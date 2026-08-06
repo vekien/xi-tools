@@ -32,10 +32,13 @@ VFX "id" is the 4-char section FourCC stored in the generator header — the sam
 value the web editor captures from gen.id via parseGenerator().
 """
 
+from __future__ import annotations
+
 import json
 import shutil
 import struct
 from pathlib import Path
+from typing import Optional
 
 import click
 
