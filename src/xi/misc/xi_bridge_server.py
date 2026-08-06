@@ -70,32 +70,138 @@ def _read_http_headers(conn: socket.socket) -> tuple[str, dict[str, str]] | None
     return req, headers
 
 
-def _ws_handshake(conn: socket.socket) -> bool:
+_CORS = (
+    b"Access-Control-Allow-Origin: *\r\n"
+    b"Access-Control-Allow-Methods: GET, OPTIONS\r\n"
+    b"Access-Control-Allow-Headers: *\r\n"
+)
+
+
+def _http_response(conn: socket.socket, status: bytes, body: bytes = b"",
+                   content_type: bytes = b"text/plain; charset=utf-8") -> None:
+    conn.sendall(
+        b"HTTP/1.1 " + status + b"\r\n"
+        + _CORS
+        + b"Content-Type: " + content_type + b"\r\n"
+        + b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+        + b"Connection: close\r\n"
+        + b"\r\n"
+        + body
+    )
+
+
+def _safe_under(root: Path, rel: str) -> Path | None:
+    """Resolve rel under root; return None if it escapes root."""
+    try:
+        root_r = root.resolve()
+        # URL-decode and normalise
+        from urllib.parse import unquote
+        rel = unquote(rel).lstrip("/").replace("\\", "/")
+        if ".." in rel.split("/"):
+            return None
+        full = (root_r / rel).resolve()
+        full.relative_to(root_r)
+        return full
+    except (OSError, ValueError):
+        return None
+
+
+def _guess_ctype(path: Path) -> bytes:
+    name = path.name.lower()
+    if name.endswith(".dll"):
+        return b"application/octet-stream"
+    if name.endswith(".dat") or name.endswith(".base"):
+        return b"application/octet-stream"
+    if name.endswith(".json"):
+        return b"application/json"
+    return b"application/octet-stream"
+
+
+def _serve_game_file(conn: socket.socket, url_path: str) -> None:
+    """GET /game/... → FFXI_DIR; GET /game-hd/... → FFXI_HD_DIR (live config)."""
+    from xi import xi_config as cfg
+
+    if url_path.startswith("/game-hd/"):
+        root_s = (cfg.FFXI_HD_DIR or "").strip()
+        rel = url_path[len("/game-hd/"):]
+        label = "FFXI_HD_DIR"
+    elif url_path.startswith("/game/"):
+        root_s = (cfg.FFXI_DIR or "").strip()
+        rel = url_path[len("/game/"):]
+        label = "FFXI_DIR"
+    else:
+        _http_response(conn, b"404 Not Found", b"not found")
+        return
+
+    if not root_s:
+        _http_response(
+            conn, b"503 Service Unavailable",
+            f"{label} is not set. Finish Game Paths setup first.".encode("utf-8"),
+        )
+        return
+    root = Path(root_s)
+    if not root.is_dir():
+        _http_response(
+            conn, b"503 Service Unavailable",
+            f"{label} is not a directory: {root_s}".encode("utf-8"),
+        )
+        return
+
+    # Strip query string
+    rel = rel.split("?", 1)[0]
+    full = _safe_under(root, rel)
+    if full is None or not full.is_file():
+        _http_response(conn, b"404 Not Found", f"missing: {rel}".encode("utf-8"))
+        return
+    try:
+        data = full.read_bytes()
+    except OSError as e:
+        _http_response(conn, b"500 Internal Server Error", str(e).encode("utf-8"))
+        return
+    _http_response(conn, b"200 OK", data, _guess_ctype(full))
+
+
+def _handle_http_or_ws(conn: socket.socket) -> str | None:
+    """Handle one HTTP request. Returns 'ws' if upgraded to WebSocket, else None."""
     parsed = _read_http_headers(conn)
     if not parsed:
-        return False
+        return None
     req, headers = parsed
-    if not req.startswith("GET ") or headers.get("upgrade", "").lower() != "websocket":
-        conn.sendall(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
-        return False
-    key = headers.get("sec-websocket-key")
-    if not key:
-        conn.sendall(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
-        return False
-    path = req.split(" ")[1] if " " in req else "/"
-    if not path.startswith("/ws"):
-        conn.sendall(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")
-        return False
-    accept = _ws_accept_key(key)
-    resp = (
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        f"Sec-WebSocket-Accept: {accept}\r\n"
-        "\r\n"
-    )
-    conn.sendall(resp.encode("ascii"))
-    return True
+    parts = req.split()
+    method = parts[0] if parts else ""
+    path = parts[1] if len(parts) > 1 else "/"
+
+    # CORS preflight
+    if method == "OPTIONS":
+        conn.sendall(b"HTTP/1.1 204 No Content\r\n" + _CORS + b"Connection: close\r\n\r\n")
+        return None
+
+    # WebSocket upgrade on /ws
+    if method == "GET" and path.startswith("/ws") and headers.get("upgrade", "").lower() == "websocket":
+        key = headers.get("sec-websocket-key")
+        if not key:
+            _http_response(conn, b"400 Bad Request", b"missing sec-websocket-key")
+            return None
+        accept = _ws_accept_key(key)
+        conn.sendall(
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Upgrade: websocket\r\n"
+            b"Connection: Upgrade\r\n"
+            b"Sec-WebSocket-Accept: " + accept.encode("ascii") + b"\r\n"
+            b"\r\n"
+        )
+        return "ws"
+
+    if method == "GET" and (path.startswith("/game/") or path.startswith("/game-hd/")):
+        _serve_game_file(conn, path)
+        return None
+
+    if method == "GET" and path in ("/", "/health", "/healthz"):
+        _http_response(conn, b"200 OK", b"ok")
+        return None
+
+    _http_response(conn, b"404 Not Found", b"not found")
+    return None
 
 
 def _ws_recv_text(conn: socket.socket) -> str | None:
@@ -230,9 +336,13 @@ class BridgeServer:
 
     def _client_loop(self, conn: socket.socket, addr, handle_command: Callable) -> None:
         conn.settimeout(120.0)
+        upgraded = False
         try:
-            if not _ws_handshake(conn):
+            kind = _handle_http_or_ws(conn)
+            if kind != "ws":
+                # Plain HTTP (game file / health) — connection already closed by response.
                 return
+            upgraded = True
             with self._clients_lock:
                 self._clients += 1
                 self._ever_client = True
@@ -254,14 +364,15 @@ class BridgeServer:
                 self.touch()
                 self._handle_message(conn, text, handle_command)
         finally:
-            with self._clients_lock:
-                self._clients = max(0, self._clients - 1)
-            self.touch()
+            if upgraded:
+                with self._clients_lock:
+                    self._clients = max(0, self._clients - 1)
+                self.touch()
+                click.echo(f"bridge client disconnected {addr[0]}:{addr[1]}", err=True)
             try:
                 conn.close()
             except OSError:
                 pass
-            click.echo(f"bridge client disconnected {addr[0]}:{addr[1]}", err=True)
 
     def _handle_message(self, conn: socket.socket, text: str, handle_command: Callable) -> None:
         try:

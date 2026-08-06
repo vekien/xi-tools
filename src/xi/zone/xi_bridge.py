@@ -279,6 +279,8 @@ def handle_command(method: str, params: dict):
         return _env_detect_blender(params)     # best-effort Blender path guess
     if method == "env.pickPath":
         return _env_pick_path(params)          # folder or file picker for env fields
+    if method == "env.validate":
+        return _env_validate(params)           # live path checks for green ticks
     if method == "editor.loadSettings":
         return _editor_load_settings(params)   # local per-user view-state (editor.json)
     if method == "editor.saveSettings":
@@ -3417,6 +3419,49 @@ def _env_pick_path(params: dict) -> dict:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     return _pick_folder({"title": title, "initial": initial})
+
+
+def _env_validate(params: dict) -> dict:
+    """Validate one path field for the setup form UI ticks."""
+    key = (params.get("key") or "").strip()
+    path = (params.get("path") or "").strip()
+    if not path:
+        return {"ok": True, "valid": False, "empty": True, "detail": ""}
+
+    # Ignore leftover sample placeholders
+    low = path.lower()
+    if "path\\to" in low or "path/to" in low or "<" in path or "your-overlay" in low:
+        return {"ok": True, "valid": False, "empty": False, "detail": "placeholder"}
+
+    p = Path(path)
+    if key == "FFXI_DIR":
+        if not p.is_dir():
+            return {"ok": True, "valid": False, "detail": "Not a folder"}
+        dll = None
+        for cand in (p / "FFXiMain.dll", p.parent / "FFXiMain.dll"):
+            try:
+                if cand.is_file():
+                    dll = cand
+                    break
+            except OSError:
+                pass
+        if not dll:
+            return {"ok": True, "valid": False, "detail": "FFXiMain.dll not found here"}
+        return {"ok": True, "valid": True, "detail": f"Found {dll.name}"}
+
+    if key == "BLENDER_PATH":
+        if not p.is_file():
+            return {"ok": True, "valid": False, "detail": "File not found"}
+        if "blender" not in p.name.lower():
+            return {"ok": True, "valid": False, "detail": "Expected blender.exe"}
+        return {"ok": True, "valid": True, "detail": "Blender found"}
+
+    if key in ("FFXI_HD_DIR", "FFXI_PIVOT_DIR"):
+        if not p.is_dir():
+            return {"ok": True, "valid": False, "detail": "Not a folder"}
+        return {"ok": True, "valid": True, "detail": "Folder OK"}
+
+    return {"ok": True, "valid": p.exists(), "detail": ""}
 
 
 def _env_save(params: dict) -> dict:
