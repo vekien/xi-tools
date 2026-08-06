@@ -3181,88 +3181,47 @@ def _workspace_skip() -> dict:
 
 
 def _workspace_setup(params: dict) -> dict:
-    """Clone (or adopt) the shared workspaces repo into ``path``.
+    """Adopt (or create) a local workspaces folder at ``path``.
 
-    git's progress is printed line-by-line — the WS bridge tees stdout to the editor
-    as ``log`` frames, so the setup card shows live status. Returns
-    ``{ok: True, path, adopted}`` on success, or ``{ok: False, error}`` (the editor
-    shows the error and keeps the setup gate up). git is run non-interactively so a
-    missing credential / unknown host fails fast instead of hanging on a prompt."""
-    import subprocess
-    import shutil
-
+    No git requirement — any directory is fine. Creates the folder if missing and
+    seeds an empty ``projects.json`` when absent. Returns
+    ``{ok: True, path, adopted}`` or ``{ok: False, error}``."""
     raw = (params.get("path") or "").strip()
     if not raw:
         return {"ok": False, "error": "No folder was provided."}
-    if shutil.which("git") is None:
-        return {"ok": False, "error": "git isn't installed or isn't on PATH. Install Git, then try again."}
     dest = Path(raw).expanduser()
-
-    # Already a clone? Adopt it — but it must have an 'origin' remote, or it can't sync.
-    if (dest / ".git").exists():
-        try:
-            url = subprocess.run(["git", "-C", str(dest), "remote", "get-url", "origin"],
-                                 capture_output=True, text=True).stdout.strip()
-        except Exception:
-            url = ""
-        if not url:
-            return {"ok": False, "error": (f"{dest} is a git repo but has no 'origin' remote — you "
-                                           "won't be able to sync with the team. Pick the cloned "
-                                           "workspaces repo, or an empty folder to clone into.")}
-        print(f"Using existing workspaces clone at {dest}")
-        print(f"  remote: {url}")
-        return {"ok": True, "path": str(dest), "adopted": True}
-
-    # Not a clone — must be missing or empty to clone into.
-    if dest.exists() and any(dest.iterdir()):
-        return {"ok": False, "error": (f"{dest} already exists and isn't empty. Choose an empty "
-                                       "folder, or the existing workspaces clone.")}
-
-    if not WORKSPACES_REPO_URL:
-        return {"ok": False, "error": ("No workspaces repo configured. Set XI_WORKSPACES_REPO_URL "
-                                       "to clone one, or just point at an existing folder.")}
-
-    env = dict(os.environ)
-    env["GIT_TERMINAL_PROMPT"] = "0"                 # never block on a username/password prompt
-    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new")
-
-    print(f"Cloning {WORKSPACES_REPO_URL}")
-    print(f"  into {dest} …")
     try:
-        proc = subprocess.Popen(
-            ["git", "clone", "--progress", WORKSPACES_REPO_URL, str(dest)],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
-    except FileNotFoundError:
-        return {"ok": False, "error": "git isn't installed or isn't on PATH."}
-
-    tail = []
-    for line in proc.stdout:                          # text mode splits on \r too → live progress
-        line = line.rstrip()
-        if line:
-            print(line, flush=True)
-            tail.append(line)
-            if len(tail) > 20:
-                tail.pop(0)
-    proc.wait()
-    if proc.returncode != 0:
-        detail = "\n".join(tail[-6:]) or f"git exited with code {proc.returncode}"
-        return {"ok": False, "error": f"git clone failed:\n{detail}"}
-    print("Clone complete.")
-    return {"ok": True, "path": str(dest), "adopted": False}
+        dest.mkdir(parents=True, exist_ok=True)
+        if not dest.is_dir():
+            return {"ok": False, "error": f"Not a folder: {dest}"}
+        # Seed projects index if this is a brand-new folder.
+        projects = dest / "projects.json"
+        if not projects.exists():
+            projects.write_text(
+                json.dumps({"projects": []}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            print(f"Created workspaces folder at {dest}")
+        else:
+            print(f"Using workspaces folder at {dest}")
+        return {"ok": True, "path": str(dest.resolve()), "adopted": True}
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _workspace_status(params: dict) -> dict:
-    """Is the configured workspace path still a usable git clone on disk?
+    """Is the configured workspace path still a usable folder on disk?
 
-    The editor calls this on boot — if the user deleted the folder, ``isRepo`` is
-    False and the frontend falls back to first-run setup. Returns
-    ``{exists, isRepo, path}``."""
+    The editor calls this on boot — if the user deleted the folder, ``exists`` /
+    ``isRepo`` are False and the frontend falls back to first-run setup.
+    ``isRepo`` is kept for older frontends and now means "folder exists" (git is
+    optional)."""
     raw = (params.get("path") or "").strip()
     if not raw:
         return {"exists": False, "isRepo": False, "path": ""}
     p = Path(raw).expanduser()
     exists = p.is_dir()
-    return {"exists": exists, "isRepo": exists and (p / ".git").exists(), "path": str(p)}
+    return {"exists": exists, "isRepo": exists, "path": str(p)}
 
 
 def _set_active_project(params: dict) -> dict:
