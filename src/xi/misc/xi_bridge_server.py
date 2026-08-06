@@ -21,7 +21,9 @@ import sys
 import threading
 import time
 import traceback
+from pathlib import Path
 from typing import Callable
+from urllib.parse import unquote
 
 import click
 
@@ -94,8 +96,6 @@ def _safe_under(root: Path, rel: str) -> Path | None:
     """Resolve rel under root; return None if it escapes root."""
     try:
         root_r = root.resolve()
-        # URL-decode and normalise
-        from urllib.parse import unquote
         rel = unquote(rel).lstrip("/").replace("\\", "/")
         if ".." in rel.split("/"):
             return None
