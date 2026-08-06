@@ -1,0 +1,132 @@
+name: xi-tools-deploy
+
+run-name: xi-tools ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, e.g. 0.1.0 (no leading v).
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: xi-tools-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Package and release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version and tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${{ inputs.version }}"
+          version="${version#v}"
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([._-].+)?$ ]]; then
+            echo "::error::Invalid version '${version}'. Expected MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          tag_name="v${version}"
+
+          echo "version=${version}"                   >> "$GITHUB_OUTPUT"
+          echo "tag_name=${tag_name}"                 >> "$GITHUB_OUTPUT"
+          echo "zip_name=xi-tools-${tag_name}.zip"  >> "$GITHUB_OUTPUT"
+
+      - name: Verify bundled binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # texconv.exe is required at runtime for texture (PNG->DDS) conversion in
+          # the gear/entity/zone import pipelines. It is resolved from
+          # $XI_TOOLS_DIR/misc/texconv.exe, so it must ship inside the zip. Fail the
+          # release here if it is missing or truncated rather than shipping a bundle
+          # that crashes on the first texture import.
+          texconv="misc/texconv.exe"
+          if [[ ! -f "$texconv" ]]; then
+            echo "::error::${texconv} is missing from the checkout — cannot package a working release."
+            exit 1
+          fi
+          size=$(stat -c%s "$texconv")
+          if [[ "$size" -lt 100000 ]]; then
+            echo "::error::${texconv} is only ${size} bytes — looks like an LFS pointer or a truncated copy, not the real binary."
+            exit 1
+          fi
+          if [[ "$(head -c2 "$texconv")" != "MZ" ]]; then
+            echo "::error::${texconv} is not a Windows PE executable (missing MZ header)."
+            exit 1
+          fi
+          echo "texconv.exe OK (${size} bytes)"
+
+      - name: Build deployment zip
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          zip -r "dist/${{ steps.release.outputs.zip_name }}" \
+            .env.sample \
+            .env.app \
+            README.md \
+            QUICKY.md \
+            src \
+            web \
+            docs \
+            misc/texconv.exe \
+            pyproject.toml \
+            uv.lock \
+            requirements.txt
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-tools-deploy
+          path: dist/${{ steps.release.outputs.zip_name }}
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag_name }}
+          name: xi-tools v${{ steps.release.outputs.version }}
+          files: dist/${{ steps.release.outputs.zip_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          zip="dist/${{ steps.release.outputs.zip_name }}"
+          release_url="${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.release.outputs.tag_name }}"
+          {
+            echo "## xi-tools v${{ steps.release.outputs.version }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Version | \`${{ steps.release.outputs.version }}\` |"
+            echo "| Tag | \`${{ steps.release.outputs.tag_name }}\` |"
+            echo "| Trigger | \`${{ github.event_name }}\` |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            if [[ -f "$zip" ]]; then
+              echo "| Asset | \`${{ steps.release.outputs.zip_name }}\` ($(du -h "$zip" | cut -f1)) |"
+            else
+              echo "| Asset | _not built_ |"
+            fi
+            echo ""
+            echo "[View release]($release_url)"
+          } >> "$GITHUB_STEP_SUMMARY"

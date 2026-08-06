@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/zone.json",
+  "title": "xi dats zone action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "zone"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "depends_on": {"type": "array", "items": {"$ref": "common.json#/$defs/actionId"}, "uniqueItems": true},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dat"],
+      "properties": {
+        "dat": {"$ref": "common.json#/$defs/romPath"},
+        "zone_id": {"$ref": "common.json#/$defs/autoOrInteger"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changes"],
+      "properties": {
+        "changes": {"$ref": "common.json#/$defs/relativePath"},
+        "navmesh": {"$ref": "common.json#/$defs/relativePath"},
+        "server_sql": {"$ref": "common.json#/$defs/relativePath"}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apply_standard": {"type": "boolean", "default": true},
+        "apply_hd": {"type": "boolean", "default": false},
+        "reset_before_apply": {"type": "boolean", "default": true},
+        "clear_collision": {"type": "boolean", "default": false},
+        "copy_only": {"type": "boolean", "default": false}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "zone.byakko_hideout",
+      "type": "zone",
+      "target": {"dat": "ROM10/2/0.DAT", "zone_id": 450},
+      "resources": {"changes": "zone/byakko_hideout/zone-changes.json"},
+      "options": {"apply_standard": true, "apply_hd": true, "reset_before_apply": true},
+      "outputs": {
+        "standard": "ffxi/ROM10/2/0.DAT",
+        "hd": "ffxi-hd/ROM10/2/0.DAT"
+      }
+    }
+  ]
+}

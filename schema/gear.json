@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/gear.json",
+  "title": "xi dats gear action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "source", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "gear"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dat"],
+      "properties": {
+        "dat": {"$ref": "common.json#/$defs/romPath"},
+        "race": {"type": "string"},
+        "slot": {"type": "string"},
+        "model_id": {"type": "integer", "minimum": 0},
+        "file_id": {"type": "integer", "minimum": 0}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dat": {
+          "oneOf": [
+            {"$ref": "common.json#/$defs/romPath"},
+            {"type": "string", "const": "auto"}
+          ]
+        },
+        "race": {"type": "string"},
+        "slot": {"type": "string"},
+        "model_id": {"$ref": "common.json#/$defs/autoOrInteger"},
+        "file_id": {"$ref": "common.json#/$defs/autoOrInteger"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mesh"],
+      "properties": {
+        "mesh": {"$ref": "common.json#/$defs/relativePath"},
+        "metadata": {"$ref": "common.json#/$defs/relativePath"}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "double_sided": {"type": "boolean", "default": true},
+        "scale": {"type": "number", "default": 1.0},
+        "rotate_y": {"type": "number", "default": 0.0}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "gear.vampire_body_hf",
+      "type": "gear",
+      "source": {"dat": "ROM/33/17.DAT", "race": "HumeFemale", "slot": "body", "model_id": 34, "file_id": 10578},
+      "target": {"race": "HumeFemale", "slot": "body", "model_id": "auto", "file_id": "auto", "dat": "auto"},
+      "resources": {"mesh": "gear/HumeFemale/body/rom/33/17/17.glb", "metadata": "gear/HumeFemale/body/rom/33/17/17.json"}
+    }
+  ]
+}

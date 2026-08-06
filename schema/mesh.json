@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/mesh.json",
+  "title": "xi dats mesh action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "mesh"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dat"],
+      "properties": {"dat": {"$ref": "common.json#/$defs/romPath"}, "mesh_name": {"type": "string"}}
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mesh"],
+      "properties": {"mesh": {"$ref": "common.json#/$defs/relativePath"}}
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "double_sided": {"type": "boolean", "default": true},
+        "scale": {"type": "number", "default": 1.0},
+        "rotate_y": {"type": "number", "default": 0.0},
+        "flip_yz": {"type": "boolean"}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "mesh.crab_custom",
+      "type": "mesh",
+      "target": {"dat": "ROM/128/79.DAT"},
+      "resources": {"mesh": "mesh/rom/128/79/79.glb"}
+    }
+  ]
+}

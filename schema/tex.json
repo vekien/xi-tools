@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/tex.json",
+  "title": "xi dats texture action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "tex"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dat"],
+      "properties": {"dat": {"$ref": "common.json#/$defs/romPath"}, "names": {"type": "array", "items": {"type": "string"}}}
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["textures"],
+      "properties": {"textures": {"$ref": "common.json#/$defs/relativePath"}}
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "tex.menu_skin",
+      "type": "tex",
+      "target": {"dat": "ROM/0/14.DAT"},
+      "resources": {"textures": "tex/rom/0/14"}
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/package.json",
+  "title": "xi dats package manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "roots", "actions"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.dats.v1"},
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": "integer", "minimum": 1, "default": 1},
+    "description": {"type": "string"},
+    "roots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["standard", "hd", "resources"],
+      "properties": {
+        "standard": {"type": "string", "default": "projects/ffxi"},
+        "hd": {"type": "string", "default": "projects/ffxi-hd"},
+        "resources": {"type": "string", "default": "projects/resources"},
+        "locks": {"type": "string", "default": "projects/locks.json"}
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "zone.json"},
+          {"$ref": "mount.json"},
+          {"$ref": "gear.json"},
+          {"$ref": "mesh.json"},
+          {"$ref": "anim.json"},
+          {"$ref": "audio.json"},
+          {"$ref": "tex.json"},
+          {"$ref": "ui.json"},
+          {"$ref": "event.json"}
+        ]
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.dats.v1",
+      "name": "ffxi-update",
+      "version": 1,
+      "roots": {
+        "standard": "projects/ffxi",
+        "hd": "projects/ffxi-hd",
+        "resources": "projects/resources",
+        "locks": "projects/locks.json"
+      },
+      "actions": [
+        {
+          "id": "zone.byakko_hideout",
+          "type": "zone",
+          "target": {"dat": "ROM10/2/0.DAT", "zone_id": 450},
+          "resources": {"changes": "zone/byakko_hideout/zone-changes.json"},
+          "options": {"apply_standard": true, "apply_hd": true, "reset_before_apply": true}
+        }
+      ]
+    }
+  ]
+}

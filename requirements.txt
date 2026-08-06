@@ -1,0 +1,10 @@
+# Runtime dependencies (keep in sync with pyproject.toml [project.dependencies]).
+# The launcher's bundled embeddable python must have these installed into
+# Lib/site-packages, or `xi` fails to import at startup (xi_cli pulls them in).
+click>=8.0
+prompt_toolkit>=3.0
+pefile
+capstone
+pillow>=12.2.0
+pymysql>=1.1
+numpy>=1.26

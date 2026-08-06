@@ -1,0 +1,5 @@
+#!/bin/bash
+# Wrapper that invokes Blender via flatpak with full filesystem access.
+# xi-tools calls: subprocess.run([BLENDER_PATH, "-b", "--python", script, "--", ...])
+# This wrapper forwards all arguments to the flatpak Blender binary.
+exec flatpak run --filesystem=host org.blender.Blender "$@"

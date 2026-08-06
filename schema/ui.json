@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/ui.json",
+  "title": "xi dats UI action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "ui"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dat"],
+      "properties": {
+        "dat": {"$ref": "common.json#/$defs/romPath"},
+        "category": {"type": "string", "enum": ["texture", "layout", "strings", "items", "spells"]},
+        "entry": {"oneOf": [{"type": "string"}, {"type": "integer"}]}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {"$ref": "common.json#/$defs/relativePath"},
+        "json": {"$ref": "common.json#/$defs/relativePath"},
+        "directory": {"$ref": "common.json#/$defs/relativePath"}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "ui.title_logo",
+      "type": "ui",
+      "target": {"dat": "ROM/0/14.DAT", "category": "texture", "entry": "title_logo"},
+      "resources": {"image": "ui/title_logo.png"}
+    }
+  ]
+}

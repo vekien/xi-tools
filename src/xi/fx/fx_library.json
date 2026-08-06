@@ -1,0 +1,43 @@
+{
+  "_comment": "Registry for `xi fx list` effect labels. An effect (0x05 generator) is classified by (1) exact `names` entry, (2) the mesh it places (`meshes`), (3) the texture it references (`textures` — for mesh-less sprite effects like fire), (4) longest matching `prefixes` entry. A verified classification wins over a tentative one; a trailing `?` = verified:false (guess). Extend freely — no code change needed.",
+  "names": {
+    "grid": { "label": "Water surface (puddle)", "category": "water", "verified": true, "notes": "places suim/suimen (水面)" }
+  },
+  "textures": {
+    "fire": { "label": "Fire / flame", "category": "fire", "verified": true, "notes": "'effect fire1' sprite; dungeon torches (a0NN on syokudai pillars), boss fire" },
+    "lig1": { "label": "Light / flash", "category": "light", "verified": false }
+  },
+  "meshes": {
+    "ligh": { "label": "Light", "category": "light", "verified": true, "notes": "glow billboard; ~80 lt/sw/myl/SPLT effects place it" },
+    "rnp0": { "label": "Lamp post", "category": "prop", "verified": false, "notes": "RP/RR effects; lamp/post props (rnp0-3)" },
+    "rnp1": { "label": "Lamp post", "category": "prop", "verified": false },
+    "rnp2": { "label": "Lamp post", "category": "prop", "verified": false },
+    "rnp3": { "label": "Lamp post", "category": "prop", "verified": false },
+    "clod": { "label": "Cloud", "category": "sky", "verified": false },
+    "sta1": { "label": "Star", "category": "sky", "verified": false },
+    "sta2": { "label": "Star", "category": "sky", "verified": false },
+    "lows": { "label": "Sea (ocean water)", "category": "water", "verified": false },
+    "2low": { "label": "Sea (ocean water)", "category": "water", "verified": false },
+    "lowc": { "label": "Sea collision/cull", "category": "water", "verified": false },
+    "5win": { "label": "Window", "category": "prop", "verified": false },
+    "sibj": { "label": "Water splash", "category": "water", "verified": true, "notes": "fountain shibuki; placed by tki1-5" },
+    "awan": { "label": "Bubbles", "category": "water", "verified": true, "notes": "placed by awa1-6" },
+    "suim": { "label": "Water surface", "category": "water", "verified": true },
+    "syok": { "label": "Candle-stand pillar (syokudai)", "category": "prop", "verified": true, "notes": "torch pillar; dungeon torches sit on these" },
+    "hasi": { "label": "Pillar (hasira)", "category": "prop", "verified": false }
+  },
+  "prefixes": {
+    "tki":  { "label": "Water jet (splash)", "category": "water", "verified": true },
+    "awa":  { "label": "Bubbles", "category": "water", "verified": true },
+    "lt":   { "label": "Light", "category": "light", "verified": false },
+    "pl":   { "label": "Point light", "category": "light", "verified": false, "notes": "no mesh; pure light (xiclient Pointlightprog)" },
+    "lf":   { "label": "Light fade", "category": "light", "verified": false, "notes": "xiclient Lfd" },
+    "cld":  { "label": "Cloud", "category": "sky", "verified": false },
+    "sun":  { "label": "Sun", "category": "sky", "verified": false },
+    "moon": { "label": "Moon", "category": "sky", "verified": false },
+    "star": { "label": "Star", "category": "sky", "verified": false },
+    "kamo": { "label": "Seagull (kamome)", "category": "fauna", "verified": false },
+    "efc":  { "label": "Effect (generic)", "category": "effect", "verified": false },
+    "g":    { "label": "Generator (generic gNNN)", "category": "unknown", "verified": false, "notes": "numbered generic generators; no local mesh ref; type not yet decoded" }
+  }
+}

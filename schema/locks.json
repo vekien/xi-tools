@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/locks.json",
+  "title": "xi dats allocation locks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "allocations"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.locks.v1"},
+    "allocations": {
+      "type": "object",
+      "description": "Stable ids allocated by dats build, keyed by action id.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "mount_id": {"type": "integer", "minimum": 0},
+          "model_id": {"type": "integer", "minimum": 0},
+          "zone_id": {"type": "integer", "minimum": 0},
+          "file_id": {"type": "integer", "minimum": 0},
+          "dat": {"$ref": "common.json#/$defs/romPath"},
+          "key_item": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.locks.v1",
+      "allocations": {
+        "mount.shadow_wolf": {
+          "mount_id": 50,
+          "file_id": 102755,
+          "dat": "ROM10/100/50.DAT",
+          "key_item": 3122
+        },
+        "zone.byakko_hideout": {
+          "zone_id": 450,
+          "dat": "ROM10/2/0.DAT"
+        }
+      }
+    }
+  ]
+}

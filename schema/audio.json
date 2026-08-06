@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/audio.json",
+  "title": "xi dats audio action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "audio"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string", "enum": ["music", "sfx"]},
+        "dat": {"$ref": "common.json#/$defs/romPath"},
+        "sound_id": {"$ref": "common.json#/$defs/autoOrInteger"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audio"],
+      "properties": {"audio": {"$ref": "common.json#/$defs/relativePath"}}
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": {"type": "string", "enum": ["spw", "bgw"], "default": "spw"},
+        "loop": {"type": "boolean", "default": false}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "audio.custom_hit",
+      "type": "audio",
+      "target": {"kind": "sfx", "sound_id": "auto"},
+      "resources": {"audio": "audio/sfx/custom_hit.wav"},
+      "options": {"format": "spw", "loop": false}
+    }
+  ]
+}

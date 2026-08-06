@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/mount.json",
+  "title": "xi dats mount action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources", "text"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "mount"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mount_id"],
+      "properties": {
+        "mount_id": {"$ref": "common.json#/$defs/autoOrInteger"},
+        "model_dat": {
+          "oneOf": [
+            {"$ref": "common.json#/$defs/romPath"},
+            {"type": "string", "const": "auto"}
+          ]
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model_dat": {"$ref": "common.json#/$defs/relativePath"}
+      }
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name_en"],
+      "properties": {
+        "name_en": {"type": "string"},
+        "name_jp": {"type": "string"},
+        "help_en": {"type": "string"},
+        "help_jp": {"type": "string"},
+        "key_item_name_en": {"type": "string"},
+        "key_item_name_jp": {"type": "string"},
+        "key_item_desc_en": {"type": "string"},
+        "key_item_desc_jp": {"type": "string"}
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emit": {"type": "boolean", "default": true}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "mount.shadow_wolf",
+      "type": "mount",
+      "target": {"mount_id": "auto", "model_dat": "auto"},
+      "resources": {"model_dat": "mount/shadow_wolf/model.DAT"},
+      "text": {
+        "name_en": "Shadow Wolf",
+        "name_jp": "Shadow Wolf",
+        "help_en": "Call forth your Shadow Wolf.",
+        "key_item_name_en": "Shadow Wolf Companion",
+        "key_item_desc_en": "A companion whistle for the Shadow Wolf."
+      },
+      "server": {"emit": true}
+    }
+  ]
+}

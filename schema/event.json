@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/event.json",
+  "title": "xi dats event/dialog action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "event"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zone_id": {"$ref": "common.json#/$defs/autoOrInteger"},
+        "event_dat": {"$ref": "common.json#/$defs/romPath"},
+        "dialog_dat": {"$ref": "common.json#/$defs/romPath"},
+        "npc_dat": {"$ref": "common.json#/$defs/romPath", "description": "NPC entity DAT (file_id 6720+zone). Read for name/entity resolution; not currently written by event actions."},
+        "scene_dat": {"$ref": "common.json#/$defs/romPath", "description": "Scene resource DAT that holds this cutscene's camera Routes + EffectRoutines. Required when the cutscene has a camera block; may be shared with existing retail scene resources."}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Resource files this event action consumes at build time. All paths are relative to projects/resources.",
+      "properties": {
+        "cutscene": {"$ref": "common.json#/$defs/relativePath", "description": "Path to a cutscene definition (schema: xi.cutscene.v1 — see event_cutscene.json). Compiles to Event DAT bytecode + Dialog DAT strings + scene DAT camera Routes."},
+        "cast": {"$ref": "common.json#/$defs/relativePath", "description": "Path to a cast definition (schema: xi.cutscene.npc.v1 — see cutscene_npc.json). Can be inlined into cutscene instead."},
+        "dialog": {"$ref": "common.json#/$defs/relativePath", "description": "Path to a dialog definition (schema: xi.cutscene.dialog.v1 — see cutscene_dialog.json). Can be inlined into cutscene instead."},
+        "dialogue": {"$ref": "common.json#/$defs/relativePath", "description": "Legacy — plain dialogue-only event (schema-less, matches `xi event dialogue new` inputs). Prefer 'cutscene' for new work."}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "event.zone_450_dialogue",
+      "type": "event",
+      "target": {"zone_id": 450, "event_dat": "ROM10/2/1.DAT", "dialog_dat": "ROM10/2/2.DAT"},
+      "resources": {"dialogue": "event/zone_450/dialogue.json"}
+    }
+  ]
+}

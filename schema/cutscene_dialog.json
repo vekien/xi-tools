@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/cutscene_dialog.json",
+  "title": "xi cutscene dialog lines",
+  "description": "Dialog strings for one cutscene. Each line becomes one entry in the zone's event-message DAT (or one paged entry with '\\v' page-prompts). Message ids are assigned by the compiler at build time; refer to lines by 'id' from cutscene steps.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "lines"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.cutscene.dialog.v1"},
+    "description": {"type": "string"},
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]*$",
+            "description": "Stable line id. Referenced by cutscene steps as 'text': '<id>'."
+          },
+          "text": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "array", "items": {"type": "string"}}
+            ],
+            "description": "One string, or an array joined as paged sub-lines with '\\v' (▼ prompt). Escapes: \\n newline, \\v paged-prompt, {player}, {npc}, {auto:N}."
+          },
+          "paged": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, and text is an array, produce a single message entry that pages via ▼. If false, each array element becomes its own message id (one dialog box each)."
+          },
+          "speaker": {
+            "type": "string",
+            "description": "Default speaker for this line (id from cutscene_npc). Overridden by the step's speaker field if set."
+          },
+          "note": {"type": "string"}
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.cutscene.dialog.v1",
+      "description": "Maat greeting lines",
+      "lines": [
+        {"id": "greet_1", "text": "So it's you, {player}. Sit down.", "speaker": "maat"},
+        {"id": "greet_2", "text": ["I've been waiting.", "There is much to discuss."], "paged": true, "speaker": "maat"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/event_cutscene.json",
+  "title": "xi cutscene definition",
+  "description": "One full cutscene: cast + dialog + camera shots + step timeline. Compiled to (1) event bytecode appended to the actor block in the zone Event DAT, (2) dialog strings appended to the zone Dialog DAT, (3) camera Route + EffectRoutine sections appended to the referenced scene resource DAT. Verified against Maat event 93 (Ru'Lude Gardens, ROM/21/52.DAT) as the retail reference profile.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "actor", "cast", "dialog"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.cutscene.v1"},
+    "description": {"type": "string"},
+    "eventId": {
+      "oneOf": [
+        {"type": "integer", "minimum": 0, "maximum": 65533},
+        {"type": "string", "const": "auto"}
+      ],
+      "default": "auto",
+      "description": "Event id on the owning actor. 'auto' = max(existing real ids) + 1."
+    },
+    "actor": {
+      "type": "string",
+      "description": "Cast id (from cutscene_npc) that OWNS this event — its actor block gets the new event id. Server Lua `player:startEvent(id)` runs against this actor's entity."
+    },
+    "cast": {
+      "oneOf": [
+        {"$ref": "cutscene_npc.json"},
+        {"type": "string", "description": "Path (relative to this file) to a cutscene_npc.json"}
+      ]
+    },
+    "dialog": {
+      "oneOf": [
+        {"$ref": "cutscene_dialog.json"},
+        {"type": "string", "description": "Path (relative to this file) to a cutscene_dialog.json"}
+      ]
+    },
+    "flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Presentation flags. Defaults are dialog-mode (no cinematic opcodes) — retail dialogue events don't emit 0x20/0x42/0x46/0x38 and the client handles player-freeze + Enter-popup + music continuity automatically. Cinematic flags require the scene-DAT writer (not shipped) to look right.",
+      "properties": {
+        "lockPlayer": {"type": "boolean", "default": false, "description": "Emit 0x20 lock_player. Not needed for dialog — the message box auto-freezes the player."},
+        "cameraLock": {"type": "boolean", "default": false, "description": "Emit 0x46 camera control mode 1. Triggers a client fade-to-cinematic. WARNING: needs scene-DAT fdi1 routine to fade back — leaves screen black otherwise."},
+        "cancelSet": {"type": "boolean", "default": false, "description": "Emit 0x42 to clear cancel-set (uninterruptible)."},
+        "eventMode": {
+          "type": "integer", "minimum": 0, "maximum": 65535, "default": 3,
+          "description": "0x38 CliEventModeLocal bitfield. Client reads only the high byte (HIBYTE|0x20). See docs/events/event_mode_bits.md."
+        },
+        "talkAnim": {"type": "string", "default": "tlk0", "description": "4-char gesture tag played while a line is on screen (0x66 sched_ext2). Overridable per line."},
+        "idleAnim": {"type": "string", "default": "idl0", "description": "4-char gesture tag the NPC returns to after each line (0x5E stop_action)."},
+        "hideActorsOnEnd": {"type": "boolean", "default": false, "description": "Emit 0x4E 01 (hide) for every non-player, non-owner cast NPC during the epilogue's fade-to-black, so no explicit Hide keyframes are needed at the end. Status-6 NPCs re-hide at teardown anyway; this covers actors whose default state is visible."},
+        "hideNpcNames": {"type": "boolean", "default": false, "description": "Hide the floating name tag + health bar over every non-player, non-owner cast NPC. NOT an event opcode — applied server-side at publish (npc_list.namevis |= 0x20; namevis is the high byte of packet 0x000E Flags3, bit 29 = name-not-rendered per XiPackets) to the live DB + custom-NPC registry SQL; needs a map-server restart. Turning it back off restores the bit."},
+        "resetZoomOnEnd": {"type": "boolean", "default": true, "description": "Restore the client's default camera zoom (projection focal 350) under the epilogue's fade-to-black. Camera routes set the GLOBAL projection focal and nothing resets it when the event ends — without this the player keeps the last shot's zoom after the cutscene. Emitted as a dur-0 'zres' still (focal 350) fired before 0x46 camera 00; skipped when the cutscene has no camera shots."}
+      }
+    },
+    "totalFrames": {
+      "type": "integer", "minimum": 30, "default": 300,
+      "description": "Cutscene duration in frames (30fps). Used by timeline mode to lay out keyframes; ignored in step mode."
+    },
+    "autoFadeIn": {
+      "type": "integer", "minimum": 0, "default": 0,
+      "description": "Auto-emit an fdi1 fade-in of this many frames at start. 0 = no fade."
+    },
+    "autoFadeOut": {
+      "type": "integer", "minimum": 0, "default": 0,
+      "description": "Auto-emit an fdo1 fade-out of this many frames at the end. 0 = no fade."
+    },
+    "timeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Timeline authoring mode — an alternative to `steps`. When both are present, `timeline` wins. Tracks group keyframes by kind (dialog / npc / music / sfx / vfx / camera / fade / face). Compiler walks all keyframes in frame order, emitting the matching opcode + wait-time gaps between them.",
+      "required": ["tracks"],
+      "properties": {
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "keyframes"],
+            "properties": {
+              "kind": {
+                "enum": ["dialog", "npc", "music", "sfx", "vfx", "camera", "fade", "face", "lock"],
+                "description": "Track type — determines which opcodes its keyframes emit."
+              },
+              "castId": {"type": "string", "description": "For npc/dialog/face tracks: which cast id this track applies to. Omit for global tracks (music, camera, fade)."},
+              "label": {"type": "string", "description": "Display label; not emitted."},
+              "keyframes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["frame"],
+                  "properties": {
+                    "frame": {"type": "integer", "minimum": 0, "description": "Frame index (30fps) when this keyframe fires."},
+                    "op":    {"type": "string", "description": "Optional opcode override. If absent the compiler picks based on track.kind + keyframe fields."}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Camera shots. Each shot becomes a paired 0x06 Route (spline) + 0x07 EffectRoutine (timeline) in the scene resource; a step { op: 'camera', shot: <id> } emits 0x45 start_task with the shot's FourCC tag.",
+      "properties": {
+        "sceneDat": {
+          "oneOf": [
+            {"type": "string", "pattern": "^ROM[0-9]*/[0-9]+/[0-9]+(?:\\.DAT)?$"},
+            {"type": "string", "const": "auto"}
+          ],
+          "default": "auto",
+          "description": "Full ROM path of the scene resource DAT to append shots into. 'auto' picks a compatible existing scene DAT referenced by this zone, or allocates a new file_id."
+        },
+        "shots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "tag", "keys"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$"},
+              "tag": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9]{4}$",
+                "description": "4-char FourCC written into 0x45 start_task and used as the EffectRoutine's section name (e.g. 'w005'). Convention: 'wNNN' for camera shots; 'fdo1'/'fdi1' for fades; 'ovl1' for overlays."
+              },
+              "duration": {"type": "integer", "minimum": 1, "description": "Total frames the shot plays (client 30fps)."},
+              "smoothing": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4,
+                "default": 0,
+                "description": "Route interpMode. 0=mixed(default), 1=multi-point spline (most common in retail), 4=variant, 2/3 rare. Curve-per-value not fully pinned yet."
+              },
+              "keys": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["t", "eye", "look"],
+                  "properties": {
+                    "t": {"type": "number", "minimum": 0, "maximum": 1, "description": "Normalized time along the shot (0=start, 1=end)."},
+                    "eye": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                    "look": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "Look-at point in FFXI world space."},
+                    "fov": {"type": "number", "minimum": 1, "maximum": 179, "default": 60, "description": "Field-of-view in degrees. Encoded as int(fov*10) (decidegrees)."},
+                    "roll": {"type": "number", "default": 0, "description": "Camera roll in radians. Retail typically ~0."}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The ordered scene beats. Each step lowers to a fixed opcode template. Labels enable branching (`goto`/`branch`).",
+      "items": {
+        "oneOf": [
+          {"type": "object", "required": ["op"], "properties": {"op": {"const": "wait"}, "frames": {"type": "integer", "minimum": 1}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op", "shot"], "properties": {"op": {"const": "camera"}, "shot": {"type": "string"}, "wait": {"type": "boolean", "default": true, "description": "Emit 0x55 wait_for_scheduler after the start_task."}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op", "kind"], "properties": {"op": {"const": "fade"}, "kind": {"enum": ["in", "out", "in_black", "out_black"]}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op", "speaker", "text"], "properties": {"op": {"const": "say"}, "speaker": {"type": "string", "description": "Cast id."}, "text": {"type": "string", "description": "Dialog line id (from cutscene_dialog.lines[].id)."}, "wait": {"type": "boolean", "default": true, "description": "Emit 0x23 wait_dismiss after."}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op", "text"], "properties": {"op": {"const": "narrate"}, "text": {"type": "string"}, "wait": {"type": "boolean", "default": true}, "label": {"type": "string"}}, "additionalProperties": false, "description": "Speaker-less message (0x48)."},
+          {"type": "object", "required": ["op", "actor", "target"], "properties": {"op": {"const": "face"}, "actor": {"type": "string"}, "target": {"type": "string"}, "talk": {"type": "boolean", "default": false, "description": "true → 0x1E (look + mouth-move), false → 0x4A (look only)."}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op", "actor", "tag"], "properties": {"op": {"const": "anim"}, "actor": {"type": "string"}, "tag": {"type": "string", "pattern": "^[a-zA-Z0-9]{4}$", "description": "4-char routine/clip tag on the actor's motion package (e.g. 'grt0', 'idl0', 'fg00')."}, "loop": {"type": "integer", "minimum": 0, "default": 1, "description": "0 = loop forever, N≥1 = play N times then hold. Matches routine 0x05 maxLoop."}, "wait": {"type": "boolean", "default": false}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op", "actor"], "properties": {"op": {"const": "show"}, "actor": {"type": "string"}, "label": {"type": "string"}}, "additionalProperties": false, "description": "0x4E render-flag show."},
+          {"type": "object", "required": ["op", "actor"], "properties": {"op": {"const": "hide"}, "actor": {"type": "string"}, "label": {"type": "string"}}, "additionalProperties": false, "description": "0x4E render-flag hide."},
+          {"type": "object", "required": ["op", "actor"], "properties": {"op": {"const": "place"}, "actor": {"type": "string"}, "pos": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "Optional override; else uses cast.pos."}, "dir": {"type": "number"}, "label": {"type": "string"}}, "additionalProperties": false, "description": "0xBA calibrate_entity_position mid-scene (also emitted implicitly at scene start from cast entries)."},
+          {"type": "object", "required": ["op", "song"], "properties": {"op": {"const": "music"}, "song": {"type": "integer", "minimum": 0, "description": "BGM id."}, "track": {"type": "integer", "minimum": 0, "maximum": 1, "default": 0, "description": "0x5C slot (0=main, 1=alt)."}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op", "volume"], "properties": {"op": {"const": "music_volume"}, "volume": {"type": "integer", "minimum": 0, "maximum": 127}, "frames": {"type": "integer", "minimum": 0, "description": "Ease length. 0 = snap."}, "label": {"type": "string"}}, "additionalProperties": false, "description": "0x5D music volume."},
+          {"type": "object", "required": ["op", "options", "text"], "properties": {"op": {"const": "menu"}, "options": {"type": "array", "items": {"type": "string"}, "minItems": 2}, "text": {"type": "string", "description": "Dialog line id shown as the prompt."}, "enabled": {"type": "integer", "description": "0x40 bitmask (default: all)."}, "label": {"type": "string"}}, "additionalProperties": false, "description": "0x40 + 0x24 + 0x25. The player's selection lands in the server onEventFinish 'option' arg."},
+          {"type": "object", "required": ["op", "on"], "properties": {"op": {"const": "branch"}, "on": {"const": "menu_result"}, "cases": {"type": "object", "additionalProperties": {"type": "string"}}, "label": {"type": "string"}}, "additionalProperties": false, "description": "Emits 0x3E test-bit branches keyed on prior 0x25 result."},
+          {"type": "object", "required": ["op", "to"], "properties": {"op": {"const": "goto"}, "to": {"type": "string"}, "label": {"type": "string"}}, "additionalProperties": false, "description": "0x1A unconditional jump to a step 'label'."},
+          {"type": "object", "required": ["op", "zoneId"], "properties": {"op": {"const": "load_zone"}, "zoneId": {"type": "integer", "minimum": 0}, "restore": {"type": "boolean", "default": false, "description": "false → 0x34 full swap, true → 0x35 overlay/restore."}, "label": {"type": "string"}}, "additionalProperties": false},
+          {"type": "object", "required": ["op"], "properties": {"op": {"const": "end"}, "label": {"type": "string"}}, "additionalProperties": false, "description": "0x21 end_event. Auto-appended if omitted."}
+        ]
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Server-side wiring hints. Emitted as a Lua stub for the user to paste into the owning NPC script.",
+      "properties": {
+        "scriptPath": {"type": "string", "description": "Relative server script path (e.g. 'scripts/zones/Rulude_Gardens/npcs/Maat.lua')."},
+        "trigger": {"enum": ["onTrigger", "onEventUpdate", "custom"], "default": "onTrigger"},
+        "customStub": {"type": "string"}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.cutscene.v1",
+      "description": "Minimal Maat greeting — study distilled from event 93",
+      "eventId": "auto",
+      "actor": "maat",
+      "cast": "cast.json",
+      "dialog": "dialog.json",
+      "flags": {"lockPlayer": true, "cameraLock": true, "cancelable": false, "eventMode": 12},
+      "camera": {
+        "sceneDat": "auto",
+        "shots": [
+          {"id": "wide", "tag": "w005", "duration": 120, "smoothing": 1, "keys": [
+            {"t": 0, "eye": [-6.0, -13.0, 68.0], "look": [-3.5, -14.0, 66.0], "fov": 60},
+            {"t": 1, "eye": [-4.5, -13.5, 66.5], "look": [-3.5, -14.0, 66.0], "fov": 40}
+          ]}
+        ]
+      },
+      "steps": [
+        {"op": "fade", "kind": "in"},
+        {"op": "camera", "shot": "wide"},
+        {"op": "face", "actor": "maat", "target": "player", "talk": true},
+        {"op": "say", "speaker": "maat", "text": "greet_1"},
+        {"op": "say", "speaker": "maat", "text": "greet_2"},
+        {"op": "fade", "kind": "out"},
+        {"op": "end"}
+      ],
+      "server": {"scriptPath": "scripts/zones/Rulude_Gardens/npcs/Maat.lua"}
+    }
+  ]
+}

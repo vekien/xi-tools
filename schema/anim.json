@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/anim.json",
+  "title": "xi dats animation action",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "anim"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dat", "animation"],
+      "properties": {"dat": {"$ref": "common.json#/$defs/romPath"}, "animation": {"type": "string"}}
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["animation"],
+      "properties": {"animation": {"$ref": "common.json#/$defs/relativePath"}}
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "template_anim": {"type": "string"},
+        "keep_routine_duration": {"type": "boolean", "default": false},
+        "fps": {"type": "number"}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "anim.crab_idle",
+      "type": "anim",
+      "target": {"dat": "ROM/128/79.DAT", "animation": "idl"},
+      "resources": {"animation": "anim/rom/128/79/idl.glb"}
+    }
+  ]
+}
