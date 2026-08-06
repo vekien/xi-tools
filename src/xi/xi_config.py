@@ -84,6 +84,40 @@ FFXI_PIVOT_DIR = os.environ.get('FFXI_PIVOT_DIR', '')
 FFXI_HD_DIR = os.environ.get('FFXI_HD_DIR', '')
 
 
+def apply_env_overrides(values: dict[str, str]) -> None:
+    """Push path/config keys into ``os.environ`` and refresh this module's globals.
+
+    Used by the zone-editor bridge after writing ``.env`` so the running process
+    picks up FFXI_DIR etc. without a restart. Blank values clear the env var.
+    """
+    global FFXI_DIR, FFXI_PIVOT_DIR, FFXI_HD_DIR, BLENDER_PATH
+    global XI_SERVER_DIR, XI_NAVMESH_DIR
+    global DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+    for key, raw in (values or {}).items():
+        key = str(key).strip()
+        if not key:
+            continue
+        val = "" if raw is None else str(raw).strip()
+        if val:
+            os.environ[key] = val
+        else:
+            os.environ.pop(key, None)
+    FFXI_DIR = os.environ.get('FFXI_DIR', '')
+    FFXI_PIVOT_DIR = os.environ.get('FFXI_PIVOT_DIR', '')
+    FFXI_HD_DIR = os.environ.get('FFXI_HD_DIR', '')
+    BLENDER_PATH = os.environ.get('BLENDER_PATH', BLENDER_PATH)
+    XI_SERVER_DIR = os.environ.get('XI_SERVER_DIR') or None
+    XI_NAVMESH_DIR = os.environ.get('XI_NAVMESH_DIR') or None
+    DB_HOST = os.environ.get('XI_DB_HOST', DB_HOST)
+    try:
+        DB_PORT = int(os.environ.get('XI_DB_PORT', str(DB_PORT)))
+    except ValueError:
+        pass
+    DB_USER = os.environ.get('XI_DB_USER', DB_USER)
+    DB_PASSWORD = os.environ.get('XI_DB_PASSWORD', DB_PASSWORD)
+    DB_NAME = os.environ.get('XI_DB_NAME', DB_NAME)
+
+
 def require_ffxi_dir() -> Path:
     """Return FFXI_DIR as a Path, or raise telling the user to set it.
 

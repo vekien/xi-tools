@@ -39,6 +39,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import threading
 from datetime import datetime
@@ -270,6 +271,14 @@ def handle_command(method: str, params: dict):
         return _workspace_status(params)       # does the configured workspace still exist?
     if method == "workspace.setActiveProject":
         return _set_active_project(params)     # point reads/writes at a project folder
+    if method == "env.status":
+        return _env_status(params)             # .env paths for first-run setup form
+    if method == "env.save":
+        return _env_save(params)               # write .env + hot-reload xi_config
+    if method == "env.detectBlender":
+        return _env_detect_blender(params)     # best-effort Blender path guess
+    if method == "env.pickPath":
+        return _env_pick_path(params)          # folder or file picker for env fields
     if method == "editor.loadSettings":
         return _editor_load_settings(params)   # local per-user view-state (editor.json)
     if method == "editor.saveSettings":
@@ -3222,6 +3231,223 @@ def _workspace_status(params: dict) -> dict:
     p = Path(raw).expanduser()
     exists = p.is_dir()
     return {"exists": exists, "isRepo": exists, "path": str(p)}
+
+
+# ── First-run .env setup (FFXI_DIR etc.) ──────────────────────────────────────
+
+# Keys the zone-editor setup form cares about (subset of .env.app).
+_ENV_SETUP_KEYS = (
+    "FFXI_DIR",
+    "FFXI_HD_DIR",
+    "FFXI_PIVOT_DIR",
+    "BLENDER_PATH",
+)
+
+
+def _tools_root() -> Path:
+    """xi-tools install root (parent of ``src/``)."""
+    return Path(__file__).resolve().parents[3]
+
+
+def _env_file_path() -> Path:
+    explicit = (os.environ.get("XI_ENV_FILE") or os.environ.get("CEXI_ENV_FILE") or "").strip()
+    if explicit:
+        return Path(explicit)
+    return _tools_root() / ".env"
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not path.is_file():
+        return out
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        if key:
+            out[key] = value
+    return out
+
+
+def _write_env_file(path: Path, updates: dict[str, str]) -> None:
+    """Merge ``updates`` into ``path``, preserving unknown keys and comments."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_lines: list[str] = []
+    if path.is_file():
+        try:
+            existing_lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            existing_lines = []
+
+    seen: set[str] = set()
+    out_lines: list[str] = []
+    for raw in existing_lines:
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            out_lines.append(raw)
+            continue
+        key = stripped.split("=", 1)[0].strip().removeprefix("export ").strip()
+        if key in updates:
+            val = updates[key]
+            if val:
+                out_lines.append(f"{key}={val}")
+            # blank → drop the line (unset)
+            seen.add(key)
+        else:
+            out_lines.append(raw)
+
+    for key in _ENV_SETUP_KEYS:
+        if key in seen:
+            continue
+        val = (updates.get(key) or "").strip()
+        if val:
+            out_lines.append(f"{key}={val}")
+
+    text = "\n".join(out_lines).rstrip() + "\n"
+    path.write_text(text, encoding="utf-8")
+
+
+def _env_status(params: dict) -> dict:
+    """Return current path settings and whether FFXI_DIR is ready."""
+    from xi import xi_config as cfg
+
+    file_vals = _parse_env_file(_env_file_path())
+
+    def _get(key: str) -> str:
+        # Live process wins, then .env file.
+        return (os.environ.get(key) or file_vals.get(key) or getattr(cfg, key, "") or "").strip()
+
+    ffxi = _get("FFXI_DIR")
+    ffxi_ok = bool(ffxi) and Path(ffxi).is_dir()
+    # Zone decrypt needs FFXiMain.dll under the install (or POL tree).
+    dll_ok = False
+    if ffxi_ok:
+        p = Path(ffxi)
+        for cand in (
+            p / "FFXiMain.dll",
+            p.parent / "FFXiMain.dll",
+            p / ".." / "FFXiMain.dll",
+        ):
+            try:
+                if cand.resolve().is_file():
+                    dll_ok = True
+                    break
+            except OSError:
+                pass
+
+    return {
+        "ok": True,
+        "envFile": str(_env_file_path()),
+        "needsSetup": not ffxi_ok,
+        "ffxiOk": ffxi_ok,
+        "dllOk": dll_ok,
+        "values": {
+            "FFXI_DIR": ffxi,
+            "FFXI_HD_DIR": _get("FFXI_HD_DIR"),
+            "FFXI_PIVOT_DIR": _get("FFXI_PIVOT_DIR"),
+            "BLENDER_PATH": _get("BLENDER_PATH"),
+        },
+    }
+
+
+def _env_detect_blender(params: dict) -> dict:
+    """Best-effort Blender executable discovery (Windows Program Files)."""
+    import glob as _glob
+    cands: list[str] = []
+    if sys.platform == "win32":
+        patterns = [
+            r"C:\Program Files\Blender Foundation\Blender *\blender.exe",
+            r"C:\Program Files (x86)\Blender Foundation\Blender *\blender.exe",
+        ]
+        for pat in patterns:
+            cands.extend(sorted(_glob.glob(pat), reverse=True))
+    which = shutil.which("blender") or shutil.which("blender.exe")
+    if which:
+        cands.insert(0, which)
+    # de-dupe preserve order
+    seen: set[str] = set()
+    uniq = []
+    for c in cands:
+        k = c.lower()
+        if k not in seen and Path(c).is_file():
+            seen.add(k)
+            uniq.append(c)
+    return {"ok": True, "path": uniq[0] if uniq else "", "candidates": uniq}
+
+
+def _env_pick_path(params: dict) -> dict:
+    """Native folder (default) or file picker for env fields."""
+    kind = (params.get("kind") or "folder").strip().lower()
+    title = (params.get("title") or "Select path").strip()
+    initial = (params.get("initial") or "").strip()
+    if kind == "file":
+        # reuse pick folder machinery with a file dialog
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            kw = {"title": title}
+            if initial:
+                p = Path(initial)
+                if p.is_file():
+                    kw["initialdir"] = str(p.parent)
+                    kw["initialfile"] = p.name
+                elif p.is_dir():
+                    kw["initialdir"] = str(p)
+            path = filedialog.askopenfilename(**kw) or ""
+            root.destroy()
+            if not path:
+                return {"ok": False, "cancelled": True}
+            return {"ok": True, "path": path}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    return _pick_folder({"title": title, "initial": initial})
+
+
+def _env_save(params: dict) -> dict:
+    """Write setup keys to ``.env`` and hot-reload ``xi_config`` in this process."""
+    from xi.xi_config import apply_env_overrides
+
+    raw = params.get("values") or {}
+    if not isinstance(raw, dict):
+        return {"ok": False, "error": "values must be an object"}
+    updates = {k: str(raw.get(k) or "").strip() for k in _ENV_SETUP_KEYS}
+    ffxi = updates.get("FFXI_DIR") or ""
+    if not ffxi:
+        return {"ok": False, "error": "FFXI_DIR is required — choose your FINAL FANTASY XI folder."}
+    if not Path(ffxi).is_dir():
+        return {"ok": False, "error": f"FFXI_DIR is not a folder:\n{ffxi}"}
+
+    env_path = _env_file_path()
+    try:
+        _write_env_file(env_path, updates)
+    except OSError as e:
+        return {"ok": False, "error": f"Could not write {env_path}: {e}"}
+
+    # Hot-reload so this bridge process uses the new paths immediately.
+    apply_env_overrides(updates)
+    os.environ["XI_ENV_FILE"] = str(env_path)
+
+    st = _env_status({})
+    st["ok"] = True
+    st["saved"] = True
+    st["envFile"] = str(env_path)
+    return st
 
 
 def _set_active_project(params: dict) -> dict:
