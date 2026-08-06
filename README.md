@@ -3,32 +3,48 @@
 CLI toolkit for FFXI DAT modding on private servers — models, animations, zones,
 gear, mounts, VFX, audio, UI, events, and packaging.
 
-```text
-xi <group> <command> …
-```
-
-Paths can be ROM-relative (e.g. `ROM/1/41`) and resolve against `FFXI_DIR`.
-Edits write in place; each changed DAT keeps a pristine `<dat>.base` backup.
+> **Command reference:** see **[QUICKY.md](QUICKY.md)** for the full public CLI surface and examples.
 
 ---
 
-## Setup
+## Requirements
 
-1. Install Python 3.11+ (3.14 recommended)
-2. Install `uv`: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-3. Sync dependencies: `uv sync`
-4. Install the CLI entry point (so you can type `xi` instead of `uv run xi`):
+| Requirement | Notes |
+|---|---|
+| **[Python 3.14](https://www.python.org/downloads/)** | Recommended runtime |
+| **[uv](https://docs.astral.sh/uv/)** | Fast Python package/project manager — installs deps and runs the CLI |
+| **[Blender](https://www.blender.org/download/)** | 3D mesh/animation editing and FBX support |
+
+---
+
+## Getting Started
+
+1. **Clone the repo** *or* download the [latest release zip](https://github.com/vekien/xi-tools/releases)
+2. Copy [`.env.sample`](.env.sample) → `.env` and fill in the paths to FFXI and Blender
+3. Open a terminal in the root folder and run:
+
+```bash
+uv run xi --help
+```
+
+This installs all Python dependencies and shows the full command list.
+
+4. Run commands with:
+
+```bash
+uv run xi <command> <arg>
+```
+
+---
+
+## Install (optional permanent CLI)
+
+Install once so you can type `xi` instead of `uv run xi`:
 
 ```bash
 uv tool install -e .
 xi --help
 ```
-
-5. Copy [`.env.sample`](.env.sample) → `.env` and set at least `FFXI_DIR` (required — no default).
-
-**Optional — 3D model editing:** Install [Blender](https://www.blender.org/download/) and set `BLENDER_PATH` (needed for FBX only; GLB works without it).
-
-**Optional — navmesh bake:** build the native lib once under [`misc/tools/xi-navmesh`](misc/tools/xi-navmesh/README.md) (or use the bundled `src/xi/libs/xi_navmesh.dll`).
 
 ---
 
@@ -39,7 +55,7 @@ xi --help
 | `FFXI_DIR` | FFXI game install — tools read **and** write here |
 | `FFXI_HD_DIR` | HD asset-pack DAT root (publish-to-HD / HD preview) |
 | `FFXI_PIVOT_DIR` | Ashita/XIPivot override DAT root (keeps F/V tables in sync) |
-| `BLENDER_PATH` | Path to `blender.exe` — only for `--fbx` exports |
+| `BLENDER_PATH` | Path to `blender.exe` — mesh/anim editing + FBX |
 | `CUSTOM_FTABLE` | ROM name for the custom namespace (default: `ROM10`) |
 | `XI_VGMSTREAM` | `vgmstream-cli` for ATRAC3 (`xi audio`); else from `PATH` |
 | `XI_SERVER_DIR` | Local LSB/server checkout root (`xi zone new`, server helpers) |
@@ -52,90 +68,150 @@ See [`.env.sample`](.env.sample) for the full list.
 
 ## Features
 
-### FTABLE / custom model space
+### Animation
 
-- Expand base (+ pivot) FTABLE/VTABLE for custom **entity** and **gear** model ranges
-- Lookup, range-scan, set/delete entries, reset from `.base` backups
-- `xi model search` / `json` — registered modelids, free slots, DAT paths
+- Export, import, and schedule creation
+- Replace existing animations on characters, NPCs, etc. (auto-detect)
+- Layered animations — blend multiple animations on top of each other
+- Inject brand-new animations (mounts, monsters, attack sets, etc.)
+- Skeletal clips and `0x07` cutscene routines (`xi anim export` / `import` / `schedule`)
 
-### Mesh, animation, entities
+### Mesh
 
-- `xi mesh export` / `import` — glTF/GLB (+ optional FBX) round-trip for entity meshes
-- `xi anim export` / `import` / `schedule` — skeletal clips, layering, `0x07` cutscene routines
+- Export / import including mirroring, unmirroring, split textures, multi-polygon meshes, weights/rigging
+- Ideal for asymmetrical monsters (e.g. battle-worn Byakko with an eyepatch as a separate 3D model + texture)
+- glTF/GLB round-trip; optional FBX via Blender
 - Entity inject, recolor, look-blob decode, NPC bake helpers
 
-### Gear & mounts
+### Textures
 
-- Search / export / import gear models; texture edit; character assemble from `look`
-- Inject custom gear (incl. particle-config bake), import-json configs
-- Mount search / export / import / delete
+- Export / import for any graphics, UI, etc.
+- DDS ↔ PNG via `xi utils` / `xi tex`
+- UI texture extract/import (`sx`/`si`), layout position tweaks
 
-### Zones, objects, collision, navmesh
+### FFXIMain / FTABLE patching
 
-- Zone export / import / import-json / reset / search / json
-- `xi zone new`, `make-template`, `scaffold-server`, `delete`, `footsteps`
-- `xi zone navmesh` / `navmesh-info` — bake LSB-compatible `.nav` from collision
+- Expand model IDs, F/V table mapping, modify entries, custom ROM folders
+- Patch gear IDs up to **4096**, models up to **65k**
+- Lookup, range-scan, set/delete entries, reset from `.base` backups
+- `xi model search` / `json` — registered modelids, free slots, DAT paths
+- `xi ffximain` — unpack, text-dump, gear-groups / gear-patch
+
+### Mounts
+
+- Mount injection including keyitems, category listing, EN/JP support
+- Search / export / import / delete
+
+### Gear
+
+- Export, import, modify; add/remove parts; edit the mesh
+- Auto skeleton detection; import to new model IDs
+- Simple wizard injector
+- Texture edit; character assemble from `look`
+- Custom gear inject (incl. particle-config bake), import-json configs
+
+### Zones & objects
+
+- Zone export, import, rebuilds; object/environment modifications
+- Ties into **xi-zone-editor** (separate release)
+- Collision mesh modifications
 - Object export/import/replace/clone/delete/set-placement/swap-placement
+- `xi zone new`, `make-template`, `scaffold-server`, `delete`, `footsteps`
 - FX inspect/set/copy/delete/export (zone particle & light generators)
 
-> **Note:** The browser **zone level editor** is no longer part of this repo. Use the CLI
-> (`xi zone` / `xi object` / `xi fx`) and JSON change-sets here; the editor lives in its
-> own project.
+### Navmesh
+
+- Auto navmesh building from collision (see [NavMesh Builder](#navmesh-builder) below)
+
+### FX
+
+- Export, import, and modifications for zone particle & light generators
+
+### Audio
+
+- Music + SFX export
+- Search/catalog, decode/encode BGW/SPW, install into the game tree
+- DAT sound-reference inspection (`xi audio refs`)
+
+### Events & dialogue
+
+- Event manipulation for cutscenes, dialog, custom NPCs
+- Cutscene export/import; dialogue actors, search, edit, reset
+- Event authoring / compile helpers under `xi event`
+
+### Bulk actions & data
+
+- Batch jobs (`xi batch`) — bulk zone/audio/asset work
+- Data searching, JSON exports, opcode exports
+- Strings, spells, item tables (general/consumable/armor/weapon/mount/custom)
+- Item icons
 
 ### DAT packaging
 
 - `xi dats prepare` / `build` / `json` / `changelog` — project manifests, locked
   allocations, standard/HD client packages, reproducible builds
 
-### Audio
-
-- Search/catalog music & SFX, decode/encode BGW/SPW, install into the game tree
-- DAT sound-reference inspection (`xi audio refs`)
-
-### UI, items, spells, textures
-
-- UI texture extract/import (`sx`/`si`), layout position tweaks
-- Strings, spells, item tables (general/consumable/armor/weapon/mount/custom)
-- Item icons; DDS ↔ PNG via `xi utils` / `xi tex`
-
-### Events & dialogue
-
-- Cutscene export/import; dialogue actors, search, edit, reset
-- Event authoring / compile helpers under `xi event`
-
 ### Client / server utilities
 
-- `xi ffximain` — unpack, text-dump, gear-groups / gear-patch
 - `xi launcher ui-themes`
 - `xi server` — DB queries / status when `XI_SERVER_DIR` + DB env are set
 - `xi misc` — orphans, staging, scans, previews
-- `xi batch` — bulk zone/audio/asset jobs
-
-Command cheat sheet: **[QUICKY.md](QUICKY.md)**
 
 ---
 
-## Quick examples
+## NavMesh Builder
 
-```text
-# Reserve custom entity + gear model space (once per install)
-xi ftable expand
+Bake a **server-compatible** pathfinding navmesh (`.nav`) from a zone's collision
+mesh via the bundled Recast/Detour library. Used by LandSandBoat / CatsEyeXI map
+servers (`navmeshes/<ZoneName>.nav`).
 
-# Entity mesh round-trip
-xi mesh export ROM/351/102 --split-tex
-xi mesh import ROM/351/102 path/to/edited.glb
+A prebuilt `xi_navmesh.dll` ships in `src/xi/libs/`. Rebuild only if you change
+the native sources.
 
-# Package a custom mesh into the live install
-xi dats prepare exports/mesh/rom/351/102/102_schema.json --project my_mod --replace
-xi dats build my_mod
+### One-time rebuild (optional)
 
-# Zone collision → server navmesh
-xi zone navmesh ROM/1/41
+Needs a C++ toolchain (MSVC / clang / gcc) + CMake ≥ 3.15:
 
-# UI title screen textures (pivot override)
-xi ui tex sx ROM/119/50.DAT --ffxi "%FFXI_PIVOT_DIR%"
-xi ui tex si ROM/119/50.DAT --ffxi "%FFXI_PIVOT_DIR%"
+```sh
+cd misc/tools/xi-navmesh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
 ```
+
+Produces `xi_navmesh.dll` (Windows) / `xi_navmesh.so` (Linux). `xi zone navmesh`
+finds it under `build/`, `build/Release/`, or the bundled `src/xi/libs/` copy.
+
+### Bake a navmesh
+
+```bash
+xi zone navmesh ROM/1/41
+```
+
+Reads the zone's collision (including your edits) and writes
+`exports/zone/<rom>/<stem>.nav`.
+
+| Flag | Default | Effect |
+|------|--------:|--------|
+| `--output PATH` | `exports/zone/<rom>/<stem>.nav` | Output path |
+| `--agent-radius` | `0.3` | Agent radius in yalms (`0.3` = stock mob; ~`0.7` player-style) |
+| `--agent-max-climb` | `0.5` | Max step/climb height |
+| `--cell-size` | `0.40` | Recast voxel cell size |
+| `--tile-size` | `256` | Tile size in cells |
+
+### Install on the server
+
+Copy to `navmeshes/<ZoneName>.nav` (spaces → underscores, e.g. `Lower_Jeuno.nav`).
+Set `XI_NAVMESH_DIR` in `.env` if you want tools to target that folder. **Back up
+stock `.nav` files before overwriting.**
+
+```bash
+# Validate
+xi zone navmesh-info exports/zone/rom/1/41/41.nav
+xi zone navmesh-info <nav> --tiles
+```
+
+Full details: [docs/zone/navmesh.md](docs/zone/navmesh.md) · native lib notes:
+[misc/tools/xi-navmesh/README.md](misc/tools/xi-navmesh/README.md)
 
 ---
 
@@ -143,9 +219,10 @@ xi ui tex si ROM/119/50.DAT --ffxi "%FFXI_PIVOT_DIR%"
 
 | Doc | |
 |-----|--|
-| [QUICKY.md](QUICKY.md) | Full public CLI surface |
+| **[QUICKY.md](QUICKY.md)** | **Full public CLI surface + examples** |
 | [docs/README.md](docs/README.md) | Format docs + command deep-dives |
 | [docs/common_crashes.md](docs/common_crashes.md) | Client crash diagnosis after publishes |
+| [docs/zone/navmesh.md](docs/zone/navmesh.md) | Navmesh bake & server install |
 
 Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — WebGL2/Tauri asset browser (zones, NPCs, gear, VFX, audio, DAT inspector).
 
@@ -156,3 +233,30 @@ Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — We
 - Built by: Vekien
 - Advanced by: Loxley
 - Team CatsEyeXI
+
+---
+
+## For AI assistants (Claude / GPT / Grok / etc.)
+
+This project is **heavily AI-assisted**. If you are an LLM helping with xi-tools:
+
+| Path | What it is |
+|------|------------|
+| `src/xi/` | Python package — all CLI tools live here |
+| `src/xi/xi_cli.py` | Top-level Click CLI entry (`xi` command groups) |
+| `docs/` | Format specs + command deep-dives (read these before guessing binary layouts) |
+| `QUICKY.md` | Full public command surface |
+| `.env.sample` | Required env vars (`FFXI_DIR`, `BLENDER_PATH`, …) |
+| `misc/tools/xi-navmesh/` | Native Recast/Detour navmesh library (C++/CMake) |
+| `schema/` | JSON schemas / descriptors |
+| `exports/` | Default output tree for mesh/zone/anim exports (generated, not source) |
+
+**How to work here**
+
+1. Prefer reading `docs/` and existing modules under `src/xi/<area>/` over inventing DAT layouts.
+2. CLI groups map to packages: `xi mesh` → `src/xi/entity/mesh/`, `xi zone` → `src/xi/zone/`, `xi anim` → `src/xi/entity/anim/`, etc.
+3. Paths are often ROM-relative (`ROM/1/41`) and resolve via `FFXI_DIR` from `.env`.
+4. Edits are in-place; tools keep `<dat>.base` backups — do not break that contract.
+5. Run via `uv run xi …` (or installed `xi`). Python **3.14** recommended; project requires `>=3.11`.
+6. Do not commit secrets, `.env`, or large binaries under `exports/` / game trees.
+7. Match existing style: Click CLIs, minimal comments, no drive-by refactors outside the task.
