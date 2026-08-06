@@ -99,6 +99,11 @@ def _require_ffxi_dir() -> None:
     mid-command error. Skipped for help output so `--help` always works."""
     if "--help" in sys.argv[1:]:
         return
+    # `xi bridge` starts the zone-editor WebSocket server; it can come up before
+    # FFXI_DIR is configured (the editor wizard sets it). Individual bridge
+    # methods still fail clearly if a DAT path is needed.
+    if len(sys.argv) > 1 and sys.argv[1] == "bridge":
+        return
     from pathlib import Path
     from xi.xi_config import FFXI_DIR
     if FFXI_DIR and Path(FFXI_DIR).is_dir():
@@ -115,6 +120,8 @@ def cli():
     _require_ffxi_dir()
 
 
+from xi.misc import xi_bridge_server as misc_bridge
+cli.add_command(misc_bridge.cmd, 'bridge')
 cli.add_command(batch_cmds.batch, 'batch')
 cli.add_command(xi_dats.group, 'dats')
 

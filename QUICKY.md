@@ -10,6 +10,7 @@ This lists the current public CLI command surface. Hidden compatibility aliases 
 xi anim
 xi audio
 xi batch
+xi bridge
 xi dats
 xi entity
 xi event
@@ -29,6 +30,15 @@ xi ui
 xi utils
 xi zone
 ```
+
+## Bridge (zone editor backend)
+
+```text
+xi bridge
+xi bridge --host 127.0.0.1 --port 8777 --idle-secs 90
+```
+
+WebSocket at `ws://HOST:PORT/ws`. Used by xi-zone-editor; exits after idle-secs with no clients.
 
 ## Dats Packages
 
