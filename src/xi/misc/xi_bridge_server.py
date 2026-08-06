@@ -124,22 +124,45 @@ def _guess_ctype(path: Path) -> bytes:
 
 
 def _tools_exports_root() -> Path | None:
-    """``<xi-tools>/exports`` — icons, pre-decoded audio, manifests."""
+    """Folder with icons / pre-decoded audio / manifests.
+
+    Search order: ``XI_EXPORTS_DIR``, ``<XI_TOOLS_DIR>/exports``, package-adjacent
+    ``exports/``, then a few common dev locations.
+    """
+    candidates: list[Path] = []
+    exp = (os.environ.get("XI_EXPORTS_DIR") or "").strip()
+    if exp:
+        candidates.append(Path(exp))
     try:
         from xi.xi_config import XI_TOOLS_DIR
         if XI_TOOLS_DIR:
-            p = Path(XI_TOOLS_DIR) / "exports"
-            if p.is_dir():
-                return p
+            candidates.append(Path(XI_TOOLS_DIR) / "exports")
     except Exception:
         pass
-    # src/xi/misc/xi_bridge_server.py → parents[3] = tools root when layout is tools/src/xi/...
     try:
-        p = Path(__file__).resolve().parents[3] / "exports"
+        # …/src/xi/misc/this.py → tools root
+        candidates.append(Path(__file__).resolve().parents[3] / "exports")
+    except Exception:
+        pass
+    # Dev machines often keep the big exports tree on the source checkout
+    # even when the running package is under %LOCALAPPDATA%.
+    for extra in (
+        Path(r"D:\xi-tools\exports"),
+        Path.home() / "xi-tools" / "exports",
+    ):
+        candidates.append(extra)
+
+    seen: set[str] = set()
+    for p in candidates:
+        try:
+            key = str(p.resolve()).lower()
+        except OSError:
+            key = str(p).lower()
+        if key in seen:
+            continue
+        seen.add(key)
         if p.is_dir():
             return p
-    except Exception:
-        pass
     return None
 
 
