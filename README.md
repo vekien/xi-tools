@@ -5,6 +5,8 @@ gear, mounts, VFX, audio, UI, events, and packaging.
 
 > **Command reference:** see **[QUICKY.md](QUICKY.md)** for the full public CLI surface and examples.
 
+![cli](ss.png)
+
 ---
 
 ## Requirements
