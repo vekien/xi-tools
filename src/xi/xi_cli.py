@@ -554,3 +554,7 @@ def server():
 
 server.add_command(server_cmds.db_cmd,     'db')
 server.add_command(server_cmds.status_cmd, 'status')
+
+
+if __name__ == "__main__":
+    cli(prog_name="xi")
