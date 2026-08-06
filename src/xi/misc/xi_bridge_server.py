@@ -108,38 +108,72 @@ def _safe_under(root: Path, rel: str) -> Path | None:
 
 def _guess_ctype(path: Path) -> bytes:
     name = path.name.lower()
-    if name.endswith(".dll"):
-        return b"application/octet-stream"
-    if name.endswith(".dat") or name.endswith(".base"):
-        return b"application/octet-stream"
     if name.endswith(".json"):
         return b"application/json"
+    if name.endswith(".png"):
+        return b"image/png"
+    if name.endswith((".jpg", ".jpeg")):
+        return b"image/jpeg"
+    if name.endswith(".webp"):
+        return b"image/webp"
+    if name.endswith(".wav"):
+        return b"audio/wav"
+    if name.endswith((".dll", ".dat", ".base", ".bin")):
+        return b"application/octet-stream"
     return b"application/octet-stream"
 
 
-def _serve_game_file(conn: socket.socket, url_path: str) -> None:
-    """GET /game/... → FFXI_DIR; GET /game-hd/... → FFXI_HD_DIR (live config)."""
+def _tools_exports_root() -> Path | None:
+    """``<xi-tools>/exports`` — icons, pre-decoded audio, manifests."""
+    try:
+        from xi.xi_config import XI_TOOLS_DIR
+        if XI_TOOLS_DIR:
+            p = Path(XI_TOOLS_DIR) / "exports"
+            if p.is_dir():
+                return p
+    except Exception:
+        pass
+    # src/xi/misc/xi_bridge_server.py → parents[3] = tools root when layout is tools/src/xi/...
+    try:
+        p = Path(__file__).resolve().parents[3] / "exports"
+        if p.is_dir():
+            return p
+    except Exception:
+        pass
+    return None
+
+
+def _serve_static_file(conn: socket.socket, url_path: str) -> None:
+    """GET /game/... → FFXI_DIR; /game-hd/... → HD; /exports/... → xi-tools/exports."""
     from xi import xi_config as cfg
 
     if url_path.startswith("/game-hd/"):
         root_s = (cfg.FFXI_HD_DIR or "").strip()
         rel = url_path[len("/game-hd/"):]
         label = "FFXI_HD_DIR"
+        root = Path(root_s) if root_s else None
     elif url_path.startswith("/game/"):
         root_s = (cfg.FFXI_DIR or "").strip()
         rel = url_path[len("/game/"):]
         label = "FFXI_DIR"
+        root = Path(root_s) if root_s else None
+    elif url_path.startswith("/exports/"):
+        rel = url_path[len("/exports/"):]
+        label = "exports"
+        root = _tools_exports_root()
+        root_s = str(root) if root else ""
     else:
         _http_response(conn, b"404 Not Found", b"not found")
         return
 
-    if not root_s:
-        _http_response(
-            conn, b"503 Service Unavailable",
-            f"{label} is not set. Finish Game Paths setup first.".encode("utf-8"),
+    if root is None or not root_s:
+        msg = (
+            f"{label} is not set. Finish Game Paths setup first."
+            if label != "exports"
+            else "No exports/ folder next to xi-tools (run batch icon/audio exports first)."
         )
+        _http_response(conn, b"503 Service Unavailable", msg.encode("utf-8"))
         return
-    root = Path(root_s)
     if not root.is_dir():
         _http_response(
             conn, b"503 Service Unavailable",
@@ -192,8 +226,12 @@ def _handle_http_or_ws(conn: socket.socket) -> str | None:
         )
         return "ws"
 
-    if method == "GET" and (path.startswith("/game/") or path.startswith("/game-hd/")):
-        _serve_game_file(conn, path)
+    if method == "GET" and (
+        path.startswith("/game/")
+        or path.startswith("/game-hd/")
+        or path.startswith("/exports/")
+    ):
+        _serve_static_file(conn, path)
         return None
 
     if method == "GET" and path in ("/", "/health", "/healthz"):
