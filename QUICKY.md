@@ -7,27 +7,27 @@ This lists the current public CLI command surface. Hidden compatibility aliases 
 ## Top Level
 
 ```text
+xi anim
+xi audio
 xi batch
 xi dats
-xi audio
-xi ftable
-xi model
-xi anim
-xi mesh
-xi gear
-xi ffximain
-xi ui
-xi mount
-xi zone
-xi object
-xi fx
-xi gui
-xi tex
-xi launcher
-xi utils
+xi entity
 xi event
+xi ffximain
+xi ftable
+xi fx
+xi gear
+xi launcher
+xi mesh
 xi misc
+xi model
+xi mount
+xi object
 xi server
+xi tex
+xi ui
+xi utils
+xi zone
 ```
 
 ## Dats Packages
@@ -36,7 +36,11 @@ xi server
 xi dats json
 xi dats prepare
 xi dats build
+xi dats new
+xi dats package
+xi dats release
 xi dats changelog
+xi dats undo
 ```
 
 ### Example: custom mesh end-to-end
@@ -57,44 +61,73 @@ xi dats build battle_worn_byakko
 ```text
 xi model search
 xi model json
-xi anim export
-xi anim import
-xi anim json
+
 xi mesh export
 xi mesh import
 xi mesh json
+
+xi anim export
+xi anim import
+xi anim list
+xi anim json
+xi anim schedule
+xi anim schedule list
+xi anim schedule add
+xi anim schedule create
+xi anim schedule copy
+xi anim schedule edit
+```
+
+## Entity
+
+```text
+xi entity list
+xi entity inject
+xi entity recommend
+xi entity recolor
+xi entity look
+xi entity mesh export
+xi entity mesh import
 ```
 
 ## Gear
 
 ```text
 xi gear search
+xi gear list
 xi gear json
 xi gear export
-xi gear character
-xi gear edit
-xi gear import-json
 xi gear import
+xi gear edit
+xi gear character
+xi gear inject
+xi gear import-json
+xi gear recolor
 ```
 
 ## Mounts
 
 ```text
 xi mount search
+xi mount list
 xi mount json
 xi mount export
 xi mount import
+xi mount inject
 xi mount delete
 ```
 
 ## Zones / Objects / FX
 
 ```text
-xi zone export
 xi zone search
+xi zone list
 xi zone json
+xi zone export
+xi zone tree
 xi zone import
 xi zone import-json
+xi zone inject
 xi zone reset
 xi zone build-from-manifest
 xi zone navmesh
@@ -104,6 +137,8 @@ xi zone make-template
 xi zone scaffold-server
 xi zone delete
 xi zone footsteps
+xi zone fx
+xi zone fx list
 
 xi object json
 xi object export
@@ -114,12 +149,24 @@ xi object delete
 xi object set-placement
 xi object swap-placement
 
+# also available as xi zone object …
+xi zone object list
+xi zone object export
+xi zone object import
+xi zone object replace
+xi zone object clone
+xi zone object delete
+xi zone object set-placement
+xi zone object swap-placement
+
 xi fx json
-xi fx delete
-xi fx delete-group
+xi fx list
+xi fx dump
 xi fx set
 xi fx copy
 xi fx copy-group
+xi fx delete
+xi fx delete-group
 xi fx export
 ```
 
@@ -134,12 +181,18 @@ xi audio info
 xi audio refs
 xi audio import
 xi audio install
+
+xi audio music list
+xi audio music export
+xi audio sfx list
+xi audio sfx export
 ```
 
 ## Textures / UI
 
 ```text
 xi tex json
+xi tex list
 xi tex export
 xi tex import
 
@@ -256,8 +309,12 @@ xi ftable expand entity
 xi ftable expand gear
 xi ftable reset
 xi ftable json
+xi ftable list
+xi ftable tables
+xi ftable info
 xi ftable lookup
 xi ftable range-scan
+xi ftable compare
 xi ftable delete
 xi ftable set
 ```
@@ -280,6 +337,7 @@ xi batch dat_header_dump
 xi event cutscene
 xi event cutscene export
 xi event cutscene import
+xi event cutscene compile
 
 xi event dialogue
 xi event dialogue actors
@@ -291,19 +349,13 @@ xi event dialogue edit
 xi event dialogue reset
 ```
 
-## GUI
-
-```text
-xi gui weapon
-xi gui zone
-xi gui spells
-```
-
 ## FFXiMain / Launcher / Utils
 
 ```text
-xi ffximain text-dump
 xi ffximain unpack
+xi ffximain text-dump
+xi ffximain gear-groups
+xi ffximain gear-patch
 
 xi launcher ui-themes
 
