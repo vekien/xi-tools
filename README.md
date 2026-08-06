@@ -1,6 +1,14 @@
 # xi-tools
 
-DAT modding tools for FFXI private servers — entity models, zone geometry, gear, visual effects, collision, UI textures, and more.
+CLI toolkit for FFXI DAT modding on private servers — models, animations, zones,
+gear, mounts, VFX, audio, UI, events, and packaging.
+
+```text
+xi <group> <command> …
+```
+
+Paths can be ROM-relative (e.g. `ROM/1/41`) and resolve against `FFXI_DIR`.
+Edits write in place; each changed DAT keeps a pristine `<dat>.base` backup.
 
 ---
 
@@ -16,10 +24,11 @@ uv tool install -e .
 xi --help
 ```
 
-5. Set `FFXI_DIR` to your `FINAL FANTASY XI` install folder (see Environment
-   Variables below). It is required — there is no default.
+5. Copy [`.env.sample`](.env.sample) → `.env` and set at least `FFXI_DIR` (required — no default).
 
-**Optional — 3D model editing:** Install [Blender](https://www.blender.org/download/) and set the `BLENDER_PATH` env var (needed for FBX export only; GLB works without it).
+**Optional — 3D model editing:** Install [Blender](https://www.blender.org/download/) and set `BLENDER_PATH` (needed for FBX only; GLB works without it).
+
+**Optional — navmesh bake:** build the native lib once under [`misc/tools/xi-navmesh`](misc/tools/xi-navmesh/README.md) (or use the bundled `src/xi/libs/xi_navmesh.dll`).
 
 ---
 
@@ -27,97 +36,118 @@ xi --help
 
 | Variable | Purpose |
 |---|---|
-| `FFXI_DIR` | FFXI game install — tools read AND write here (edits go in place; every edited DAT keeps a pristine `<dat>.base` backup) |
-| `BLENDER_PATH` | Path to `blender.exe` — only needed for `--fbx` exports |
+| `FFXI_DIR` | FFXI game install — tools read **and** write here |
+| `FFXI_HD_DIR` | HD asset-pack DAT root (publish-to-HD / HD preview) |
+| `FFXI_PIVOT_DIR` | Ashita/XIPivot override DAT root (keeps F/V tables in sync) |
+| `BLENDER_PATH` | Path to `blender.exe` — only for `--fbx` exports |
 | `CUSTOM_FTABLE` | ROM name for the custom namespace (default: `ROM10`) |
-| `XI_VGMSTREAM` | Path to `vgmstream-cli` — only needed to decode ATRAC3 audio (`xi audio`); auto-detected from `PATH` otherwise |
-| `XI_NAVMESH_DIR` | Directory of server navmesh `.nav` files — shown as a green walkable-area overlay in the zone level editor. Auto-detected from `../xi-server/xiNavmeshes` if present. |
+| `XI_VGMSTREAM` | `vgmstream-cli` for ATRAC3 (`xi audio`); else from `PATH` |
+| `XI_SERVER_DIR` | Local LSB/server checkout root (`xi zone new`, server helpers) |
+| `XI_NAVMESH_DIR` | Directory of server `.nav` files |
+| `XI_DB_*` | Optional MySQL settings for `xi server` |
+
+See [`.env.sample`](.env.sample) for the full list.
 
 ---
 
 ## Features
 
-- Custom FFXI Zone Editor: create new zones, edit existing zones, move/clone/import objects, tune VFX/weather, and export JSON change sets.
-- Collision and navigation tools: inspect collision, append blockers, bake navmeshes, and preview server walkable areas.
-- Model and animation tools: export/import meshes, textures, skeletons, and animations, including new or edited animation tracks.
-- Gear and character tools: find gear DATs, edit gear textures, import/export gear models, and assemble full characters from `look` data.
-- Visual effects tools: inspect, edit, copy, delete, and export particle/light generators for lamps, fire, fountains, spells, and ambience.
-- DAT packaging: build reproducible standard/HD DAT packages with manifests, locked allocations, client files, and server resources.
-- Audio tools: search, catalog, decode, import, install music/SFX, and inspect DAT sound references.
-- UI and item tools: edit UI textures, strings, item records, icons, spells, layout data, and DDS/PNG assets.
-- Event and dialogue tools: inspect cutscenes, find actors, author dialogue, and edit/reset dialogue tables.
-- Misc/server tools: discover unused zones, stage server scaffolding, inspect server DB/status, unpack `FFXiMain.dll`, and run batch jobs.
+### FTABLE / custom model space
+
+- Expand base (+ pivot) FTABLE/VTABLE for custom **entity** and **gear** model ranges
+- Lookup, range-scan, set/delete entries, reset from `.base` backups
+- `xi model search` / `json` — registered modelids, free slots, DAT paths
+
+### Mesh, animation, entities
+
+- `xi mesh export` / `import` — glTF/GLB (+ optional FBX) round-trip for entity meshes
+- `xi anim export` / `import` / `schedule` — skeletal clips, layering, `0x07` cutscene routines
+- Entity inject, recolor, look-blob decode, NPC bake helpers
+
+### Gear & mounts
+
+- Search / export / import gear models; texture edit; character assemble from `look`
+- Inject custom gear (incl. particle-config bake), import-json configs
+- Mount search / export / import / delete
+
+### Zones, objects, collision, navmesh
+
+- Zone export / import / import-json / reset / search / json
+- `xi zone new`, `make-template`, `scaffold-server`, `delete`, `footsteps`
+- `xi zone navmesh` / `navmesh-info` — bake LSB-compatible `.nav` from collision
+- Object export/import/replace/clone/delete/set-placement/swap-placement
+- FX inspect/set/copy/delete/export (zone particle & light generators)
+
+> **Note:** The browser **zone level editor** is no longer part of this repo. Use the CLI
+> (`xi zone` / `xi object` / `xi fx`) and JSON change-sets here; the editor lives in its
+> own project.
+
+### DAT packaging
+
+- `xi dats prepare` / `build` / `json` / `changelog` — project manifests, locked
+  allocations, standard/HD client packages, reproducible builds
+
+### Audio
+
+- Search/catalog music & SFX, decode/encode BGW/SPW, install into the game tree
+- DAT sound-reference inspection (`xi audio refs`)
+
+### UI, items, spells, textures
+
+- UI texture extract/import (`sx`/`si`), layout position tweaks
+- Strings, spells, item tables (general/consumable/armor/weapon/mount/custom)
+- Item icons; DDS ↔ PNG via `xi utils` / `xi tex`
+
+### Events & dialogue
+
+- Cutscene export/import; dialogue actors, search, edit, reset
+- Event authoring / compile helpers under `xi event`
+
+### Client / server utilities
+
+- `xi ffximain` — unpack, text-dump, gear-groups / gear-patch
+- `xi launcher ui-themes`
+- `xi server` — DB queries / status when `XI_SERVER_DIR` + DB env are set
+- `xi misc` — orphans, staging, scans, previews
+- `xi batch` — bulk zone/audio/asset jobs
+
+Command cheat sheet: **[QUICKY.md](QUICKY.md)**
 
 ---
 
-## Zone Editor
+## Quick examples
 
-A browser-based level editor for zone placements, served directly from this repo:
+```text
+# Reserve custom entity + gear model space (once per install)
+xi ftable expand
 
-```bash
-xi gui zone
-# → opens http://localhost:8777/ automatically
+# Entity mesh round-trip
+xi mesh export ROM/351/102 --split-tex
+xi mesh import ROM/351/102 path/to/edited.glb
+
+# Package a custom mesh into the live install
+xi dats prepare exports/mesh/rom/351/102/102_schema.json --project my_mod --replace
+xi dats build my_mod
+
+# Zone collision → server navmesh
+xi zone navmesh ROM/1/41
+
+# UI title screen textures (pivot override)
+xi ui tex sx ROM/119/50.DAT --ffxi "%FFXI_PIVOT_DIR%"
+xi ui tex si ROM/119/50.DAT --ffxi "%FFXI_PIVOT_DIR%"
 ```
-
-**Features:**
-- Loads zone DATs directly — reads your `FFXI_DIR` install, no export step needed
-- 3D viewport with fly camera, gizmos for move / rotate / scale
-- Multi-select with copy / paste support
-- Snap controls for grid-aligned placement
-- Object badge styling and visibility overrides (persisted across sessions)
-- Weather, Time-of-Day, and VFX (fog/atmosphere) controls
-- **Collision mesh overlay** — shows player-blocking geometry (red = wall/impassable, colour-coded floors by terrain type); opacity slider + isolate mode
-- **Navmesh overlay** — shows server walkable area as a green mesh from the zone's `.nav` file; requires `XI_NAVMESH_DIR` or a baked `.nav` from `xi zone navmesh`
-- **Settings panes**: Viewport (grid, wireframe, cell wireframe, sky, VFX icons), Collision (overlay opacity, isolate), Selection (outline toggles), Transformation (uniform scale, snap), Auto Save, Import (GLB import scale for C4D / non-FFXI-unit models)
-- **Export JSON → `xi zone import-json`** to write changes back to the DAT in one command
-
-### Projects & Workspaces
-
-Editor work is organised into **projects**, stored in a workspaces folder you
-pick on your own machine. Whether that folder is backed by git, Dropbox, or
-nothing at all is up to you — the tools don't manage or enforce it.
-
-- The **Projects launcher** lists projects from the folder's `projects.json`. **New Project** creates one; **Browse Zones** opens any zone read-only with no project.
-- Opening a project points all editor reads/writes at that project's folder (`<project_id>/<zone>/zone-changes.json` + imported GLBs + version snapshots). The **Project Zones** panel (Zone tab) lists every zone you've edited in it.
-- Only sources live there (change-sets, GLBs, version snapshots) — baked DATs are rebuilt on Publish. Per-user view-state (object locks, grouping, UI prefs) stays local in `editor.json`.
-
----
-
-## Particle Editor
-
-A browser-based 3D weapon viewer and live particle effect editor for FFXI weapons:
-
-```bash
-xi gui weapon
-# → opens http://localhost:8776/ automatically
-```
-
-The `game/` symlink into your `FFXI_DIR` is created automatically on first run (requires Administrator / Developer Mode on Windows).  To rebuild the weapon index after a game update:
-
-```bash
-uv run python web/particleeditor/gen_weapons.py
-```
-
-**Features:**
-- 800+ searchable weapons loaded directly from game DATs — no export step needed
-- Accurate FFXI particle system rendered in three.js — glow, fire, blade spark, distortion, and more
-- Separate **Model** and **Effects** dropdowns — mix any weapon's particle effects onto any weapon's mesh
-- Per-emitter live controls: rate, lifetime, speed, scale, spread, hue, RGB color, alpha
-- Texture replacement: click an emitter's texture thumbnail to swap in a custom PNG; right-click to revert
-- Toggle **sheathed / unsheathed** states — autorun-only particles vs. full draw/idle sequence
-- Model tinting: HSL sliders + color overlay blend for full recolor preview in the viewport
-- Advanced panels (collapsible): raw generator metadata, texture gallery with format info, effect routines, keyframe curves
-- **Export Config** button → JSON downloaded and copied to clipboard; pass directly to `gear inject --particle-config` to bake customised effects into a new weapon DAT
 
 ---
 
 ## Documentation
 
-Quick command cheat sheet: [QUICKY.md](QUICKY.md)
+| Doc | |
+|-----|--|
+| [QUICKY.md](QUICKY.md) | Full public CLI surface |
+| [docs/README.md](docs/README.md) | Format docs + command deep-dives |
+| [docs/common_crashes.md](docs/common_crashes.md) | Client crash diagnosis after publishes |
 
-Full docs: [docs/README.md](docs/README.md)
-
-Godot prototype notes: [research/godot.md](research/godot.md)
+Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — WebGL2/Tauri asset browser (zones, NPCs, gear, VFX, audio, DAT inspector).
 
 ---
 
