@@ -114,23 +114,31 @@ _ACTIVE_WS_ROOT = None
 
 def workspace_root() -> Path:
     """The active workspace root: the open project's folder when one is active, else
-    the legacy editor-local <web/leveleditor>/workspaces."""
+    ``XI_WORKSPACES_DIR``, else a non-source fallback under ``exports/cache/workspaces``.
+
+    Never defaults to ``web/leveleditor/workspaces`` — that path sits inside the tools
+    checkout and regenerates untracked files (e.g. ``subarea_index.json``) on every
+    zone load."""
     if _ACTIVE_WS_ROOT is not None:
         return _ACTIVE_WS_ROOT
-    return _editor_dir() / "workspaces"
+    env = os.environ.get("XI_WORKSPACES_DIR", "").strip()
+    if env:
+        return Path(env).expanduser()
+    # Last resort: outside the source tree (exports/ is gitignored).
+    return Path(XI_TOOLS_DIR) / "exports" / "cache" / "workspaces"
 
 
 def workspaces_repo_root() -> Path:
-    """The shared workspaces repo root — the folder holding projects.json, one level
+    """The shared workspaces root — the folder holding projects.json, one level
     above the active project folder. User templates live here (committed + shared across
-    projects). Resolution: the active project's repo (editor) → ``XI_WORKSPACES_DIR``
-    (lets a CLI process target the same clone) → the legacy editor-local workspaces dir."""
+    projects). Resolution: the active project's parent → ``XI_WORKSPACES_DIR`` →
+    ``exports/cache/workspaces`` (never the package ``web/leveleditor`` tree)."""
     if _ACTIVE_WS_ROOT is not None:
         return _ACTIVE_WS_ROOT.parent
     env = os.environ.get("XI_WORKSPACES_DIR", "").strip()
     if env:
         return Path(env).expanduser()
-    return _editor_dir() / "workspaces"
+    return Path(XI_TOOLS_DIR) / "exports" / "cache" / "workspaces"
 
 
 def _workspace_dir(zone_rel: str, create: bool = True) -> Path:
@@ -2060,7 +2068,7 @@ def _server_zone_names(server_path: Path) -> dict:
 
 
 def _server_event_info(params: dict) -> dict:
-    """Find the server-side (LandSandBoat / CatsEyeXI) script that drives a cutscene event, so
+    """Find the server-side (LandSandBoat) script that drives a cutscene event, so
     the editor can surface its zone, mission/quest, event params and any NPC movement.
 
     ``{serverPath, zoneId, eventId}`` → scan ``scripts/{missions,quests,zones,battlefields}``
@@ -2388,6 +2396,16 @@ def _build_subarea_index() -> dict:
     return index
 
 
+def _subarea_index_cache_path() -> Path:
+    """Where the interior→parent reverse index lives.
+
+    Global cache (keyed by FFXI install), not per-project. Prefer the user's
+    workspaces folder; fall back under ``exports/cache`` so we never write into
+    ``web/leveleditor/workspaces`` inside the tools checkout.
+    """
+    return workspaces_repo_root() / "subarea_index.json"
+
+
 def _subarea_index() -> dict:
     """Lazily load (or build + cache) the interior→parent reverse index. Rebuilt if the cache
     was made for a different FFXI install."""
@@ -2395,12 +2413,20 @@ def _subarea_index() -> dict:
     if _SUBAREA_INDEX is not None:
         return _SUBAREA_INDEX
     from xi.xi_config import FFXI_DIR
-    ffxi = str(Path(FFXI_DIR))
-    cache = workspace_root() / "subarea_index.json"
+    try:
+        ffxi = str(Path(FFXI_DIR).expanduser().resolve()) if FFXI_DIR else ""
+    except OSError:
+        ffxi = str(Path(FFXI_DIR)) if FFXI_DIR else ""
+    cache = _subarea_index_cache_path()
     if cache.exists():
         try:
             blob = json.loads(cache.read_text(encoding="utf-8"))
-            if blob.get("ffxiDir") == ffxi and isinstance(blob.get("index"), dict):
+            cached_dir = str(blob.get("ffxiDir") or "")
+            try:
+                cached_dir = str(Path(cached_dir).expanduser().resolve()) if cached_dir else ""
+            except OSError:
+                pass
+            if cached_dir == ffxi and isinstance(blob.get("index"), dict):
                 _SUBAREA_INDEX = blob["index"]
                 return _SUBAREA_INDEX
         except (ValueError, OSError):
@@ -2408,7 +2434,10 @@ def _subarea_index() -> dict:
     _SUBAREA_INDEX = _build_subarea_index()
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({"ffxiDir": ffxi, "index": _SUBAREA_INDEX}, indent=1), encoding="utf-8")
+        cache.write_text(
+            json.dumps({"ffxiDir": ffxi, "index": _SUBAREA_INDEX}, indent=1),
+            encoding="utf-8",
+        )
     except OSError:
         pass
     return _SUBAREA_INDEX
@@ -3218,13 +3247,25 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($f.Se
     return {"ok": True, "path": str(Path(path))}
 
 
+def _persist_workspaces_dir(path: Path) -> str:
+    """Remember the workspaces folder for this process and in ``.env`` so caches
+    (subarea_index, etc.) land there instead of under ``web/leveleditor``."""
+    resolved = str(path.expanduser().resolve())
+    os.environ["XI_WORKSPACES_DIR"] = resolved
+    try:
+        _write_env_file(_env_file_path(), {"XI_WORKSPACES_DIR": resolved})
+    except OSError:
+        pass
+    return resolved
+
+
 def _workspace_skip() -> dict:
     """Create a local ``workspaces/`` folder at the xi-tools root (no git).
     Returns ``{ok: True, path}`` on success."""
     try:
         path = Path(XI_TOOLS_DIR) / "workspaces"
         path.mkdir(parents=True, exist_ok=True)
-        return {"ok": True, "path": str(path)}
+        return {"ok": True, "path": _persist_workspaces_dir(path)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -3253,7 +3294,8 @@ def _workspace_setup(params: dict) -> dict:
             print(f"Created workspaces folder at {dest}")
         else:
             print(f"Using workspaces folder at {dest}")
-        return {"ok": True, "path": str(dest.resolve()), "adopted": True}
+        path = _persist_workspaces_dir(dest)
+        return {"ok": True, "path": path, "adopted": True}
     except OSError as e:
         return {"ok": False, "error": str(e)}
 
@@ -3366,8 +3408,34 @@ def _write_env_file(path: Path, updates: dict[str, str]) -> None:
         if val:
             out_lines.append(f"{key}={val}")
 
+    # Other keys callers may persist (e.g. XI_WORKSPACES_DIR) that aren't wizard-owned.
+    for key, raw_val in updates.items():
+        if key in seen or key in _ENV_SETUP_KEYS:
+            continue
+        val = (raw_val or "").strip()
+        if val:
+            out_lines.append(f"{key}={val}")
+
     text = "\n".join(out_lines).rstrip() + "\n"
     path.write_text(text, encoding="utf-8")
+
+
+#: Fragments that mark a value as a shipped example rather than real configuration.
+_PLACEHOLDER_MARKS = ("path\\to", "path/to", "<", "your-overlay", "your-server")
+
+
+def _is_placeholder_path(value: str) -> bool:
+    """True for the example paths that ``.env.sample`` used to ship uncommented.
+
+    Older samples set FFXI_PIVOT_DIR, XI_SERVER_DIR and friends to things like
+    ``C:\\Path\\To\\Ashita\\polplugins\\DATs\\<your-overlay>``. The installer copies the
+    sample to ``.env``, so those come back as configured values — the setup form showed
+    them as if they were real, and a placeholder XI_SERVER_DIR silently broke every
+    database lookup. Treat them as unset wherever a value is read for display."""
+    if not value:
+        return False
+    low = str(value).lower()
+    return any(mark in low for mark in _PLACEHOLDER_MARKS)
 
 
 def _env_status(params: dict) -> dict:
@@ -3377,8 +3445,10 @@ def _env_status(params: dict) -> dict:
     file_vals = _parse_env_file(_env_file_path())
 
     def _get(key: str) -> str:
-        # Live process wins, then .env file.
-        return (os.environ.get(key) or file_vals.get(key) or getattr(cfg, key, "") or "").strip()
+        # Live process wins, then .env file. Sample placeholders read as unset so the
+        # setup form shows its own hint text instead of a fake path.
+        val = (os.environ.get(key) or file_vals.get(key) or getattr(cfg, key, "") or "").strip()
+        return "" if _is_placeholder_path(val) else val
 
     ffxi = _get("FFXI_DIR")
     ffxi_ok = bool(ffxi) and Path(ffxi).is_dir()
@@ -3491,9 +3561,7 @@ def _env_validate(params: dict) -> dict:
     if not path:
         return {"ok": True, "valid": False, "empty": True, "detail": ""}
 
-    # Ignore leftover sample placeholders
-    low = path.lower()
-    if "path\\to" in low or "path/to" in low or "<" in path or "your-overlay" in low:
+    if _is_placeholder_path(path):
         return {"ok": True, "valid": False, "empty": False, "detail": "placeholder"}
 
     p = Path(path)
@@ -3683,13 +3751,29 @@ def _set_active_project(params: dict) -> dict:
 
 # ── Editor settings (local, per-user view-state) ─────────────────────────────
 def _editor_settings_path() -> Path:
-    """Per-user editor view-state (locks, categorySets, …) — local, NOT shared.
-    Lives at the editor root, separate from the project's content change-sets."""
-    return _editor_dir() / "editor.json"
+    """Per-user editor view-state (camera, locks, categorySets, GLB src paths, …).
+
+    Local machine only — not per-project content. Lives at the **workspaces root**
+    (``XI_WORKSPACES_DIR/editor.json``), never under ``web/leveleditor/`` in the
+    tools checkout (that path regenerates untracked files next to source).
+    """
+    return workspaces_repo_root() / "editor.json"
 
 
 def _editor_load_settings(params: dict) -> dict:
     p = _editor_settings_path()
+    # One-time migrate from the legacy package path if present.
+    legacy = _editor_dir() / "editor.json"
+    if not p.exists() and legacy.is_file():
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
+            try:
+                legacy.unlink()
+            except OSError:
+                pass
+        except OSError:
+            pass
     if not p.exists():
         return {"ok": True, "settings": {}}
     try:
@@ -3703,7 +3787,9 @@ def _editor_save_settings(params: dict) -> dict:
     if not isinstance(data, dict):
         return {"ok": False, "error": "data must be an object"}
     try:
-        _editor_settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
+        p = _editor_settings_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return {"ok": True}
     except OSError as exc:
         return {"ok": False, "error": str(exc)}
@@ -4226,7 +4312,7 @@ def _reveal_in_explorer(path: Path) -> bool:
 
 
 def _client_relpath(p: Path, client_root: Path, fallback: str) -> str:
-    """Path of ``p`` relative to the catseyexi-client root, as a forward-slash
+    """Path of ``p`` relative to the client-install root, as a forward-slash
     string. Falls back to ``fallback`` when ``p`` lives outside the client tree
     (e.g. FFXI_HD_DIR pointed somewhere exotic)."""
     try:
@@ -4237,7 +4323,7 @@ def _client_relpath(p: Path, client_root: Path, fallback: str) -> str:
 
 def _package(params: dict) -> dict:
     """``zone.package`` — zip this zone's edited game + HD DATs into a deployable
-    package whose internal layout mirrors the catseyexi-client install exactly
+    package whose internal layout mirrors the client install exactly
     (``Game/FINAL FANTASY XI/ROM/...`` and ``Ashita/polplugins/DATs/ffxi-hd/ROM/...``),
     written to ``workspaces/packages/<ZoneName>_<version>.zip``.
 
@@ -4256,7 +4342,7 @@ def _package(params: dict) -> dict:
     dat = _resolve_dat(zone_rel)                       # pristine FFXI_DIR path
     ffxi_dir = Path(FFXI_DIR).resolve()
     rel = dat.resolve().relative_to(ffxi_dir)          # e.g. ROM/1/41.DAT
-    # catseyexi-client root = parent of "<root>/Game/FINAL FANTASY XI".
+    # Client-install root = parent of "<root>/Game/FINAL FANTASY XI".
     client_root = ffxi_dir.parent.parent
 
     # Human zone name for the filename (static table → workspace meta → key).

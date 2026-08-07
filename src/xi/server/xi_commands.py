@@ -9,7 +9,12 @@ import click
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 
-_DEFAULTS = dict(host="127.0.0.1", port=3306, user="root", password="xi", database="tpzdb")
+# Last-resort fallback, used only when no server checkout is configured and no XI_DB_*
+# override is set — in which case any guess is likely to fail anyway. "xidb" is the
+# name LandSandBoat's Quick Start Guide creates; "tpzdb" was the legacy Topaz name.
+# There is no meaningful cross-platform default for user/password (the guide uses
+# root on Windows and xi/password on Linux), so network.lua is the real source.
+_DEFAULTS = dict(host="127.0.0.1", port=3306, user="root", password="", database="xidb")
 
 #: ``XI_DB_*`` env var per credential field, for :func:`_env_creds`.
 _ENV_KEYS = {
@@ -47,7 +52,7 @@ def _env_creds() -> dict:
             out[field] = raw
     return out
 
-# Lua accepts either quote style and real checkouts mix them (CatsEyeXI ships
+# Lua accepts either quote style and real checkouts mix them (some ship
 # SQL_HOST = '127.0.0.1' single-quoted next to double-quoted SQL_LOGIN), so matching
 # only `"` silently dropped fields and fell back to the defaults.
 _LUA_PATTERNS = {
@@ -158,7 +163,7 @@ def _cred_opts(f):
         click.option("--port",     default=None, type=int, help="DB port  [default: 3306]"),
         click.option("--user", "-u", default=None, help="DB user  [default: root]"),
         click.option("--password", "-p", default=None, help="DB password"),
-        click.option("--database", "--db", default=None, help="DB schema  [default: tpzdb]"),
+        click.option("--database", "--db", default=None, help="DB schema  [default: from network.lua, else xidb]"),
     ]):
         f = opt(f)
     return f

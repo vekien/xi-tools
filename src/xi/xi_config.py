@@ -305,15 +305,16 @@ TEXTURE_CLAMP = int(os.environ.get('XI_TEXTURE_CLAMP', '2048'))
 CUSTOM_ROM     = os.environ.get('CUSTOM_FTABLE', 'ROM10')
 CUSTOM_ROM_IDX = int(CUSTOM_ROM[3:])   # 'ROM10' -> 10
 
-# ── Local dev server DB (LandSandBoat / CatsEyeXI "topaz" — tpzdb) ──────────
+# ── Local dev server DB (LandSandBoat — xidb) ───────────────────────────────
 # Used by `xi zone new` to auto-apply the generated zone-migration.sql to the
-# running dev server's database. Defaults match a stock local LSB/CatsEyeXI setup
-# (MariaDB on localhost, db=tpzdb, root/xi). Override per-machine via env.
+# running dev server's database. Defaults match a stock local LSB setup (MariaDB on
+# localhost, db=xidb per the Quick Start Guide). Override per-machine via env, or
+# better, point XI_SERVER_DIR at your checkout and let network.lua decide.
 DB_HOST     = os.environ.get('XI_DB_HOST', '127.0.0.1')
 DB_PORT     = int(os.environ.get('XI_DB_PORT', '3306'))
 DB_USER     = os.environ.get('XI_DB_USER', 'root')
 DB_PASSWORD = os.environ.get('XI_DB_PASSWORD', 'xi')
-DB_NAME     = os.environ.get('XI_DB_NAME', 'tpzdb')
+DB_NAME     = os.environ.get('XI_DB_NAME', 'xidb')
 # Auto-apply migrations on `zone new`. Default (unset/empty) attempts to apply when
 # the DB is reachable and skips gracefully otherwise; '0'/'false'/'no'/'off' disables.
 DB_AUTOAPPLY = os.environ.get('XI_DB_AUTOAPPLY', '').strip().lower() not in ('0', 'false', 'no', 'off')

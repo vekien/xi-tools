@@ -2,7 +2,7 @@
 
 The editor resolves a cutscene actor's model from its ``npc_list`` row (``look`` →
 :func:`xi.gear.xi_core.parse_look` → GLB). That table lives in the *server* database,
-so anyone without a local LSB/CatsEyeXI instance running gets no NPCs at all in the
+so anyone without a local LSB instance running gets no NPCs at all in the
 cutscene preview — the DB error is swallowed and every actor comes back
 ``hasModel: False``.
 
