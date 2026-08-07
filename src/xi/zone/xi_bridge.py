@@ -914,42 +914,73 @@ def _cutscene(params: dict) -> dict:
     return tl
 
 
-def _npc_look_rows(ids: list[int]) -> dict:
-    """Fetch ``{npcid: {name, look(bytes), pos, rot}}`` for the given npc ids.
+def _npc_look_rows(ids: list[int], detail: bool = False):
+    """Fetch ``{npcid: {name, look(bytes), pos, rot, source}}`` for the given npc ids.
 
-    Registered custom NPCs win over the live ``npc_list`` row (so a custom id never
-    silently renders as the retail NPC it collided with). Everything else comes from
-    ``npc_list``; still-missing ids fall back to the registry so a freshly-created
-    custom NPC renders on-stage before the SQL is ever applied."""
+    Resolution order, first hit per id wins:
+
+    1. **custom registry** — authoritative for anything we've registered, so a custom
+       id never silently renders as the retail NPC it collided with (and a freshly
+       created custom NPC renders on-stage before its SQL is ever applied);
+    2. **live ``npc_list``** — the server database, when one is reachable;
+    3. **bundled snapshot** — :mod:`xi.server.xi_npc_snapshot`, so the cutscene preview
+       still resolves NPC models with no server running at all.
+
+    ``source`` on each row records which of those answered. Pass ``detail=True`` to get
+    ``(rows, info)`` where ``info`` carries ``dbReachable`` and a per-source tally —
+    callers can't infer reachability from a non-empty result any more, now that the
+    snapshot fills in for an unreachable database."""
     ids = [int(i) for i in ids if i]
     if not ids:
-        return {}
+        return ({}, {"dbReachable": True, "sources": {}}) if detail else {}
     # Custom registry first — authoritative for anything we've registered.
-    out: dict = dict(_custom_npc_rows(ids))
+    out: dict = {}
+    for nid, row in _custom_npc_rows(ids).items():
+        out[nid] = {**row, "source": "custom"}
+
+    db_ok = True
     need = [i for i in ids if i not in out]
-    if not need:
-        return out
-    try:
-        conn = _db_connect({})
-    except Exception:
-        conn = None
-    if conn is not None:
+    if need:
         try:
-            with conn.cursor() as cur:
-                placeholders = ",".join(["%s"] * len(need))
-                cur.execute(
-                    f"SELECT npcid, name, look, pos_x, pos_y, pos_z, pos_rot "
-                    f"FROM npc_list WHERE npcid IN ({placeholders})", need)
-                for npcid, name, look, px, py, pz, rot in cur.fetchall():
-                    nm = name.decode("utf-8", "replace") if isinstance(name, (bytes, bytearray)) else name
-                    out[int(npcid)] = {"name": nm, "look": bytes(look or b""),
-                                       "pos": [float(px or 0), float(py or 0), float(pz or 0)],
-                                       "rot": int(rot or 0)}
+            conn = _db_connect({})
         except Exception:
-            pass
-        finally:
-            conn.close()
-    return out
+            conn = None
+        db_ok = conn is not None
+        if conn is not None:
+            try:
+                with conn.cursor() as cur:
+                    placeholders = ",".join(["%s"] * len(need))
+                    cur.execute(
+                        f"SELECT npcid, name, look, pos_x, pos_y, pos_z, pos_rot "
+                        f"FROM npc_list WHERE npcid IN ({placeholders})", need)
+                    for npcid, name, look, px, py, pz, rot in cur.fetchall():
+                        nm = name.decode("utf-8", "replace") if isinstance(name, (bytes, bytearray)) else name
+                        out[int(npcid)] = {"name": nm, "look": bytes(look or b""),
+                                           "pos": [float(px or 0), float(py or 0), float(pz or 0)],
+                                           "rot": int(rot or 0), "source": "db"}
+            except Exception:
+                db_ok = False
+            finally:
+                conn.close()
+
+    # Bundled snapshot backfills whatever is still missing — either the database is
+    # unreachable (no local server) or it simply has no row for that id.
+    still = [i for i in ids if i not in out]
+    if still:
+        try:
+            from xi.server import xi_npc_snapshot
+            for nid, row in xi_npc_snapshot.rows(still).items():
+                out[nid] = {**row, "source": "bundled"}
+        except Exception:
+            pass       # snapshot is a convenience layer; never let it break a lookup
+
+    if not detail:
+        return out
+    tally: dict = {}
+    for row in out.values():
+        src = row.get("source") or "db"
+        tally[src] = tally.get(src, 0) + 1
+    return out, {"dbReachable": db_ok, "sources": tally}
 
 
 # Built character GLBs, reused across actor requests: {look hex → (glb bytes, meta dict)}.
@@ -1908,7 +1939,7 @@ def _npc_defaults(params: dict) -> dict:
         seen.add(aid)
         uniq.append(aid)
     ids = uniq
-    rows = _npc_look_rows(ids)
+    rows, info = _npc_look_rows(ids, detail=True)
     out = []
     for aid in ids:
         row = rows.get(aid)
@@ -1916,7 +1947,7 @@ def _npc_defaults(params: dict) -> dict:
             out.append({"actorId": aid, "hasModel": False, "dbMissing": True})
             continue
         rec = {"actorId": aid, "name": row["name"], "pos": row["pos"], "rot": row["rot"],
-               "runtimePos": row["pos"] == [0.0, 0.0, 0.0]}
+               "runtimePos": row["pos"] == [0.0, 0.0, 0.0], "source": row.get("source")}
         try:
             from xi.gear.xi_core import parse_look
             lk = parse_look(row["look"])
@@ -1925,7 +1956,8 @@ def _npc_defaults(params: dict) -> dict:
         except Exception:
             rec["hasModel"] = False
         out.append(rec)
-    return {"ok": True, "actors": out, "dbReachable": bool(rows) or not ids}
+    return {"ok": True, "actors": out,
+            "dbReachable": info["dbReachable"], "npcSources": info["sources"]}
 
 
 def _cutscene_actors(params: dict) -> dict:
@@ -1966,7 +1998,7 @@ def _cutscene_actors(params: dict) -> dict:
         for aid in (b.get("actorIds") or []):
             tgt = ev_actor_id if (aid == 0x7FFFFFF8 and ev_actor_id) else aid
             motion_by_actor.setdefault(tgt, []).append({"frame": b["frame"], **m})
-    rows = _npc_look_rows(list(actors))
+    rows, npc_info = _npc_look_rows(list(actors), detail=True)
     for aid, a in actors.items():
         a["animTrack"] = anim_tracks.get(str(aid), [])   # [{frame, tag, op}] motion timeline
         a["motionClips"] = motion_clips.get(str(aid), {})  # {tag: {file_id, clip}} resolved clips
@@ -1979,6 +2011,7 @@ def _cutscene_actors(params: dict) -> dict:
             a["runtimePos"] = False
             a["posSource"] = "event"
         if row:
+            a["source"] = row.get("source")
             if "pos" not in a:
                 a["pos"] = row["pos"]
                 a["rot"] = row["rot"]
@@ -1995,7 +2028,8 @@ def _cutscene_actors(params: dict) -> dict:
             a["hasModel"] = False
             a["dbMissing"] = True
     ordered = sorted(actors.values(), key=lambda a: (a["showFrame"] is None, a["showFrame"] or 0))
-    return {"ok": True, "actors": ordered, "dbReachable": bool(rows) or not actors,
+    return {"ok": True, "actors": ordered,
+            "dbReachable": npc_info["dbReachable"], "npcSources": npc_info["sources"],
             "totalFrames": tl.get("totalFrames"), "fps": tl.get("fps")}
 
 

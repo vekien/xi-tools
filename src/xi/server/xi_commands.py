@@ -177,3 +177,83 @@ def status_cmd():
         click.echo(click.style("All processes running.", fg="green"))
     else:
         click.echo(click.style("Some processes are not running.", fg="yellow"))
+
+
+@click.command("npc-snapshot")
+@click.option("--sql", "sql_path", type=click.Path(path_type=Path), default=None,
+              help="npc_list mysqldump  [default: <XI_SERVER_DIR>/sql/npc_list.sql]")
+@click.option("--out", "out_path", type=click.Path(path_type=Path), default=None,
+              help="Output file  [default: the bundled src/xi/server/data/npc_list.json.gz]")
+@click.option("--source", "source", default=None,
+              help="Provenance label recorded in the file  [default: the dump path]")
+def npc_snapshot_cmd(sql_path, out_path, source):
+    """Rebuild the bundled npc_list snapshot from a server checkout's SQL dump.
+
+    The editor resolves a cutscene NPC's model from its npc_list row, which normally
+    needs a running server database. This bakes the six columns the preview needs
+    (npcid, name, look, pos_*) into a ~460 KB gzipped-JSON file that ships inside the
+    package, so cutscene NPCs render with no server at all. A reachable database still
+    wins. Inspect the result with: gzip -dc npc_list.json.gz | jq
+
+    Parses the dump directly — no database connection required.
+    """
+    from xi.server import xi_npc_snapshot as snap
+
+    if sql_path is None:
+        from xi.xi_config import XI_SERVER_DIR
+        if not XI_SERVER_DIR:
+            click.echo("XI_SERVER_DIR is not set — pass --sql /path/to/npc_list.sql", err=True)
+            sys.exit(1)
+        sql_path = Path(XI_SERVER_DIR) / "sql" / "npc_list.sql"
+    if not sql_path.is_file():
+        click.echo(f"Dump not found: {sql_path}", err=True)
+        sys.exit(1)
+
+    out_path = out_path or snap.default_path()
+
+    click.echo(f"Reading {sql_path} ({sql_path.stat().st_size / 1048576:.1f} MiB)")
+    stats: dict = {}
+    try:
+        rows = snap.parse_dump_file(sql_path, stats)
+    except ValueError as e:
+        click.echo(f"Could not parse dump: {e}", err=True)
+        sys.exit(1)
+    if not rows:
+        click.echo("No npc_list rows found in that dump — nothing written.", err=True)
+        sys.exit(1)
+
+    # Report what was dropped rather than quietly shipping a short table.
+    if stats.get("commented"):
+        click.echo(f"  skipped     : {stats['commented']} commented-out INSERT(s)")
+    if stats.get("duplicate"):
+        click.echo(f"  duplicates  : {stats['duplicate']} repeated npcid(s), last one wins")
+    if stats.get("malformed"):
+        click.echo(click.style(
+            f"  malformed   : {stats['malformed']} row(s) with an unexpected column count "
+            f"— skipped", fg="yellow"))
+
+    modelled = sum(1 for r in rows if any(r["look"]))
+    meta = {
+        "source": source or str(sql_path),
+        "generated": _utc_stamp(),
+    }
+    blob = snap.build(rows, meta)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(blob)
+
+    click.echo(f"  rows        : {len(rows)}")
+    click.echo(f"  with a look : {modelled}")
+    click.echo(f"  written     : {out_path}  ({len(blob) / 1024:.0f} KiB)")
+
+    # Read it straight back — a snapshot that fails to parse would degrade silently at
+    # runtime (the loader swallows errors by design), so catch it here instead.
+    check = snap.load(out_path)
+    if check is None or len(check) != len(rows):
+        click.echo("Verification FAILED — the file did not read back cleanly.", err=True)
+        sys.exit(1)
+    click.echo(click.style(f"  verified    : {len(check)} rows readable", fg="green"))
+
+
+def _utc_stamp() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

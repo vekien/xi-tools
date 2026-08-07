@@ -554,6 +554,7 @@ def server():
 
 server.add_command(server_cmds.db_cmd,     'db')
 server.add_command(server_cmds.status_cmd, 'status')
+server.add_command(server_cmds.npc_snapshot_cmd, 'npc-snapshot')   # bake the offline npc_list fallback
 
 
 if __name__ == "__main__":
