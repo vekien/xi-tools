@@ -9,19 +9,55 @@ import click
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 
-from xi.xi_config import XI_SERVER_DIR
-
-# Server checkout comes from XI_SERVER_DIR (env / .env) — no hardcoded default.
-_LUA_CONFIG = Path(XI_SERVER_DIR) / "settings" / "network.lua" if XI_SERVER_DIR else None
-
 _DEFAULTS = dict(host="127.0.0.1", port=3306, user="root", password="xi", database="tpzdb")
 
+#: ``XI_DB_*`` env var per credential field, for :func:`_env_creds`.
+_ENV_KEYS = {
+    "host": "XI_DB_HOST", "port": "XI_DB_PORT", "user": "XI_DB_USER",
+    "password": "XI_DB_PASSWORD", "database": "XI_DB_NAME",
+}
+
+
+def lua_config_path() -> Path | None:
+    """``<XI_SERVER_DIR>/settings/network.lua``, or ``None`` when unconfigured.
+
+    Resolved per call rather than at import: the zone-editor setup writes ``.env`` and
+    hot-reloads :mod:`xi.xi_config` in the running bridge, so a module-level constant
+    would pin whatever XI_SERVER_DIR happened to be at startup."""
+    from xi.xi_config import XI_SERVER_DIR
+    return Path(XI_SERVER_DIR) / "settings" / "network.lua" if XI_SERVER_DIR else None
+
+
+def _env_creds() -> dict:
+    """Explicit ``XI_DB_*`` overrides. Blank/unset keys are omitted, not defaulted —
+    otherwise an unset password would masquerade as a deliberate choice and shadow
+    network.lua."""
+    import os
+    out: dict = {}
+    for field, env in _ENV_KEYS.items():
+        raw = (os.environ.get(env) or "").strip()
+        if not raw:
+            continue
+        if field == "port":
+            try:
+                out[field] = int(raw)
+            except ValueError:
+                continue
+        else:
+            out[field] = raw
+    return out
+
+# Lua accepts either quote style and real checkouts mix them (CatsEyeXI ships
+# SQL_HOST = '127.0.0.1' single-quoted next to double-quoted SQL_LOGIN), so matching
+# only `"` silently dropped fields and fell back to the defaults.
 _LUA_PATTERNS = {
-    "host":     r'SQL_HOST\s*=\s*"([^"]+)"',
-    "port":     r'SQL_PORT\s*=\s*(\d+)',
-    "user":     r'SQL_LOGIN\s*=\s*"([^"]+)"',
-    "password": r'SQL_PASSWORD\s*=\s*"([^"]+)"',
-    "database": r'SQL_DATABASE\s*=\s*"([^"]+)"',
+    "host":     r"""SQL_HOST\s*=\s*['"]([^'"]+)['"]""",
+    "port":     r"""SQL_PORT\s*=\s*(\d+)""",
+    "user":     r"""SQL_LOGIN\s*=\s*['"]([^'"]+)['"]""",
+    # `*` not `+`: an empty SQL_PASSWORD is a legitimate dev setup, and it must win
+    # over the default rather than being treated as "not found".
+    "password": r"""SQL_PASSWORD\s*=\s*['"]([^'"]*)['"]""",
+    "database": r"""SQL_DATABASE\s*=\s*['"]([^'"]+)['"]""",
 }
 
 
@@ -41,7 +77,15 @@ def _read_lua_creds(path: Path | None) -> dict:
 
 
 def _resolve(host, port, user, password, database) -> tuple:
-    creds = {**_DEFAULTS, **_read_lua_creds(_LUA_CONFIG)}
+    """Resolve DB credentials. Precedence, last wins:
+
+    hardcoded defaults → ``<XI_SERVER_DIR>/settings/network.lua`` → ``XI_DB_*`` env
+    → explicit arguments.
+
+    network.lua sits above the defaults because a server checkout is the authoritative
+    source for its own database; ``XI_DB_*`` sits above network.lua because setting it
+    is a deliberate act (the zone-editor setup writes it only when you fill the field)."""
+    creds = {**_DEFAULTS, **_read_lua_creds(lua_config_path()), **_env_creds()}
     return (
         host     or creds["host"],
         port     or creds["port"],
@@ -49,6 +93,27 @@ def _resolve(host, port, user, password, database) -> tuple:
         password or creds["password"],
         database or creds["database"],
     )
+
+
+def resolved_creds() -> dict:
+    """``{host, port, user, database, source}`` for the setup UI — no password.
+
+    ``source`` names where the effective values came from, so the wizard can say "read
+    from network.lua" rather than showing defaults that may not work.
+
+    An ``XI_DB_*`` value only counts as an override when it actually *differs* from
+    what network.lua declares. ``.env`` keys are loaded with ``os.environ.setdefault``
+    and the shipped ``.env.sample`` pre-fills XI_DB_*, so presence alone would label
+    every install "custom" and hide the fact that network.lua is really in charge."""
+    lua = _read_lua_creds(lua_config_path())
+    env = _env_creds()
+    differs = {k: v for k, v in env.items() if not lua or lua.get(k) != v}
+    h, p, u, _pw, db = _resolve(None, None, None, None, None)
+    source = "override" if differs else ("network.lua" if lua else "default")
+    return {"host": h, "port": p, "user": u, "database": db, "source": source,
+            "luaPath": str(lua_config_path() or ""),
+            "hasOverride": bool(differs),
+            "overriddenFields": sorted(differs)}
 
 
 def _connect(host, port, user, password, database):

@@ -281,6 +281,10 @@ def handle_command(method: str, params: dict):
         return _env_pick_path(params)          # folder or file picker for env fields
     if method == "env.validate":
         return _env_validate(params)           # live path checks for green ticks
+    if method == "env.testDb":
+        return _env_test_db(params)            # setup wizard "Test connection" probe
+    if method == "env.serverCreds":
+        return _env_server_creds(params)       # read a checkout's network.lua for pre-fill
     if method == "editor.loadSettings":
         return _editor_load_settings(params)   # local per-user view-state (editor.json)
     if method == "editor.saveSettings":
@@ -3272,11 +3276,21 @@ def _workspace_status(params: dict) -> dict:
 # ── First-run .env setup (FFXI_DIR etc.) ──────────────────────────────────────
 
 # Keys the zone-editor setup form cares about (subset of .env.app).
+#: Keys the zone-editor setup wizard owns. Anything not listed here is preserved
+#: untouched by :func:`_write_env_file` — notably BLENDER_PATH, which the editor never
+#: needs (its GLB→DAT injector is pure Python; only CLI FBX work shells out to Blender)
+#: but CLI users may well have set. Listing a key here means "blank clears it", so
+#: adding one the wizard doesn't collect would silently wipe it.
 _ENV_SETUP_KEYS = (
     "FFXI_DIR",
     "FFXI_HD_DIR",
     "FFXI_PIVOT_DIR",
-    "BLENDER_PATH",
+    "XI_SERVER_DIR",
+    "XI_DB_HOST",
+    "XI_DB_PORT",
+    "XI_DB_USER",
+    "XI_DB_PASSWORD",
+    "XI_DB_NAME",
 )
 
 
@@ -3384,17 +3398,32 @@ def _env_status(params: dict) -> dict:
             except OSError:
                 pass
 
+    server_dir = _get("XI_SERVER_DIR")
+    server_ok = bool(server_dir) and (Path(server_dir) / "settings" / "network.lua").is_file()
+    try:
+        from xi.server.xi_commands import resolved_creds
+        db_info = resolved_creds()
+    except Exception:
+        db_info = {}
+
     return {
         "ok": True,
         "envFile": str(_env_file_path()),
         "needsSetup": not ffxi_ok,
         "ffxiOk": ffxi_ok,
         "dllOk": dll_ok,
+        "serverOk": server_ok,
+        "db": db_info,
         "values": {
             "FFXI_DIR": ffxi,
             "FFXI_HD_DIR": _get("FFXI_HD_DIR"),
             "FFXI_PIVOT_DIR": _get("FFXI_PIVOT_DIR"),
-            "BLENDER_PATH": _get("BLENDER_PATH"),
+            "XI_SERVER_DIR": server_dir,
+            "XI_DB_HOST": _get("XI_DB_HOST"),
+            "XI_DB_PORT": _get("XI_DB_PORT"),
+            "XI_DB_USER": _get("XI_DB_USER"),
+            "XI_DB_PASSWORD": _get("XI_DB_PASSWORD"),
+            "XI_DB_NAME": _get("XI_DB_NAME"),
         },
     }
 
@@ -3490,12 +3519,118 @@ def _env_validate(params: dict) -> dict:
             return {"ok": True, "valid": False, "detail": "Expected blender.exe"}
         return {"ok": True, "valid": True, "detail": "Blender found"}
 
+    if key == "XI_SERVER_DIR":
+        if not p.is_dir():
+            return {"ok": True, "valid": False, "detail": "Not a folder"}
+        lua = p / "settings" / "network.lua"
+        if not lua.is_file():
+            return {"ok": True, "valid": False,
+                    "detail": "No settings/network.lua here — is this the server checkout?"}
+        return {"ok": True, "valid": True, "detail": "Found settings/network.lua"}
+
     if key in ("FFXI_HD_DIR", "FFXI_PIVOT_DIR"):
         if not p.is_dir():
             return {"ok": True, "valid": False, "detail": "Not a folder"}
         return {"ok": True, "valid": True, "detail": "Folder OK"}
 
     return {"ok": True, "valid": p.exists(), "detail": ""}
+
+
+def _friendly_db_error(exc: Exception) -> str:
+    """Translate pymysql connection failures into something a user can act on.
+
+    MariaDB answers a wrong username/password with ``auth_gssapi_client not
+    configured`` rather than "access denied" (it avoids confirming whether an account
+    exists). Taken at face value that reads like a missing Kerberos dependency, which
+    is exactly the wrong thing to go fix."""
+    msg = str(exc)
+    if "auth_gssapi_client" in msg:
+        return ("Wrong username or password. (MariaDB reports a failed login as an "
+                "'auth_gssapi_client' plugin error rather than access denied.)")
+    if "Access denied" in msg:
+        return "Access denied — check the username and password."
+    if "Unknown database" in msg:
+        return "That database does not exist on the server."
+    if any(s in msg for s in ("Can't connect", "Connection refused", "timed out", "WinError 10061")):
+        return "Could not reach the server — is it running, and are the host and port right?"
+    return msg
+
+
+def _env_test_db(params: dict) -> dict:
+    """``env.testDb`` — try a real connection and report what happened.
+
+    Called by the setup wizard before saving, so a bad credential surfaces here as a
+    clear message instead of later as silently-missing NPCs. Any field left blank
+    falls through the normal resolution chain (network.lua, then defaults)."""
+    try:
+        import pymysql
+    except ImportError:
+        return {"ok": False, "error": "pymysql is not installed in the bridge's Python environment."}
+    from xi.server.xi_commands import _resolve
+
+    def _opt(key):
+        v = params.get(key)
+        v = str(v).strip() if v is not None else ""
+        return v or None
+
+    port_raw = _opt("port")
+    try:
+        port_in = int(port_raw) if port_raw else None
+    except ValueError:
+        return {"ok": False, "error": f"Port must be a number, got {port_raw!r}."}
+
+    host, port, user, password, database = _resolve(
+        _opt("host"), port_in, _opt("user"), _opt("password"), _opt("database"))
+    where = {"host": host, "port": port, "user": user, "database": database}
+
+    try:
+        conn = pymysql.connect(host=host, port=int(port), user=user, password=password,
+                               database=database, charset="utf8mb4", connect_timeout=5)
+    except Exception as exc:
+        return {"ok": False, "error": _friendly_db_error(exc), **where}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT VERSION()")
+            version = (cur.fetchone() or ("",))[0]
+            try:
+                cur.execute("SELECT COUNT(*) FROM npc_list")
+                npc_rows = int((cur.fetchone() or (0,))[0])
+            except Exception:
+                npc_rows = None      # connected, but not an FFXI schema
+    finally:
+        conn.close()
+
+    if npc_rows is None:
+        return {"ok": False, **where,
+                "connected": True,
+                "error": f"Connected to '{database}', but it has no npc_list table — "
+                         f"is that the right database?"}
+    return {"ok": True, **where, "version": str(version), "npcRows": npc_rows}
+
+
+def _env_server_creds(params: dict) -> dict:
+    """``env.serverCreds`` — read ``settings/network.lua`` so the wizard can pre-fill.
+
+    ``{path}`` points at a server checkout root; omitted, the configured XI_SERVER_DIR
+    is used. Never returns an error for a merely-unconfigured path — the wizard treats
+    this as best-effort pre-fill, not validation."""
+    from xi.server.xi_commands import _read_lua_creds, lua_config_path
+    root = (params.get("path") or "").strip()
+    lua = (Path(root) / "settings" / "network.lua") if root else lua_config_path()
+    if not lua or not lua.is_file():
+        return {"ok": False, "found": False,
+                "error": "No settings/network.lua in that folder.", "path": str(lua or "")}
+    creds = _read_lua_creds(lua)
+    if not creds:
+        return {"ok": False, "found": True, "path": str(lua),
+                "error": "Found network.lua, but no SQL_* settings inside it."}
+    return {"ok": True, "found": True, "path": str(lua), "values": {
+        "XI_DB_HOST": creds.get("host", ""),
+        "XI_DB_PORT": str(creds.get("port", "") or ""),
+        "XI_DB_USER": creds.get("user", ""),
+        "XI_DB_PASSWORD": creds.get("password", ""),
+        "XI_DB_NAME": creds.get("database", ""),
+    }}
 
 
 def _env_save(params: dict) -> dict:
@@ -3505,12 +3640,19 @@ def _env_save(params: dict) -> dict:
     raw = params.get("values") or {}
     if not isinstance(raw, dict):
         return {"ok": False, "error": "values must be an object"}
-    updates = {k: str(raw.get(k) or "").strip() for k in _ENV_SETUP_KEYS}
-    ffxi = updates.get("FFXI_DIR") or ""
-    if not ffxi:
-        return {"ok": False, "error": "FFXI_DIR is required — choose your FINAL FANTASY XI folder."}
-    if not Path(ffxi).is_dir():
-        return {"ok": False, "error": f"FFXI_DIR is not a folder:\n{ffxi}"}
+    # Only touch keys the caller actually sent. The setup wizard saves one step at a
+    # time, so materialising the whole key set here would blank every field the step
+    # being saved doesn't render.
+    updates = {k: str(raw.get(k) or "").strip() for k in _ENV_SETUP_KEYS if k in raw}
+    if not updates:
+        return {"ok": False, "error": "no recognised keys in 'values'"}
+
+    if "FFXI_DIR" in updates:
+        ffxi = updates["FFXI_DIR"]
+        if not ffxi:
+            return {"ok": False, "error": "FFXI_DIR is required — choose your FINAL FANTASY XI folder."}
+        if not Path(ffxi).is_dir():
+            return {"ok": False, "error": f"FFXI_DIR is not a folder:\n{ffxi}"}
 
     env_path = _env_file_path()
     try:
