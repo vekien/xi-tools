@@ -144,6 +144,8 @@ stay stable and the file remains order-independent.
 
 ## See also
 
+- [README.md](README.md) — the full `xi dll` command tree
+- [unpack.md](unpack.md) / [pack.md](pack.md) — produce the PE you patch, then re-pack it for the game
 - [ffximain/inventory.md](../ffximain/inventory.md) — the 80→120 change this patch encodes, with root-cause analysis
 - [ffximain/ffximain_inventory.patch](../ffximain/ffximain_inventory.patch) — the patch file itself (183 edits)
 - [ffximain/dll.md](../ffximain/dll.md) — the shared `xi dll` unpack/pack workflow (POL1)
