@@ -272,7 +272,7 @@ ProcMon read-counts from a boot trace in parens — higher = hit more often.
 * Packed with the POL1 packer; `.text` is LZSS-compressed in section `POL1`.
 * Unpack with `xi dll ffximain` tools → `pol_decompressed.bin`/`.txt` for analysis.
 * Holds the monster modelid→file_id formula and gear lookup tables (not in any DAT).
-* Detail: [reference/ffximain.md](reference/ffximain.md)
+* Detail: [ffximain/ffximain.md](ffximain/ffximain.md)
 
 ---
 

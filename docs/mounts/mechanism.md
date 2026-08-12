@@ -30,7 +30,7 @@ Reference (xim client reimpl): `ActorMountEvent.kt` → `ModelLook.fileTableInde
 → `FileTableManager.getFilePath(fileId)` (`FTable.kt`).
 
 This is **not** the monster/gear model-id space. Monster modelids go through the
-`98239 + modelid` formula (see [../reference/ffximain.md](../reference/ffximain.md)); gear is a
+`98239 + modelid` formula (see [../ffximain/ffximain.md](../ffximain/ffximain.md)); gear is a
 12-bit field (≤4095). Mounts bypass both and index FTABLE directly — the base ≈ 102705 is far
 above either range. The "4096" ceiling people cite is the gear/model-id space and is irrelevant
 to mounts.
@@ -229,7 +229,7 @@ The menu can't show more than 64 owned mounts without patching the client. Requi
   **RE lead (atom0s XiPackets 0x00AE):** the client copies `MountDataTbl` into
   `PTR_pGlobalNowZone->MountSys.MountDataTbl` and reads that buffer for "castable mounts". Search
   `MountSys` / `MountDataTbl` / `pGlobalNowZone` in the `xi dll ffximain unpack` → Ghidra output
-  ([../reference/ffximain.md](../reference/ffximain.md)). Also watch for a clamp-to-63 (chocobo) fallback.
+  ([../ffximain/ffximain.md](../ffximain/ffximain.md)). Also watch for a clamp-to-63 (chocobo) fallback.
 
 Widening `m_mountId` to a `uint16` is a *further, separate* job, only needed for **>255 distinct
 models** — not for the menu.
@@ -263,5 +263,5 @@ work and gaps fail for the right reason. Files leaning on `MOUNT_MAX`: `scripts/
 - **cpp-patches** (`D:\xi-server\xi-modules\cpp-patches`) — server-side git-diff patches applied
   to the CatsEyeXI source via dbtool. Server only; order-dependent. Use for the `0x0ae` widen and for
   edits to existing upstream Lua so they survive merges. Net-new Lua files can be plain.
-- **FFXiMain.dll RE** — [../reference/ffximain.md](../reference/ffximain.md) (POL1 unpacker, Ghidra/IDA
+- **FFXiMain.dll RE** — [../ffximain/ffximain.md](../ffximain/ffximain.md) (POL1 unpacker, Ghidra/IDA
   workflow, xiclient symbol cross-reference). ROM10 is confirmed to load.

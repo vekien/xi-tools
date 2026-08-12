@@ -65,7 +65,7 @@ that eventually confirmed the 4-range lookup function at VA `0x100C513D` in
 → See [reference/model-file-ids.md](../reference/model-file-ids.md) for the
 full formula explanation and file_id space map.
 
-→ See [reference/ffximain.md](../reference/ffximain.md) for how the formula
+→ See [ffximain/ffximain.md](../ffximain/ffximain.md) for how the formula
 was confirmed from the decompiled DLL.
 
 ---

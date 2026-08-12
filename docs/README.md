@@ -273,10 +273,12 @@ Core lookup tables and named-DAT catalog.
 | [reference/model-file-ids.md](reference/model-file-ids.md) | FTABLE/VTABLE structure, modelid formula, custom ID ranges |
 | [reference/named-dats.md](reference/named-dats.md) | fileId catalog: string tables, system messages, per-zone event/entity ranges |
 | [reference/dat_sections.md](reference/dat_sections.md) | DAT section type reference |
-| [reference/dll.md](reference/dll.md) | `xi dll` category: shared POL1 unpack/pack for FFXiMain / polcore / app |
-| [reference/ffximain.md](reference/ffximain.md) | FFXiMain.dll: POL1 algorithm, gear groups, model formulas, Ghidra |
-| [reference/polcore.md](reference/polcore.md) | polcore.dll: PlayOnline COM host, IPOLCoreCom, base collision with FFXiMain |
-| [reference/app.md](reference/app.md) | app.dll: PlayOnline Viewer UI / apps module |
+| [ffximain/dll.md](ffximain/dll.md) | `xi dll` category: shared POL1 unpack/pack for FFXiMain / polcore / app |
+| [ffximain/ffximain.md](ffximain/ffximain.md) | FFXiMain.dll: POL1 algorithm, gear groups, model formulas, Ghidra |
+| [ffximain/polcore.md](ffximain/polcore.md) | polcore.dll: PlayOnline COM host, IPOLCoreCom, base collision with FFXiMain |
+| [ffximain/app.md](ffximain/app.md) | app.dll: PlayOnline Viewer UI / apps module |
+| [ffximain/inventory.md](ffximain/inventory.md) | FFXiMain.dll 80→120 inventory expansion: relocation root cause, object-relative patching, what's left |
+| [dll/patch.md](dll/patch.md) | `xi dll … patch`: apply a replayable `va/expect/replace` `.patch` to an unpacked DLL |
 | [common_crashes.md](common_crashes.md) | Client crash diagnosis: overlay table shadowing, scene-file churn, FFXI-2003 |
 
 ---

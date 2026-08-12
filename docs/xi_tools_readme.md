@@ -244,11 +244,12 @@ Simplified flow:
 
 Decompress the POL1-packed `.text` section of FFXiMain.dll for static analysis. Research only — the game loads the original packed DLL.
 
-- `uv run xi dll list` ([docs](reference/dll.md)) — Resolve packed paths for FFXiMain / polcore / app
-- `uv run xi dll ffximain unpack` ([docs](reference/ffximain.md)) — Write `FFXiMain_unpacked.dll` as a valid PE (load in Ghidra/IDA, image base `0x10000000`)
-- `uv run xi dll polcore unpack` / `xi dll app unpack` ([docs](reference/polcore.md), [app.md](reference/app.md)) — Same POL1 unpack for Viewer modules
+- `uv run xi dll list` ([docs](ffximain/dll.md)) — Resolve packed paths for FFXiMain / polcore / app
+- `uv run xi dll ffximain unpack` ([docs](ffximain/ffximain.md)) — Write `FFXiMain_unpacked.dll` as a valid PE (load in Ghidra/IDA, image base `0x10000000`)
+- `uv run xi dll polcore unpack` / `xi dll app unpack` ([docs](ffximain/polcore.md), [app.md](ffximain/app.md)) — Same POL1 unpack for Viewer modules
 - `uv run xi dll ffximain pack` / `polcore pack` / `app pack` — Re-compress `.text` into game-loadable POL1
-- `uv run xi dll ffximain text-dump` ([docs](reference/ffximain.md)) — Write `pol_decompressed.bin` + full disassembly `.txt` (~45 MB, ~2–3 min)
+- `uv run xi dll ffximain patch` ([docs](dll/patch.md)) — Apply a replayable `va/expect/replace` `.patch` to an unpacked DLL (e.g. the [80→120 inventory](ffximain/inventory.md) expansion)
+- `uv run xi dll ffximain text-dump` ([docs](ffximain/ffximain.md)) — Write `pol_decompressed.bin` + full disassembly `.txt` (~45 MB, ~2–3 min)
 - `uv run xi dll ffximain crashdump` — Parse Windows minidumps next to `%LOCALAPPDATA%\CrashDumps`
 
 ## Research
