@@ -1,0 +1,200 @@
+# ffximain_inventory.patch
+# FFXI 80 -> 120 slot inventory expansion for FFXiMain.dll (UNPACKED, image base 0x10000000).
+# Storage (object-relative 121-slot table) + all container-window UIs (main inventory, Mog Safe,
+# Satchel/Sack/Case, etc.). See docs/ffximain/inventory.md for the full write-up.
+#
+# Apply:  xi dll ffximain unpack --output FFXiMain_unpacked.dll
+#         xi dll ffximain patch --unpacked FFXiMain_unpacked.dll --patch ffximain_inventory.patch --output FFXiMain_patched.dll
+#         xi dll ffximain pack --template FFXiMain.dll --unpacked FFXiMain_patched.dll --output FFXiMain.dll
+#
+# Format (one edit per line):  <va> <expect_hex> <replace_hex>  ; <note>
+#   va          virtual address (image base 0x10000000)
+#   expect_hex  bytes that MUST be present before patching (aborts on mismatch)
+#   replace_hex bytes to write (same length as expect)
+# Lines starting with # are comments. Re-applying is safe: already-patched edits are skipped.
+#
+# 183 edits, 634 bytes changed. Generated from clean unpack -> fully-patched build.
+
+0x10094101 5c08 0010  ; Mog Safe window: alloc size 0x85c->0x1000
+0x100df83f 51 79  ; storage: outbound action slot-bound 0x50/0x51->0x78/0x79
+0x100e934f 8d04c08d04c0 6bc079909090  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100e9361 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100e9369 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb04a 7b40 965d  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb052 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb06f 36980000fec03c51 f221f8fffec03c79  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb098 8d04c0 6bc079  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb0a1 8d04c0 909090  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb0b2 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb105 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb110 ec0d cc14  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb138 8bc1c1e00503c18d04408d0cc0 69c93305000090909090909090  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb14d 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb178 51 79  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb199 51 79  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb401 8c980000 4822f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb456 8c980000 4822f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100eb4e2 8bc656c1e00503c68d04408d04c08dbc878c980000 69c63305000056909090909090908dbc874822f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ebad0 a63e 965d  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ebadb 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec0ef 8d04c08d04c0 6bc079909090  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec106 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec14f 8d04c08d04c0 6bc079909090  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec166 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec16e 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec231 8d04c0 6bc079  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec23c 8d04c0 909090  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100ec250 60980000 1c22f8ff  ; storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative
+0x100f7840 50 78  ; storage: outbound action slot-bound 0x50/0x51->0x78/0x79
+0x100f7a7e 50 78  ; storage: outbound action slot-bound 0x50/0x51->0x78/0x79
+0x101646b6 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x101646db bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164700 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164725 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x1016474a bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x1016476f bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164794 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x101647b9 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x101647de bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164803 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164828 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x1016484d bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164872 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164897 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x101648bc bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x101648e1 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x10164906 bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x1016492b bc13 0020  ; container windows: alloc size 0x13bc->0x2000 (per container)
+0x101a5e7a 8bc1c1e00503c15657518d04408d04c08db4828c980000 69c133050000565751909090909090908db4824822f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101a5eec 8c980000 4822f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101a5f84 c1e00503c7578d04408d04c08db4818c980000 69c7330500005790909090908db4814822f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101c9f27 8d04c08d34c103c6 6bc07903c1909090  ; storage: bag-walk / getSize-caller, object-relative
+0x101c9f38 60980000 1c22f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101c9fac 60980000 1c22f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101c9fed 60980000 1c22f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101ca078 60980000 1c22f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101ca138 60980000 1c22f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101d12fa 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1369 5c05 e00b  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1370 5c05 e00b  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1517 d4020000b951 18080000b979  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1522 78fd 34f8  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1537 a2 f2  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d153f 5c05 e00b  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1bd0 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1cc1 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1db8 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1ea9 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1f55 8d04c0 6bc079  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1f5e 8d04c0 909090  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d1f7c 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2000 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2090 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2111 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2155 8d04c0 6bc079  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2161 8d04c0 909090  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d21e5 8d04c0 6bc079  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d21ef 8d04c0 909090  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d23b7 8d04c08d04c0 6bc079909090  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d249c 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d24ff 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2536 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d259e 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d25e6 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d25ec 44 e4  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2632 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2638 44 e4  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2681 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2687 44 e4  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2f81 d402 1808  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d2f93 d402 1808  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d375d 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d38bd 8d04c08d04c0 6bc079909090  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d38f6 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101d3a18 51 79  ; Mog Safe window UI: widen 3 per-slot arrays 81->121
+0x101ee4ab c1e00503c5558d04408d04c08dbc818c980000 69c5330500005590909090908dbc814822f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101ee81f 8c980000 4822f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x101ee974 8c980000 4822f8ff  ; storage: bag-walk / getSize-caller, object-relative
+0x1021a3ea 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a400 a2 f2  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a406 8802 c803  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a40c 8802 c803  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a425 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a4cd 8802 c803  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a4e4 6813 041d  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a4f0 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a5c8 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a5d5 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a5e7 a2 f2  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a5ed 8802 c803  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a5f3 8802 c803  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a634 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a6c2 6813 041d  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a6d4 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a726 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a75f 04080000bf51 000c0000bf79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a7ad e601 d602  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a7b9 8802 c803  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a7bf 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a7c6 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a7cc 2412 201b  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a7d9 6813 041d  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021a83c 24120000bf51 201b0000bf79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021aa6f 2412 201b  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ab4e 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ac1f 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ac95 6813 041d  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021acc1 51736a8d14f6 79736a6bfe79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021accc 8d3cd2 909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021acd6 0a08 060c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ace5 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021acfe 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ad67 6813 041d  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ad7d 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ad92 8d2cff8d6ced00 6bef7990909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021adaa 0a08 060c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ade8 0c08 080c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021adf1 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021adf7 1008 0c0c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021adfd 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ae16 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021ae1d 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af08 8d04c08d0cc0 6bc879909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af17 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af1f 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af28 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af2f 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af45 8d04c08d1cc103c38b9cc20408 6bc07903c19090908b9cc2000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af5c 0c08 080c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af62 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af68 1008 0c0c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af71 8d04c08d4cc50003c1 6bc07903c590909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af81 0c08 080c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021af8c 1008 0c0c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021afba 8d34dbb9a2 6bf379b9f2  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021afc4 8d34f68dbcf20408 9090908dbcf2000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021afd3 8d04c08d04c0 6bc079909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021afdd 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021afe6 8d04c08d0cc0c784ca0408 6bc879909090c784ca000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021affa 8d04c08d04c0c684c20a08 6bc079909090c684c2060c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b043 8d04c08d04c0 6bc079909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b04f 0808 040c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b05c 8d04c08d04c0 6bc079909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b067 0a08 060c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b074 8d04c08d04c0 6bc079909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b082 0408 000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b0a0 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b0d1 8d04c98d0cc08d94ca0c08 6bc9799090908d94ca080c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b13b 8d34f6 6bce79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b149 8d0cf68d8ccf0408 9090908d8ccf000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b1b5 8d04c0558d04c08dacc60408 6bc079559090908dacc6000c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b25b 8d04c08d04c0 6bc079909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b266 0a08 060c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b29b 8d04c08d04c0 6bc079909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b2a6 0a08 060c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b2c7 8d04c08d04c0 6bc079909090  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b2d2 0a08 060c  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b2df 51 79  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b2ee 2412 201b  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b2f5 2412 201b  ; container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121
+0x1021b330 c1e00503c18d04408d04c08db4828c980000 69c13305000090909090908db4824822f8ff  ; storage: bag-walk / getSize-caller, object-relative
