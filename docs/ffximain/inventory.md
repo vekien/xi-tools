@@ -308,10 +308,26 @@ via the PE section table of whatever DLL you point `--unpacked` at.
 Everything below either isn't verified to 120 yet, or is a known loose end. This
 is the to-do list, not a claim that any of it is broken.
 
-- **HD-edition duplicate code.** There appears to be a second copy of some of
-  these routines up around `0x10ae…` (HD client path). The patch does **not**
-  touch it. If the HD renderer path is ever exercised, those sites may still
-  assume 81. Confirm whether this build reaches that code.
+- **12 cold-path table reads still at the old displacement.** The storage core
+  (getItem / init / iterator / free-slot) is fully patched, which is why normal
+  play works. But a binary diff of clean vs. the deployed build shows **12**
+  object-relative reads of the item table (`mov …,[obj + idx*4 + 0x9860]`) that
+  fall outside the displacement-shift ranges and are still reading at the retail
+  `0x9860` offset — i.e. the *old* table location, not the moved 121-slot table:
+
+  ```
+  0x100eb791  0x100eb834  0x100ebbb0  0x100ebbe9  0x100ebc28  0x100ebc46
+  0x100ec361  0x100ec386  0x100ec3a9  0x100ec3d7  0x100ec407  0x100f8606
+  ```
+
+  These are secondary handlers (not the hot getItem/iterator path), so they
+  aren't exercised by the flows tested so far — but any one of them will read
+  stale/garbage for a moved slot when it *is* hit (a specific packet type,
+  sort/search-by-id, etc.). Fix = extend the disp-shift (`+SHIFT`) to cover these
+  sites, same as the core. This is the concrete "what's left," and it supersedes
+  the earlier hunch about an "HD-edition duplicate around `0x10ae`" — a byte scan
+  found nothing of the sort there; that region and a `0x1018a…` cluster were
+  false positives (unrelated integer-multiply math, not inventory indexing).
 - **Mog Safe 2 (`location 9`) / Storage (`location 2`) container sizes.** The
   storage core is size-driven (getSize is raw), so these *should* follow, but
   they haven't each been individually filled to 120 and eyeballed. Run
