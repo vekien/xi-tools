@@ -14,7 +14,7 @@ xi bridge
 xi dats
 xi entity
 xi event
-xi ffximain
+xi dll
 xi ftable
 xi fx
 xi gear
@@ -359,13 +359,29 @@ xi event dialogue edit
 xi event dialogue reset
 ```
 
-## FFXiMain / Launcher / Utils
+## Client DLLs (POL1) / Launcher / Utils
+
+POL1-packed modules. Docs: `docs/reference/dll.md`, `ffximain.md`, `polcore.md`, `app.md`.
 
 ```text
-xi ffximain unpack
-xi ffximain text-dump
-xi ffximain gear-groups
-xi ffximain gear-patch
+xi dll list
+xi dll ffximain unpack
+xi dll ffximain pack
+xi dll ffximain text-dump
+xi dll ffximain gear-groups
+xi dll ffximain gear-patch
+xi dll ffximain crashdump
+xi dll ffximain crashdump --list
+xi dll polcore unpack
+xi dll polcore pack
+xi dll app unpack
+xi dll app pack
+
+# examples
+xi dll polcore unpack --dll PATH --output misc/polcore_unpacked.dll
+xi dll ffximain pack --unpacked misc/FFXiMain_unpacked.dll --template PATH
+xi dll ffximain crashdump
+xi dll ffximain crashdump path/to/pol.exe.1234.dmp
 
 xi launcher ui-themes
 

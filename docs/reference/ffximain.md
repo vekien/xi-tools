@@ -4,6 +4,10 @@
 
 `FFXiMain.dll` is packed with a **custom Square Enix packer** (not SecuROM directly — SecuROM is only the disc authentication layer). The packer compresses the `.text` section using a simple LZSS variant and stores the result in a new section called `POL1`. The `.text` section is empty on disk and is reconstructed in memory at load time by the unpacker stub.
 
+> **CLI category:** all client DLL tools live under **`xi dll …`** (not a top-level
+> `xi ffximain`). Shared unpack/pack for FFXiMain, polcore, and app is documented in
+> [dll.md](dll.md). Sibling modules: [polcore.md](polcore.md), [app.md](app.md).
+
 ---
 
 ## PE Section Layout
@@ -60,23 +64,23 @@ def lzss_decompress(src: bytes, dst_size: int) -> bytes:
 - `bit = 0` → copy `length` bytes from `output[current - offset]` to output
 - `offset = 0` is the end-of-stream sentinel
 
-Verified: `xi ffximain unpack` produces exactly 3,305,838 bytes of `.text` that
+Verified: `xi dll ffximain unpack` produces exactly 3,305,838 bytes of `.text` that
 disassemble as valid x86 code.
 
 ---
 
 ## Unpacking Tools
 
-Lead with the **CLI** (`xi ffximain …`). All outputs are **research only** — the
+Lead with the **CLI** (`xi dll ffximain …`). All outputs are **research only** — the
 game loads the original packed DLL, not any of these.
 
-### `xi ffximain unpack`
+### `xi dll ffximain unpack`
 
 Decompresses POL1 and writes a fully patched **`FFXiMain_unpacked.dll`**.
 
 ```
-uv run xi ffximain unpack
-uv run xi ffximain unpack --dll PATH --output PATH
+uv run xi dll ffximain unpack
+uv run xi dll ffximain unpack --dll PATH --output PATH
 ```
 
 - Restores the decompressed `.text` bytes back into the PE file structure
@@ -87,13 +91,13 @@ uv run xi ffximain unpack --dll PATH --output PATH
 **Why the game won't run it:** The OEP stub would try to decompress POL1 into
 `.text` again, corrupting the already-filled section. Research only.
 
-### `xi ffximain text-dump`
+### `xi dll ffximain text-dump`
 
 Decompresses POL1 and writes two flat files:
 
 ```
-uv run xi ffximain text-dump
-uv run xi ffximain text-dump --dll PATH --output-dir DIR
+uv run xi dll ffximain text-dump
+uv run xi dll ffximain text-dump --dll PATH --output-dir DIR
 ```
 
 - **`pol_decompressed.bin`** — raw `.text` bytes, no PE wrapper (3.2 MB)
@@ -103,11 +107,11 @@ uv run xi ffximain text-dump --dll PATH --output-dir DIR
 
 Takes ~2–3 minutes to run.
 
-### `xi ffximain gear-groups` / `gear-patch`
+### `xi dll ffximain gear-groups` / `gear-patch`
 
 ```
-uv run xi ffximain gear-groups [--race RACE] [--slot SLOT] [--json]
-uv run xi ffximain gear-patch [--max-model N] [--dry-run]
+uv run xi dll ffximain gear-groups [--race RACE] [--slot SLOT] [--json]
+uv run xi dll ffximain gear-patch [--max-model N] [--dry-run]
 ```
 
 List per-race per-slot gear model groups from the DLL, or patch those groups so
@@ -117,9 +121,9 @@ custom `model_id`s resolve (pairs with `xi ftable expand gear`).
 
 | Goal | Tool |
 |---|---|
-| Full decompiler (Ghidra/IDA) with PE metadata | `xi ffximain unpack` |
-| Grep / binary search scripts | `xi ffximain text-dump` |
-| Gear group table / custom model_id patch | `xi ffximain gear-groups` / `gear-patch` |
+| Full decompiler (Ghidra/IDA) with PE metadata | `xi dll ffximain unpack` |
+| Grep / binary search scripts | `xi dll ffximain text-dump` |
+| Gear group table / custom model_id patch | `xi dll ffximain gear-groups` / `gear-patch` |
 | Search for a specific constant or instruction | research scripts against `pol_decompressed.bin` (see below) |
 | Disassemble a region of the packed DLL (non-.text sections) | research `disasm_lookup.py` |
 
@@ -128,9 +132,9 @@ custom `model_id`s resolve (pairs with `xi ftable expand gear`).
 ```
 FFXiMain.dll  (packed — game uses this)
       │
-      ├─ xi ffximain unpack ──────────→ misc/FFXiMain_unpacked.dll  (Ghidra/IDA)
+      ├─ xi dll ffximain unpack ──────────→ misc/FFXiMain_unpacked.dll  (Ghidra/IDA)
       │
-      └─ xi ffximain text-dump ───────→ pol_decompressed.bin        (search scripts)
+      └─ xi dll ffximain text-dump ───────→ pol_decompressed.bin        (search scripts)
                                         └→ pol_decompressed.txt        (grep)
 ```
 

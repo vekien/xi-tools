@@ -1,5 +1,5 @@
 """
-xi ffximain gear-patch
+xi dll ffximain gear-patch
 ========================
 Patch FFXiMain.dll's per-race per-slot gear group table so custom gear model_ids
 work in-game. Extends group G5 for head/body/hands/legs/feet/main/sub to cover
@@ -111,9 +111,9 @@ def cmd(dll: Path | None, max_model: int, dry_run: bool) -> None:
 
     \b
     Examples:
-      xi ffximain gear-patch                # patch to model_id 4095 (default)
-      xi ffximain gear-patch --dry-run      # preview without writing
-      xi ffximain gear-patch --max-model 2048  # smaller ceiling
+      xi dll ffximain gear-patch                # patch to model_id 4095 (default)
+      xi dll ffximain gear-patch --dry-run      # preview without writing
+      xi dll ffximain gear-patch --max-model 2048  # smaller ceiling
     """
     dll = dll or Path(FFXI_DIR) / 'FFXiMain.dll'
     if not dll.exists():

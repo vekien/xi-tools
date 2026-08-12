@@ -244,8 +244,12 @@ Simplified flow:
 
 Decompress the POL1-packed `.text` section of FFXiMain.dll for static analysis. Research only — the game loads the original packed DLL.
 
-- `uv run xi ffximain text-dump` ([docs](reference/ffximain.md)) — Write `pol_decompressed.bin` + full disassembly `.txt` (~45 MB, ~2–3 min)
-- `uv run xi ffximain unpack` ([docs](reference/ffximain.md)) — Write `FFXiMain_unpacked.dll` as a valid PE (load in Ghidra/IDA, image base `0x10000000`)
+- `uv run xi dll list` ([docs](reference/dll.md)) — Resolve packed paths for FFXiMain / polcore / app
+- `uv run xi dll ffximain unpack` ([docs](reference/ffximain.md)) — Write `FFXiMain_unpacked.dll` as a valid PE (load in Ghidra/IDA, image base `0x10000000`)
+- `uv run xi dll polcore unpack` / `xi dll app unpack` ([docs](reference/polcore.md), [app.md](reference/app.md)) — Same POL1 unpack for Viewer modules
+- `uv run xi dll ffximain pack` / `polcore pack` / `app pack` — Re-compress `.text` into game-loadable POL1
+- `uv run xi dll ffximain text-dump` ([docs](reference/ffximain.md)) — Write `pol_decompressed.bin` + full disassembly `.txt` (~45 MB, ~2–3 min)
+- `uv run xi dll ffximain crashdump` — Parse Windows minidumps next to `%LOCALAPPDATA%\CrashDumps`
 
 ## Research
 
@@ -257,7 +261,7 @@ Exploratory scripts from the FFXiMain.dll reverse engineering session. Not for r
 - [disasm_lookup.py](../research/disasm_lookup.py) — Disassemble a window around a hardcoded raw file offset in the packed DLL
 - [pol1_inspect.py](../research/pol1_inspect.py) — Dump PE section layout and hex-inspect the POL1 stub region
 - [pol1_unpack.py](../research/pol1_unpack.py) — Exploratory OEP finder and brute-force rotation attempts
-- `pol_decompressed.bin` / `pol_decompressed.txt` — outputs of `uv run xi ffximain text-dump`
+- `pol_decompressed.bin` / `pol_decompressed.txt` — outputs of `uv run xi dll ffximain text-dump`
 
 ## DAT Map
 
@@ -302,5 +306,5 @@ Standalone texture conversion helpers.
 
 - Run `uv sync` to install all dependencies (`click`, `pefile`, `capstone`).
 - Generated outputs (`exports/`, `*.gltf`, `*.bin`, `*.DAT.base`) are gitignored.
-- `uv run xi ffximain text-dump` takes ~2–3 minutes. Outputs land in `research/` and are gitignored by default.
+- `uv run xi dll ffximain text-dump` takes ~2–3 minutes. Outputs land in `research/` and are gitignored by default.
 - Custom ROM namespace defaults to `ROM10` — override with `CUSTOM_FTABLE=ROMn`.

@@ -1,5 +1,5 @@
 """
-xi ffximain geargroups
+xi dll ffximain geargroups
 ========================
 Dump FFXiMain.dll's per-race per-slot gear group table (6 groups × 8 bytes each)
 so you can see the current model_id ranges each group covers, both retail and
@@ -68,9 +68,9 @@ def cmd(dll: Path | None, race: str | None, slot: str | None, as_json: bool) -> 
 
     \b
     Examples:
-      xi ffximain geargroups
-      xi ffximain geargroups --race HumeFemale --slot body
-      xi ffximain geargroups --json > groups.json
+      xi dll ffximain geargroups
+      xi dll ffximain geargroups --race HumeFemale --slot body
+      xi dll ffximain geargroups --json > groups.json
     """
     dll = dll or Path(FFXI_DIR) / 'FFXiMain.dll'
     if not dll.exists():

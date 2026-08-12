@@ -29,11 +29,7 @@ from xi.entity.anim    import xi_import as anim_import
 from xi.entity.anim    import xi_schedule as anim_schedule
 from xi.entity.mesh    import xi_export as mesh_export
 from xi.entity.mesh    import xi_import as mesh_import
-from xi.ffximain import xi_geargroups as ffximain_geargroups
-from xi.ffximain import xi_gear_patch as ffximain_gear_patch
-from xi.ffximain import xi_text_dump as ffximain_text_dump
-from xi.ffximain import xi_unpack   as ffximain_unpack
-from xi.ffximain import xi_pack     as ffximain_pack
+from xi.dll.cli import dll_group
 from xi.gear     import xi_list    as gear_list
 from xi.gear     import xi_export  as gear_export
 from xi.gear     import xi_import  as gear_import
@@ -310,18 +306,9 @@ _gear_recolor_alias.hidden = True
 gear.add_command(_gear_recolor_alias,    'recolor')
 
 
-# ── ffximain ──────────────────────────────────────────────────────────────
+# ── dll (POL1 client modules: FFXiMain, polcore, app, …) ───────────────────
 
-@cli.group()
-def ffximain():
-    """FFXiMain.dll POL1 decompression tools."""
-    pass
-
-ffximain.add_command(ffximain_geargroups.cmd, 'gear-groups')
-ffximain.add_command(ffximain_gear_patch.cmd, 'gear-patch')
-ffximain.add_command(ffximain_text_dump.cmd,  'text-dump')
-ffximain.add_command(ffximain_unpack.cmd,     'unpack')
-ffximain.add_command(ffximain_pack.cmd,       'pack')
+cli.add_command(dll_group)
 
 
 # ── ui ────────────────────────────────────────────────────────────────────────

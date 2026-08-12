@@ -97,7 +97,7 @@ See [`.env.sample`](.env.sample) for the full list.
 - Patch gear IDs up to **4096**, models up to **65k**
 - Lookup, range-scan, set/delete entries, reset from `.base` backups
 - `xi model search` / `json` — registered modelids, free slots, DAT paths
-- `xi ffximain` — unpack, text-dump, gear-groups / gear-patch
+- `xi dll` — POL1 client DLLs (`ffximain` / `polcore` / `app`): unpack, pack, gear-patch, crashdump
 
 ### Mounts
 

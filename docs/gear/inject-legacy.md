@@ -13,7 +13,7 @@ a completely separate model_id so the original gear is unaffected.
    there is **no** `xi gear setup` command. Expand grows all F/VTABLEs through the
    custom gear region (windowed layout to `MAX_GEAR_MODELID` 4095, base
    `CUSTOM_GEAR_BASE` = **128240** at the default entity ceiling).
-2. **Client gear tables**: `xi ffximain gear-patch` (static DLL patch) and/or the
+2. **Client gear tables**: `xi dll ffximain gear-patch` (static DLL patch) and/or the
    legacy `gearpatch` Ashita addon — so custom model_ids resolve at runtime.
 
 ## Quick start
@@ -55,7 +55,7 @@ overwritten or ignored at runtime.
 
 ### The solution (three parts)
 
-> Prefer `xi ftable expand` + `xi ffximain gear-patch` + `xi gear inject`
+> Prefer `xi ftable expand` + `xi dll ffximain gear-patch` + `xi gear inject`
 > (or `xi dats build`). There is **no** `xi gear setup`. Default entity ceiling
 > is **30k** → gear floor **`CUSTOM_GEAR_BASE` = 128240**
 > (`98239 + MAX_ENTITY_MODELID + 1`; raise via `XI_MAX_ENTITY_MODELID`).
@@ -63,7 +63,7 @@ overwritten or ignored at runtime.
 1. **`xi ftable expand`** / **`expand gear`** (run once): grow all F/VTABLEs through
    the windowed gear region (`model_id` 0…4095 per race×slot window, base 128240).
 2. **`xi gear inject`** / **`xi dats build`**: place custom gear DATs + register file_ids.
-3. **`xi ffximain gear-patch`** (or the older `gearpatch` Ashita addon): patch
+3. **`xi dll ffximain gear-patch`** (or the older `gearpatch` Ashita addon): patch
    FFXiMain.dll gear group tables so the client accepts the new model_ids.
 
 ### Gear table structure (RE)
@@ -269,6 +269,6 @@ All 8 races are supported. Each race needs its own injected model:
 ## Limitations
 
 - Gear models are per-race — inject each race separately
-- Custom model_ids need `xi ffximain gear-patch` and/or the gearpatch addon
+- Custom model_ids need `xi dll ffximain gear-patch` and/or the gearpatch addon
 - Live capacity is the windowed layout (`model_id` up to 4095 per race×slot), not
   the historical 32/64/128 bands above

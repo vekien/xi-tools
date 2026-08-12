@@ -1,5 +1,5 @@
 """
-xi ffximain text-dump
+xi dll ffximain text-dump
 =======================
 Decompress FFXiMain.dll's POL1 section and write two flat output files:
 

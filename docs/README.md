@@ -273,7 +273,10 @@ Core lookup tables and named-DAT catalog.
 | [reference/model-file-ids.md](reference/model-file-ids.md) | FTABLE/VTABLE structure, modelid formula, custom ID ranges |
 | [reference/named-dats.md](reference/named-dats.md) | fileId catalog: string tables, system messages, per-zone event/entity ranges |
 | [reference/dat_sections.md](reference/dat_sections.md) | DAT section type reference |
-| [reference/ffximain.md](reference/ffximain.md) | FFXiMain.dll: POL1 packer format, decompression, Ghidra setup |
+| [reference/dll.md](reference/dll.md) | `xi dll` category: shared POL1 unpack/pack for FFXiMain / polcore / app |
+| [reference/ffximain.md](reference/ffximain.md) | FFXiMain.dll: POL1 algorithm, gear groups, model formulas, Ghidra |
+| [reference/polcore.md](reference/polcore.md) | polcore.dll: PlayOnline COM host, IPOLCoreCom, base collision with FFXiMain |
+| [reference/app.md](reference/app.md) | app.dll: PlayOnline Viewer UI / apps module |
 | [common_crashes.md](common_crashes.md) | Client crash diagnosis: overlay table shadowing, scene-file churn, FFXI-2003 |
 
 ---

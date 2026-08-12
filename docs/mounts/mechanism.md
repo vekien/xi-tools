@@ -228,7 +228,7 @@ The menu can't show more than 64 owned mounts without patching the client. Requi
   read the wider mask and raise the menu-iteration bound 64 → 256.
   **RE lead (atom0s XiPackets 0x00AE):** the client copies `MountDataTbl` into
   `PTR_pGlobalNowZone->MountSys.MountDataTbl` and reads that buffer for "castable mounts". Search
-  `MountSys` / `MountDataTbl` / `pGlobalNowZone` in the `xi ffximain unpack` → Ghidra output
+  `MountSys` / `MountDataTbl` / `pGlobalNowZone` in the `xi dll ffximain unpack` → Ghidra output
   ([../reference/ffximain.md](../reference/ffximain.md)). Also watch for a clamp-to-63 (chocobo) fallback.
 
 Widening `m_mountId` to a `uint16` is a *further, separate* job, only needed for **>255 distinct
