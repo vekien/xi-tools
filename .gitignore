@@ -30,6 +30,9 @@ web/particleeditor/game
 web/leveleditor/workspaces/
 web/leveleditor/editor.json
 workspaces/
+# Regenerable POL1 unpack/repack outputs (xi dll <target> unpack/pack)
+misc/*_unpacked.dll
+misc/*_repacked.dll
 zone-changes
 zone-custom
 zone-data/
