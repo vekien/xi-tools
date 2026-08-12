@@ -34,3 +34,4 @@ zone-changes
 zone-custom
 zone-data/
 !web/leveleditor/assets/**
+ghidra

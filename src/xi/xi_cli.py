@@ -33,6 +33,7 @@ from xi.ffximain import xi_geargroups as ffximain_geargroups
 from xi.ffximain import xi_gear_patch as ffximain_gear_patch
 from xi.ffximain import xi_text_dump as ffximain_text_dump
 from xi.ffximain import xi_unpack   as ffximain_unpack
+from xi.ffximain import xi_pack     as ffximain_pack
 from xi.gear     import xi_list    as gear_list
 from xi.gear     import xi_export  as gear_export
 from xi.gear     import xi_import  as gear_import
@@ -320,6 +321,7 @@ ffximain.add_command(ffximain_geargroups.cmd, 'gear-groups')
 ffximain.add_command(ffximain_gear_patch.cmd, 'gear-patch')
 ffximain.add_command(ffximain_text_dump.cmd,  'text-dump')
 ffximain.add_command(ffximain_unpack.cmd,     'unpack')
+ffximain.add_command(ffximain_pack.cmd,       'pack')
 
 
 # ── ui ────────────────────────────────────────────────────────────────────────
