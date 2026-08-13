@@ -5,6 +5,7 @@ import click
 
 from xi.dll import xi_pack as dll_pack
 from xi.dll import xi_patch as dll_patch
+from xi.dll import xi_sig as dll_sig
 from xi.dll import xi_unpack as dll_unpack
 from xi.dll.targets import TARGETS
 from xi.ffximain import xi_crashdump as ffximain_crashdump
@@ -48,6 +49,8 @@ def ffximain_group():
 ffximain_group.add_command(dll_unpack.cmd_ffximain, "unpack")
 ffximain_group.add_command(dll_pack.cmd_ffximain, "pack")
 ffximain_group.add_command(dll_patch.cmd_ffximain, "patch")
+ffximain_group.add_command(dll_sig.cmd_gen, "sig-gen")
+ffximain_group.add_command(dll_sig.cmd_apply, "sig-apply")
 ffximain_group.add_command(ffximain_text_dump.cmd, "text-dump")
 ffximain_group.add_command(ffximain_geargroups.cmd, "gear-groups")
 ffximain_group.add_command(ffximain_gear_patch.cmd, "gear-patch")

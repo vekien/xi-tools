@@ -268,7 +268,7 @@ C++.
 ## 8. Reproduce from scratch
 
 ```bash
-# 1. unpack the retail client DLL
+# 1. unpack the client DLL you're patching (CatsEye's current FFXiMain.dll)
 xi dll ffximain unpack --output FFXiMain_unpacked.dll
 
 # 2. apply all 183 edits (aborts if any 'expect' byte doesn't match)
@@ -348,6 +348,64 @@ is the to-do list, not a claim that any of it is broken.
 - **Overflow headroom.** Allocs were bumped to round numbers (`0x1000`,
   `0x2000`) with slack, not sized exactly. Fine for 120; if the target ever went
   higher, re-check each alloc against `arrays_end`.
+
+---
+
+## 10. Surviving client updates (portability)
+
+The `.patch` is pinned to **one exact build** — every edit carries an absolute
+`va` plus the original bytes at it. Apply it to a different `FFXiMain.dll` (a
+newer CatsEye client rebased on a newer retail drop) and all 183 edits mismatch;
+the applier aborts and writes nothing (fail-safe — never a half-patched DLL).
+CatsEye rebuilds its client from the retail client, so this bites on **every**
+base-client update, which is the whole reason to plan for it.
+
+Two failure modes break independently:
+
+- **Code moved** (the common case). A newer build relocates every function, so
+  the absolute `va` points at the wrong place — but the *instructions* are
+  unchanged. This is recoverable **automatically**: locate each site by a masked
+  byte-**signature** (the surrounding instructions with address operands
+  wildcarded) instead of a fixed address. Measured against the Aug-2026 retail
+  client, **~130 of 183** sites still carry a usable signature and relocate with
+  no human work.
+- **Code rewritten.** When SE changes the very code you patch, no scheme can
+  re-apply your intent — the target is gone. **~50** sites fall here for the
+  Aug-2026 drop, because that update's large-inventory hotfix rewrote inventory
+  code (below). A signature applier fails **loud** (no match) on these, so you
+  re-derive only those, guided by this doc.
+
+Planned tooling: a signature-based patch format + a `patch-port` that takes
+(old unpack + old patch + new unpack), auto-locates the movable sites, writes a
+fresh patch for the new build, and reports the rewritten ones with old-vs-new
+disassembly. **The distribution model is unchanged** — CatsEye keeps shipping a
+patched `FFXiMain.dll` through the launcher (which verifies game files, so the
+patch is enforced and self-healing). Signatures only make the maintainer's
+one-time re-patch after each client update mostly automatic; players still get an
+enforced DLL, not an optional runtime mod. (An Ashita plugin doing the same edits
+at runtime was considered — it dodges unpack/repack, but a plugin can be
+unloaded/missing, and since the server sends 120-slot data unconditionally, a
+client *without* the mod crashes on inventory download. The enforced DLL is the
+correct model here.)
+
+### The retail large-inventory hotfix (Aug 2026)
+
+The Aug-10-2026 retail client added a **client-side** fix for "reduced
+performance when logging in or changing areas with a large number of items" — a
+cache + dirty-flag + deferred-UI-update layer over the inventory path, gated by a
+global at `[0x104dfd98]` and a dirty bit `byte[obj + 0x40db5] & 0x10`. It
+**inserts new fields into the storage struct** (the per-item callback at
+`[obj + 0x2d608]` shifts to `[obj + 0x2d610]`; the status byte `+0x40d45 →
++0x40db5`) and adds a snapshot routine that `rep movsd`-copies **9 + 16 dwords**
+of per-bag state into new fields at `+0x2d614 / +0x2d638`.
+
+Relevance to 120: if CatsEye rebases onto this (or a later) client, those
+inserted cache fields and the hard-coded copy counts (9, 16) become **new sites
+to review** on top of everything here — the snapshot assumes the retail bag
+layout, and the enlarged 121-stride table changes what "per-bag state" means.
+The encouraging part: SE is actively optimising the exact path a 120-slot
+inventory stresses hardest. Full teardown of the hotfix lives in the session
+notes; fold it into a dedicated doc if/when the rebase happens.
 
 ---
 

@@ -35,6 +35,7 @@ under `ffximain`.
 | `xi dll <t> unpack` | [unpack.md](unpack.md) | Decompress POL1 → a Ghidra/IDA-loadable PE (research) |
 | `xi dll <t> pack` | [pack.md](pack.md) | Re-compress an unpacked PE → a game-loadable packed DLL |
 | `xi dll ffximain patch` | [patch.md](patch.md) | Apply a replayable `va/expect/replace` `.patch` to an unpacked DLL |
+| `xi dll ffximain sig-gen` / `sig-apply` | [sig-patch.md](sig-patch.md) | **Version-resilient** patching — locate edits by code signature so they survive client updates |
 | `xi dll ffximain text-dump` | [text-dump.md](text-dump.md) | Write flat `.text` bytes + a full disassembly `.txt` |
 | `xi dll ffximain gear-groups` | [gear-groups.md](gear-groups.md) | Dump per-race/per-slot gear model-group tables |
 | `xi dll ffximain gear-patch` | [gear-patch.md](gear-patch.md) | Raise the custom `model_id` ceiling per (race, slot) |

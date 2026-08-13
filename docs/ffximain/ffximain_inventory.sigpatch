@@ -1,0 +1,1447 @@
+{
+  "meta": {
+    "source": "ghidra\\FFXiMain\\patch120\\FFXiMain_unpacked.dll",
+    "image_base": "0x10000000",
+    "edits_in": 183,
+    "entries": 159,
+    "stats": {
+      "unique": 149,
+      "multi": 9,
+      "unsafe": 1
+    },
+    "unsafe": [
+      "0x1021ACC1 container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    ]
+  },
+  "edits": [
+    {
+      "mode": "sig",
+      "pattern": "3b c3 75 ?? 68 5c 08 00 00 e8 ?? ?? ?? ?? 83 c4 04",
+      "edit_offset": 5,
+      "expect": "5c08",
+      "replace": "0010",
+      "count": 1,
+      "note": "Mog Safe window: alloc size 0x85c->0x1000"
+    },
+    {
+      "mode": "sig",
+      "pattern": "85 c9 7c ?? 83 f9 51 7c ?? 32 c0",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "storage: outbound action slot-bound 0x50/0x51->0x78/0x79"
+    },
+    {
+      "mode": "sig",
+      "pattern": "81 e1 ff 00 00 00 8a 84 16 07 98 00 00 8d 04 c0 8d 04 c0 03 c1 8d 0c 80",
+      "edit_offset": 13,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 0c 80 8d 04 48 66 83 bc 82 60 98 00 00 00 8d 84 82 60 98 00 00 75 ??",
+      "edit_offset": 10,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 48 66 83 bc 82 60 98 00 00 00 8d 84 82 60 98 00 00 75 ?? 32 c0",
+      "edit_offset": 15,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 15 ?? ?? ?? ?? 57 b9 7b 40 00 00 33 c0 8d ba 60 98 00 00",
+      "edit_offset": 8,
+      "expect": "7b40",
+      "replace": "965d",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "b9 7b 40 00 00 33 c0 8d ba 60 98 00 00 ba 12 00 00 00 f3 ab",
+      "edit_offset": 9,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 35 ?? ?? ?? ?? 83 c1 2c 88 84 31 36 98 00 00 fe c0 3c 51 72 ?? 4a",
+      "edit_offset": 12,
+      "expect": "36980000fec03c51",
+      "replace": "f221f8fffec03c79",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "56 8b f1 8d 04 c0 81 e6 ff 00 00 00 8d 04 c0",
+      "edit_offset": 3,
+      "expect": "8d04c0",
+      "replace": "6bc079",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 81 e6 ff 00 00 00 8d 04 c0 03 c6 84 c9",
+      "edit_offset": 9,
+      "expect": "8d04c0",
+      "replace": "909090",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 70 5e 8d 84 82 60 98 00 00 75 ?? 66 83 38 00",
+      "edit_offset": 7,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 0c 79 5f 8d 8c 8e 60 98 00 00 3b d1 74 ??",
+      "edit_offset": 7,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "74 ?? 40 81 c1 ec 0d 00 00 83 f8 12 7c ??",
+      "edit_offset": 5,
+      "expect": "ec0d",
+      "replace": "cc14",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 4c 24 04 c7 80 f8 92 01 00 00 00 00 00 8b c1 c1 e0 05 03 c1 8d 04 40 8d 0c c0 a1 ?? ?? ?? ?? 8d 94 88 60 98 00 00",
+      "edit_offset": 14,
+      "expect": "8bc1c1e00503c18d04408d0cc0",
+      "replace": "69c93305000090909090909090",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 0c c0 a1 ?? ?? ?? ?? 8d 94 88 60 98 00 00 89 90 fc 92 01 00 e9 ?? ?? ?? ??",
+      "edit_offset": 11,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "74 ?? 8b 8a f8 92 01 00 83 f9 51 73 ?? 66 83 38 00",
+      "edit_offset": 10,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 15 ?? ?? ?? ?? 8b 8a f8 92 01 00 83 f9 51 72 ?? c7 82 fc 92 01 00 00 00 00 00",
+      "edit_offset": 14,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "6a 00 b3 01 8d b0 8c 98 00 00 e8 ?? ?? ?? ?? 83 c4 04",
+      "edit_offset": 6,
+      "expect": "8c980000",
+      "replace": "4822f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "59 c3 8d b0 8c 98 00 00 8a 44 24 18 32 db",
+      "edit_offset": 4,
+      "expect": "8c980000",
+      "replace": "4822f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 74 24 14 b3 01 8b c6 56 c1 e0 05 03 c6 8d 04 40 8d 04 c0 8d bc 87 8c 98 00 00 e8 ?? ?? ?? ?? 83 c4 04",
+      "edit_offset": 6,
+      "expect": "8bc656c1e00503c68d04408d04c08dbc878c980000",
+      "replace": "69c63305000056909090909090908dbc874822f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "e8 ?? ?? ?? ?? 8b 15 ?? ?? ?? ?? b9 a6 3e 00 00 33 c0 83 c4 0c",
+      "edit_offset": 12,
+      "expect": "a63e",
+      "replace": "965d",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "33 c0 83 c4 0c 8d ba 60 98 00 00 f3 ab b0 01",
+      "edit_offset": 7,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8a 41 08 8a 51 09 8d 04 c0 8d 04 c0 03 c2 8d 14 80",
+      "edit_offset": 6,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 50 8b 15 ?? ?? ?? ?? 8d bc 82 60 98 00 00 8b 41 04 85 c0",
+      "edit_offset": 12,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8a 46 0a 8a 4e 0b 8d 04 c0 8d 04 c0 03 c1 8b 0d ?? ?? ?? ??",
+      "edit_offset": 6,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 14 80 8d 04 50 8d 94 81 60 98 00 00 66 8b 84 81 60 98 00 00 66 3b 46 08",
+      "edit_offset": 9,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 50 8d 94 81 60 98 00 00 66 8b 84 81 60 98 00 00 66 3b 46 08 74 ??",
+      "edit_offset": 14,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "56 57 8d 04 c0 8d 73 11 68 00 08 00 00",
+      "edit_offset": 2,
+      "expect": "8d04c0",
+      "replace": "6bc079",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 73 11 68 00 08 00 00 8d 04 c0 03 c1 8b 0d ?? ?? ?? ??",
+      "edit_offset": 8,
+      "expect": "8d04c0",
+      "replace": "909090",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 14 80 8d 04 50 8d 94 81 60 98 00 00 b9 0b 00 00 00 33 c0",
+      "edit_offset": 9,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: 121-slot table core (getItem/init/handlers/iterator/free-slot), object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "85 ed 7c ?? 83 fd 50 7e ?? 32 d2",
+      "edit_offset": 6,
+      "expect": "50",
+      "replace": "78",
+      "count": 1,
+      "note": "storage: outbound action slot-bound 0x50/0x51->0x78/0x79"
+    },
+    {
+      "mode": "sig",
+      "pattern": "83 fe ff 7c ?? 83 fe 50 7e ?? 32 c0",
+      "edit_offset": 7,
+      "expect": "50",
+      "replace": "78",
+      "count": 1,
+      "note": "storage: outbound action slot-bound 0x50/0x51->0x78/0x79"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 0d ?? ?? ?? ?? e8 ?? ?? ?? ?? 68 bc 13 00 00 e8 ?? ?? ?? ?? 83 c4 04",
+      "edit_offset": 12,
+      "expect": "bc13",
+      "replace": "0020",
+      "count": 1,
+      "note": "container windows: alloc size 0x13bc->0x2000 (per container)"
+    },
+    {
+      "mode": "sig",
+      "pattern": "eb ?? 89 1d ?? ?? ?? ?? 68 bc 13 00 00 e8 ?? ?? ?? ?? 83 c4 04",
+      "edit_offset": 9,
+      "expect": "bc13",
+      "replace": "0020",
+      "count": 17,
+      "note": "container windows: alloc size 0x13bc->0x2000 (per container)"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 4c 24 04 8b 15 ?? ?? ?? ?? 8b c1 c1 e0 05 03 c1 56 57 51 8d 04 40 8d 04 c0 8d b4 82 8c 98 00 00 e8 ?? ?? ?? ?? b1 01",
+      "edit_offset": 10,
+      "expect": "8bc1c1e00503c15657518d04408d04c08db4828c980000",
+      "replace": "69c133050000565751909090909090908db4824822f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 c1 51 8d 04 40 8d 04 c0 8d b4 82 8c 98 00 00 e8 ?? ?? ?? ?? b1 01 83 c4 04 3a c1",
+      "edit_offset": 12,
+      "expect": "8c980000",
+      "replace": "4822f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b c7 8b 0d ?? ?? ?? ?? c1 e0 05 03 c7 57 8d 04 40 8d 04 c0 8d b4 81 8c 98 00 00 e8 ?? ?? ?? ?? 88 44 24 18",
+      "edit_offset": 8,
+      "expect": "c1e00503c7578d04408d04c08db4818c980000",
+      "replace": "69c7330500005790909090908db4814822f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "ff 24 8d ?? ?? ?? ?? 8b 4c 24 0c 8d 04 c0 8d 34 c1 03 c6 8d 34 80 8d 04 70",
+      "edit_offset": 11,
+      "expect": "8d04c08d34c103c6",
+      "replace": "6bc07903c1909090",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 34 80 8d 04 70 8d 84 82 60 98 00 00 eb ?? 8b 4c 24 0c",
+      "edit_offset": 9,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 14 80 8d 04 50 66 8b 84 81 60 98 00 00 c3 90",
+      "edit_offset": 10,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 2,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 14 80 8d 04 50 8d b4 81 60 98 00 00 33 c9 66 8b 0e",
+      "edit_offset": 9,
+      "expect": "60980000",
+      "replace": "1c22f8ff",
+      "count": 2,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "85 ff 0f 84 ?? ?? ?? ?? 83 ff 51 0f 8d ?? ?? ?? ?? 8b 54 24 14",
+      "edit_offset": 10,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "66 8b 06 8d 0c 2f 66 39 84 8b 5c 05 00 00 8d bc 8b 5c 05 00 00 74 ??",
+      "edit_offset": 10,
+      "expect": "5c05",
+      "replace": "e00b",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 0c 2f 66 39 84 8b 5c 05 00 00 8d bc 8b 5c 05 00 00 74 ?? 8b 0d ?? ?? ?? ??",
+      "edit_offset": 14,
+      "expect": "5c05",
+      "replace": "e00b",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "89 5e 34 89 5e 2c 8d 86 d4 02 00 00 b9 51 00 00 00 89 98 78 fd ff ff c7 00 00 00 80 bf",
+      "edit_offset": 8,
+      "expect": "d4020000b951",
+      "replace": "18080000b979",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 86 d4 02 00 00 b9 51 00 00 00 89 98 78 fd ff ff c7 00 00 00 80 bf 83 c0 04",
+      "edit_offset": 13,
+      "expect": "78fd",
+      "replace": "34f8",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "75 ?? 57 b9 a2 00 00 00 33 c0 8d be 5c 05 00 00",
+      "edit_offset": 4,
+      "expect": "a2",
+      "replace": "f2",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "b9 a2 00 00 00 33 c0 8d be 5c 05 00 00 f3 ab 8b ce",
+      "edit_offset": 9,
+      "expect": "5c05",
+      "replace": "e00b",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 77 4c bb 02 00 00 00 bd 51 00 00 00 8b 0e 85 c9",
+      "edit_offset": 9,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 77 4c c7 44 24 18 02 00 00 00 bd 51 00 00 00 8b 0e 85 c9",
+      "edit_offset": 12,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "85 db 7c ?? 83 fb 51 7d ?? 8b 44 24 1c",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 2,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b d9 8b 4c 24 10 8d 04 c0 81 e1 ff 00 00 00 8d 04 c0",
+      "edit_offset": 6,
+      "expect": "8d04c0",
+      "replace": "6bc079",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 81 e1 ff 00 00 00 8d 04 c0 03 c1 8d 6c 83 4c",
+      "edit_offset": 9,
+      "expect": "8d04c0",
+      "replace": "909090",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 73 4c c7 44 24 18 02 00 00 00 bf 51 00 00 00 8b 0e 85 c9",
+      "edit_offset": 12,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "c7 44 24 14 02 00 00 00 57 bf 51 00 00 00 8b 0e 85 c9",
+      "edit_offset": 10,
+      "expect": "51",
+      "replace": "79",
+      "count": 2,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 71 4c bd 02 00 00 00 bf 51 00 00 00 8b 0e 85 c9",
+      "edit_offset": 9,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "56 8b f1 8d 04 c0 8b cd 81 e1 ff 00 00 00",
+      "edit_offset": 3,
+      "expect": "8d04c0",
+      "replace": "6bc079",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "81 e1 ff 00 00 00 57 8d 04 c0 03 c1 8d 7c 86 4c",
+      "edit_offset": 7,
+      "expect": "8d04c0",
+      "replace": "909090",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b e9 8b 4c 24 14 8d 04 c0 81 e1 ff 00 00 00 56",
+      "edit_offset": 6,
+      "expect": "8d04c0",
+      "replace": "6bc079",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "81 e1 ff 00 00 00 56 8d 04 c0 57 03 c1",
+      "edit_offset": 7,
+      "expect": "8d04c0",
+      "replace": "909090",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "81 e2 ff 00 00 00 56 8d 04 c0 8d 04 c0 03 c2 8d 74 81 4c",
+      "edit_offset": 7,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "46 83 c7 04 83 fe 51 7c ?? 8b 44 24 1c",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "e8 ?? ?? ?? ?? 46 83 fe 51 7c ?? 8b 4d 14",
+      "edit_offset": 8,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 71 4c bd 02 00 00 00 bb 51 00 00 00 8b 3e 85 ff",
+      "edit_offset": 9,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "5f c2 0c 00 83 f9 51 7d ?? 8b 54 24 08",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "40 83 c2 04 83 f8 51 7c ?? 46",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "7c ?? 46 81 c7 44 01 00 00 83 fe 02 7c ??",
+      "edit_offset": 5,
+      "expect": "44",
+      "replace": "e4",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "42 83 c0 04 83 fa 51 7c ?? 47",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "7c ?? 47 81 c6 44 01 00 00 3b fb 7c ??",
+      "edit_offset": 5,
+      "expect": "44",
+      "replace": "e4",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "46 83 c7 04 83 fe 51 7c ?? 43",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "7c ?? 43 81 c5 44 01 00 00 83 fb 02 7c ??",
+      "edit_offset": 5,
+      "expect": "44",
+      "replace": "e4",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 cf d8 44 24 14 d9 9c 8b d4 02 00 00 8b 4c 24 44 33 c0",
+      "edit_offset": 9,
+      "expect": "d402",
+      "replace": "1808",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8a 41 02 03 c7 d9 84 83 d4 02 00 00 d9 54 24 14 d8 25 ?? ?? ?? ??",
+      "edit_offset": 8,
+      "expect": "d402",
+      "replace": "1808",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 77 4c bd 02 00 00 00 bb 51 00 00 00 8b 0e 85 c9",
+      "edit_offset": 9,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "0f 94 c0 c7 44 24 10 00 00 00 00 8d 04 c0 8d 04 c0 8d 6c 86 4c 8b 4d 00",
+      "edit_offset": 11,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 7e 4c c7 44 24 14 02 00 00 00 bb 51 00 00 00 8b 0f 85 c9",
+      "edit_offset": 12,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "83 c5 04 40 83 f8 51 89 44 24 10 0f 8c ?? ?? ?? ??",
+      "edit_offset": 6,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "Mog Safe window UI: widen 3 per-slot arrays 81->121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b c5 8b 0d ?? ?? ?? ?? c1 e0 05 03 c5 55 8d 04 40 8d 04 c0 8d bc 81 8c 98 00 00 e8 ?? ?? ?? ?? 8a d8",
+      "edit_offset": 8,
+      "expect": "c1e00503c5558d04408d04c08dbc818c980000",
+      "replace": "69c5330500005590909090908dbc814822f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 40 8d 04 c0 8d bc 81 8c 98 00 00 e8 ?? ?? ?? ?? 83 c4 04",
+      "edit_offset": 9,
+      "expect": "8c980000",
+      "replace": "4822f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 c1 8d 04 40 8d 04 c0 8d b4 82 8c 98 00 00 e8 ?? ?? ?? ?? b1 01 83 c4 04",
+      "edit_offset": 11,
+      "expect": "8c980000",
+      "replace": "4822f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    },
+    {
+      "mode": "sig",
+      "pattern": "33 c0 8d ac 24 30 01 00 00 8d 93 04 08 00 00 57 8a 4c 03 18",
+      "edit_offset": 11,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b fd 40 b9 a2 00 00 00 81 c2 88 02 00 00 81 c5 88 02 00 00",
+      "edit_offset": 4,
+      "expect": "a2",
+      "replace": "f2",
+      "count": 2,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "40 b9 a2 00 00 00 81 c2 88 02 00 00 81 c5 88 02 00 00 83 f8 04",
+      "edit_offset": 8,
+      "expect": "8802",
+      "replace": "c803",
+      "count": 2,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "b9 a2 00 00 00 81 c2 88 02 00 00 81 c5 88 02 00 00 83 f8 04 f3 a5",
+      "edit_offset": 13,
+      "expect": "8802",
+      "replace": "c803",
+      "count": 2,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 8c 24 66 0b 00 00 8d 83 80 00 00 00 be 51 00 00 00 8d 50 ec 8d 79 ee",
+      "edit_offset": 14,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "57 8b f1 b9 88 02 00 00 8d bc 24 28 01 00 00 f3 ab",
+      "edit_offset": 4,
+      "expect": "8802",
+      "replace": "c803",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "f3 ab 8d 8c 24 28 01 00 00 8a 94 06 68 13 00 00 40 88 11",
+      "edit_offset": 12,
+      "expect": "6813",
+      "replace": "041d",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "88 11 83 c1 20 83 f8 51 7c ?? 8b 84 24 4c 0b 00 00",
+      "edit_offset": 7,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "33 c0 8d 94 24 34 01 00 00 8d ab 04 08 00 00 8a 8c 04 30 01 00 00 80 f9 51",
+      "edit_offset": 11,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d ab 04 08 00 00 8a 8c 04 30 01 00 00 80 f9 51 88 4c 03 18 76 ??",
+      "edit_offset": 15,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "83 c7 14 83 c3 18 66 83 fe 51 72 ?? 8d 4c 24 10",
+      "edit_offset": 9,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "74 ?? 56 8d 87 68 13 00 00 8d 8f 80 00 00 00 8d b4 24 28 01 00 00",
+      "edit_offset": 5,
+      "expect": "6813",
+      "replace": "041d",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 8f 80 00 00 00 8d b4 24 28 01 00 00 bf 51 00 00 00 66 83 39 00 74 ??",
+      "edit_offset": 14,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "57 8b f9 bb 51 00 00 00 8d 77 6c 8b ce",
+      "edit_offset": 4,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b f1 e8 ?? ?? ?? ?? 81 c6 04 08 00 00 bf 51 00 00 00 83 ee 18 8b ce",
+      "edit_offset": 9,
+      "expect": "04080000bf51",
+      "replace": "000c0000bf79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "f3 ab aa b9 e6 01 00 00 33 c0 8d 7e 6c",
+      "edit_offset": 4,
+      "expect": "e601",
+      "replace": "d602",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 7e 6c f3 ab b9 88 02 00 00 8d be 04 08 00 00 f3 ab",
+      "edit_offset": 6,
+      "expect": "8802",
+      "replace": "c803",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "f3 ab b9 88 02 00 00 8d be 04 08 00 00 f3 ab b9 51 00 00 00",
+      "edit_offset": 9,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d be 04 08 00 00 f3 ab b9 51 00 00 00 8d be 24 12 00 00 f3 ab",
+      "edit_offset": 9,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "f3 ab b9 51 00 00 00 8d be 24 12 00 00 f3 ab b9 14 00 00 00",
+      "edit_offset": 9,
+      "expect": "2412",
+      "replace": "201b",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "f3 ab b9 14 00 00 00 8d be 68 13 00 00 f3 ab aa",
+      "edit_offset": 9,
+      "expect": "6813",
+      "replace": "041d",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "56 57 8d b3 24 12 00 00 bf 51 00 00 00 8b 06 85 c0",
+      "edit_offset": 4,
+      "expect": "24120000bf51",
+      "replace": "201b0000bf79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "c6 44 24 10 00 89 54 24 14 8d 9f 24 12 00 00 8b 6c 24 10 8b 07",
+      "edit_offset": 11,
+      "expect": "2412",
+      "replace": "201b",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "83 c3 04 83 c2 18 3c 51 88 44 24 10 89 54 24 14",
+      "edit_offset": 7,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8a 44 24 0c fe c0 3c 51 88 44 24 0c 72 ??",
+      "edit_offset": 7,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b eb 81 e5 ff 00 00 00 c6 84 29 68 13 00 00 00 8b 74 24 18 8b 41 0c",
+      "edit_offset": 11,
+      "expect": "6813",
+      "replace": "041d",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "addr",
+      "va": "0x1021acc1",
+      "expect": "51736a8d14f6",
+      "replace": "79736a6bfe79",
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 14 f6 25 ff 00 00 00 8d 3c d2 33 d2 03 c7",
+      "edit_offset": 8,
+      "expect": "8d3cd2",
+      "replace": "909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "33 d2 03 c7 88 9c c1 0a 08 00 00 33 c0 8a 44 0e 18",
+      "edit_offset": 7,
+      "expect": "0a08",
+      "replace": "060c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8a 44 0e 18 03 c7 c7 84 c1 04 08 00 00 00 00 00 00 8a 54 0e 18 8b 44 24 14",
+      "edit_offset": 9,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 d7 66 8b 00 66 89 84 d1 08 08 00 00 8a 44 0e 18 fe c0",
+      "edit_offset": 9,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b c3 25 ff 00 00 00 c6 84 30 68 13 00 00 00 8b 4c 24 10 8b f9",
+      "edit_offset": 10,
+      "expect": "6813",
+      "replace": "041d",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "81 e7 ff 00 00 00 8a 44 37 18 3c 51 0f 87 ?? ?? ?? ?? 32 c9",
+      "edit_offset": 11,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "88 4c 24 18 0f 86 ?? ?? ?? ?? 8d 2c ff 8d 6c ed 00 8b 44 24 18 8b d0",
+      "edit_offset": 10,
+      "expect": "8d2cff8d6ced00",
+      "replace": "6bef7990909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "81 e2 ff 00 00 00 03 d5 38 9c d6 0a 08 00 00 74 ?? 8a 44 37 18",
+      "edit_offset": 11,
+      "expect": "0a08",
+      "replace": "060c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "fe c1 88 4c 24 18 8b 94 c6 0c 08 00 00 8d 04 c6 89 90 04 08 00 00",
+      "edit_offset": 9,
+      "expect": "0c08",
+      "replace": "080c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 94 c6 0c 08 00 00 8d 04 c6 89 90 04 08 00 00 8b 90 10 08 00 00 89 90 08 08 00 00",
+      "edit_offset": 12,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c6 89 90 04 08 00 00 8b 90 10 08 00 00 89 90 08 08 00 00 8a 44 37 18",
+      "edit_offset": 11,
+      "expect": "1008",
+      "replace": "0c0c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "89 90 04 08 00 00 8b 90 10 08 00 00 89 90 08 08 00 00 8a 44 37 18 3a c8",
+      "edit_offset": 14,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8a 4c 37 18 03 cd 8d 94 ce 04 08 00 00 89 84 ce 04 08 00 00 89 42 04",
+      "edit_offset": 9,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 cd 8d 94 ce 04 08 00 00 89 84 ce 04 08 00 00 89 42 04 c7 46 08 52 00 00 00",
+      "edit_offset": 12,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "3b f1 0f 8d ?? ?? ?? ?? 8d 04 c0 8d 0c c0 8d 04 39 03 cd",
+      "edit_offset": 8,
+      "expect": "8d04c08d0cc0",
+      "replace": "6bc879909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 39 03 cd 66 8b 8c ca 08 08 00 00 66 3b 8c c2 08 08 00 00 75 ??",
+      "edit_offset": 9,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 cd 66 8b 8c ca 08 08 00 00 66 3b 8c c2 08 08 00 00 75 ?? 8b 8c c2 04 08 00 00",
+      "edit_offset": 14,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "66 3b 8c c2 08 08 00 00 75 ?? 8b 8c c2 04 08 00 00 8b 84 c2 08 08 00 00 89 4c 24 10",
+      "edit_offset": 13,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "75 ?? 8b 8c c2 04 08 00 00 8b 84 c2 08 08 00 00 89 4c 24 10 8d 4f ff",
+      "edit_offset": 12,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "7c ?? 8b 42 0c 8d 04 c0 8d 1c c1 03 c3 8b 9c c2 04 08 00 00 49 8d 04 c2",
+      "edit_offset": 5,
+      "expect": "8d04c08d1cc103c38b9cc20408",
+      "replace": "6bc07903c19090908b9cc2000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c2 3b ce 89 98 0c 08 00 00 8b 98 08 08 00 00 89 98 10 08 00 00",
+      "edit_offset": 7,
+      "expect": "0c08",
+      "replace": "080c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "3b ce 89 98 0c 08 00 00 8b 98 08 08 00 00 89 98 10 08 00 00 7d ??",
+      "edit_offset": 10,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "89 98 0c 08 00 00 8b 98 08 08 00 00 89 98 10 08 00 00 7d ?? 8b 42 0c",
+      "edit_offset": 14,
+      "expect": "1008",
+      "replace": "0c0c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "7d ?? 8b 42 0c 8d 04 c0 8d 4c c5 00 03 c1 8b 4c 24 10 89 8c c2 0c 08 00 00",
+      "edit_offset": 5,
+      "expect": "8d04c08d4cc50003c1",
+      "replace": "6bc07903c590909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 c1 8b 4c 24 10 89 8c c2 0c 08 00 00 8b 4c 24 14 89 8c c2 10 08 00 00",
+      "edit_offset": 9,
+      "expect": "0c08",
+      "replace": "080c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "89 8c c2 0c 08 00 00 8b 4c 24 14 89 8c c2 10 08 00 00 8b 42 0c 33 c9",
+      "edit_offset": 14,
+      "expect": "1008",
+      "replace": "0c0c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "0f 8c ?? ?? ?? ?? e9 ?? ?? ?? ?? 8d 34 db b9 a2 00 00 00 33 c0 8d 34 f6",
+      "edit_offset": 11,
+      "expect": "8d34dbb9a2",
+      "replace": "6bf379b9f2",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "b9 a2 00 00 00 33 c0 8d 34 f6 8d bc f2 04 08 00 00 f3 ab 8b 42 0c",
+      "edit_offset": 7,
+      "expect": "8d34f68dbcf20408",
+      "replace": "9090908dbcf2000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "f3 ab 8b 42 0c 8d 04 c0 8d 04 c0 66 c7 84 c2 08 08 00 00 ff ff 8b 42 0c",
+      "edit_offset": 5,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 8d 04 c0 66 c7 84 c2 08 08 00 00 ff ff 8b 42 0c 8d 04 c0",
+      "edit_offset": 10,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "66 c7 84 c2 08 08 00 00 ff ff 8b 42 0c 8d 04 c0 8d 0c c0 c7 84 ca 04 08 00 00 00 00 00 00 8b 42 0c 8d 04 c0",
+      "edit_offset": 13,
+      "expect": "8d04c08d0cc0c784ca0408",
+      "replace": "6bc879909090c784ca000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "c7 84 ca 04 08 00 00 00 00 00 00 8b 42 0c 8d 04 c0 8d 04 c0 c6 84 c2 0a 08 00 00 00 8b 4a 0c 8d 44 11 18",
+      "edit_offset": 14,
+      "expect": "8d04c08d04c0c684c20a08",
+      "replace": "6bc079909090c684c2060c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "33 db 8a 5c 10 18 8d 04 c0 8d 04 c0 03 d8 66 89 bc da 08 08 00 00",
+      "edit_offset": 6,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 03 d8 66 89 bc da 08 08 00 00 8b 42 0c 33 db",
+      "edit_offset": 9,
+      "expect": "0808",
+      "replace": "040c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "33 db 8a 5c 10 18 8d 04 c0 8d 04 c0 03 d8 88 8c da 0a 08 00 00",
+      "edit_offset": 6,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 03 d8 88 8c da 0a 08 00 00 8b 42 0c 33 db",
+      "edit_offset": 8,
+      "expect": "0a08",
+      "replace": "060c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "33 db 8a 5c 10 18 8d 04 c0 8d 04 c0 03 d8 8b 46 f8",
+      "edit_offset": 6,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "03 d8 8b 46 f8 89 84 da 04 08 00 00 8b 42 0c 8a 5c 10 18",
+      "edit_offset": 8,
+      "expect": "0408",
+      "replace": "000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "fe c1 83 c6 18 80 f9 51 72 ?? 8b 4a 0c",
+      "edit_offset": 7,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "6a 08 50 8d 04 c9 8d 0c c0 8d 94 ca 0c 08 00 00 52 e8 ?? ?? ?? ??",
+      "edit_offset": 3,
+      "expect": "8d04c98d0cc08d94ca0c08",
+      "replace": "6bc9799090908d94ca080c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "5e c2 08 00 8d 34 f6 25 ff 00 00 00 81 e2 ff 00 00 00",
+      "edit_offset": 4,
+      "expect": "8d34f6",
+      "replace": "6bce79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "25 ff 00 00 00 81 e2 ff 00 00 00 8d 0c f6 8d 8c cf 04 08 00 00 8b 7c c1 04 8b 34 c1",
+      "edit_offset": 11,
+      "expect": "8d0cf68d8ccf0408",
+      "replace": "9090908d8ccf000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "83 c4 08 c2 08 00 8d 04 c0 55 8d 04 c0 8d ac c6 04 08 00 00 8b c1 25 ff 00 00 00",
+      "edit_offset": 6,
+      "expect": "8d04c0558d04c08dacc60408",
+      "replace": "6bc079559090908dacc6000c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 54 24 04 81 e2 ff 00 00 00 8d 04 c0 8d 04 c0 03 c2 8a 84 c1 0a 08 00 00",
+      "edit_offset": 10,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 2,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 03 c2 8a 84 c1 0a 08 00 00 8b 09 50",
+      "edit_offset": 8,
+      "expect": "0a08",
+      "replace": "060c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 03 c2 8a 84 c1 0a 08 00 00 c2 04 00 90",
+      "edit_offset": 8,
+      "expect": "0a08",
+      "replace": "060c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 54 24 08 81 e2 ff 00 00 00 8d 04 c0 8d 04 c0 03 c2 8a 84 c1 0a 08 00 00",
+      "edit_offset": 10,
+      "expect": "8d04c08d04c0",
+      "replace": "6bc079909090",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8d 04 c0 03 c2 8a 84 c1 0a 08 00 00 84 c0 88 44 24 08",
+      "edit_offset": 8,
+      "expect": "0a08",
+      "replace": "060c",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "88 44 24 08 76 ?? 3c 51 73 ?? 8b 44 24 08",
+      "edit_offset": 7,
+      "expect": "51",
+      "replace": "79",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b 44 24 08 25 ff 00 00 00 8d b4 81 24 12 00 00 8b 8c 81 24 12 00 00 85 c9",
+      "edit_offset": 12,
+      "expect": "2412",
+      "replace": "201b",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "25 ff 00 00 00 8d b4 81 24 12 00 00 8b 8c 81 24 12 00 00 85 c9 74 ??",
+      "edit_offset": 15,
+      "expect": "2412",
+      "replace": "201b",
+      "count": 1,
+      "note": "container window UI (main inventory + all Mog bags): widen arrays + map, pane*81->*121"
+    },
+    {
+      "mode": "sig",
+      "pattern": "8b c1 51 c1 e0 05 03 c1 8d 04 40 8d 04 c0 8d b4 82 8c 98 00 00 e8 ?? ?? ?? ?? 8a c8",
+      "edit_offset": 3,
+      "expect": "c1e00503c18d04408d04c08db4828c980000",
+      "replace": "69c13305000090909090908db4824822f8ff",
+      "count": 1,
+      "note": "storage: bag-walk / getSize-caller, object-relative"
+    }
+  ]
+}
