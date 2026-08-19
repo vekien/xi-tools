@@ -183,6 +183,68 @@ renders untextured.
 
 ---
 
+## 6. 16-bit palettes (`A1R5G5B5`)
+
+The texture header is a standard 40-byte `BITMAPINFOHEADER`. Its final dword — where
+BMP puts `biClrImportant` — is repurposed as **bits per palette entry**:
+
+| Value  | Palette                | Size        |
+| ------ | ---------------------- | ----------- |
+| `0x20` | 32-bit BGRA            | 1024 bytes  |
+| `0x10` | 16-bit A1R5G5B5        | 512 bytes   |
+
+Retail is always `0x20` (864 DATs scanned, 565 paletted textures, zero exceptions), so
+decoders that hardcode a 256 x u32 palette work everywhere until they hit prototype
+content. A `0x10` palette read as `0x20` goes wrong twice: the colours are scrambled,
+*and* every pixel is offset by 512 bytes. The result is a recognisable image buried in
+bright-green speckle — Noesis decodes these correctly, which is the usual tell.
+
+Affected files: `ROM/0/29` (3 textures), `ROM/0/33` (2 — `gratest_sizenn`,
+`gratest_s00_jew`), `ROM/0/42` (1).
+
+Unpack as `a = bit 15 ? 255 : 0`, `r = bits 14-10`, `g = bits 9-5`, `b = bits 4-0`, each
+5-bit channel scaled `* 255 / 31`.
+
+### Every copy of the decoder has to be fixed
+
+This bit cost the most time. Paletted-texture decoding is duplicated in **four** places
+across the three repos, and they do not share a code path — patching one and reloading
+looks like the fix simply did not work:
+
+| Repo             | File                                | Used for                          |
+| ---------------- | ----------------------------------- | --------------------------------- |
+| `xi-tools`       | `src/xi/entity/mesh/xi_export.py`   | exports (OBJ/FBX/glTF materials)  |
+| `xi-model-viewer`| `ui/js/zone.js`                     | **zone rendering** (the visible one) |
+| `xi-model-viewer`| `ui/js/dat.js`                      | entity/model textures             |
+| `xi-zone-editor` | `ui/ffxi/zone.js`                   | zone rendering                    |
+| `xi-zone-editor` | `ui/ffxi/sections.js`               | section inspector / texture list  |
+
+`ui/ffxi/sections.js` is written differently from the others — it locates the palette via
+`headerSize` at `ds + 17` and hardcodes `palOff + 1024` for the pixel offset, so it needs
+both the entry unpack *and* the `+512` stride fixed.
+
+Both UIs are Vite apps whose `ui/dist/` is gitignored, so a source edit changes nothing
+until `npm run build` is re-run in `ui/` and the app is restarted.
+
+### How this was tracked down
+
+Worth repeating because the symptom points away from the cause:
+
+1. The green speckle looked like a renderer problem. It was not — the collision debug
+   overlay is grey for terrain 0, and the "solid Unreal-green" navmesh overlay needs a
+   `.nav` file that did not exist.
+2. Decoding the zone's textures straight out of the DAT to PNG and *looking at them*
+   settled it in one step: `gratest_ido` / `johheki` / `yuka_s` were perfect, only
+   `gratest_sizenn` and `gratest_s00_jew` were noise. A whole-pipeline bug would have
+   broken all of them.
+3. Diffing a good header against a bad one byte-for-byte left exactly one differing
+   field — `0x20` vs `0x10` in the last dword.
+
+Counting bright-green pixels (`g > 200, r < 80, b < 80`) makes it measurable rather than
+a judgement call: 5.4% / 5.0% before, 0.0% after.
+
+---
+
 ## Zone list
 
 `xi zone list --dev` / `xi zone json --dev` emit these under a `Dev / Prototype` group.

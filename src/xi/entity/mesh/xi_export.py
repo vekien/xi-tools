@@ -252,8 +252,29 @@ def decode_dxt3(reader: Reader, width: int, height: int) -> bytes:
     return bytes(buffer)
 
 
-def decode_palette(reader: Reader, width: int, height: int, paletted: bool) -> bytes:
-    colors: List[int] = [reader.u32() for _ in range(256)] if paletted else []
+def _expand_a1r5g5b5(v: int) -> int:
+    """16-bit A1R5G5B5 palette entry -> 0xAARRGGBB."""
+    a = 0xFF if (v >> 15) & 1 else 0x00
+    r = ((v >> 10) & 0x1F) * 255 // 31
+    g = ((v >> 5) & 0x1F) * 255 // 31
+    b = (v & 0x1F) * 255 // 31
+    return (a << 24) | (r << 16) | (g << 8) | b
+
+
+def decode_palette(
+    reader: Reader, width: int, height: int, paletted: bool, palette_bits: int = 32
+) -> bytes:
+    # Prototype zones store some palettes as 16-bit A1R5G5B5 (512 bytes) rather
+    # than the usual 32-bit BGRA (1024 bytes); the header's last dword says which.
+    # Reading a 16-bit palette as 32-bit scrambles the colours *and* shifts the
+    # pixel data by 512 bytes -- the "bright green speckle" on rom/0/33's
+    # gratest_sizenn / gratest_s00_jew. See docs/zone/prototype-zones.md.
+    if not paletted:
+        colors: List[int] = []
+    elif palette_bits == 16:
+        colors = [_expand_a1r5g5b5(reader.u16()) for _ in range(256)]
+    else:
+        colors = [reader.u32() for _ in range(256)]
     buffer = bytearray(width * height * 4)
     for y in range(height):
         for x in range(width):
@@ -287,7 +308,7 @@ def parse_texture(data: bytes, section: Section) -> Optional[TextureImage]:
     bit_count = reader.u16()
     for _ in range(5):
         reader.u32()  # reserved zeros
-    reader.u32()  # 0x10 or 0x20?
+    palette_bits = reader.u32()  # bits per palette entry: 0x10 or 0x20
 
     if tex_type == 0xA1:
         dxt_type = reader.string(0x4)
@@ -301,9 +322,15 @@ def parse_texture(data: bytes, section: Section) -> Optional[TextureImage]:
             return None
     elif tex_type == 0xB1:
         reader.u32()  # 1?
-        rgba = decode_palette(reader, width, height, paletted=bit_count != 32)
+        rgba = decode_palette(
+            reader, width, height,
+            paletted=bit_count != 32, palette_bits=palette_bits,
+        )
     else:  # 0x91 / 0x81 (no extra dword before the palette)
-        rgba = decode_palette(reader, width, height, paletted=bit_count != 32)
+        rgba = decode_palette(
+            reader, width, height,
+            paletted=bit_count != 32, palette_bits=palette_bits,
+        )
 
     return TextureImage(name=name, width=width, height=height, rgba=rgba)
 
