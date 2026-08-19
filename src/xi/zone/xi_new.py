@@ -318,6 +318,57 @@ def register_zone_command_entry(zone_id: int, x: float = 0.0, y: float = 0.0,
     return True, f"!zone entry: added zone {zone_id} to scripts/commands/zone.lua"
 
 
+def suggest_spawn(dat_path: Path) -> tuple[float, float, float] | None:
+    """A standable spawn point derived from a zone's own collision.
+
+    `!zone` drops you at 0,0,0 for a zone with no ``zoneList`` entry, which for a
+    custom zone is usually underground (FFXI's +Y points *down*, so y=0 sits below
+    any floor at negative y). This picks the largest near-horizontal collision
+    triangle closest to the centre of the zone's floor area.
+
+    Returns ``None`` when the zone has no collision to measure.
+    """
+    from xi.zone.xi_export import parse_sections
+    from xi.zone.xi_decrypt import load_key_tables, decrypt_zone_objects
+    from xi.zone.xi_collision import decode_collision
+
+    data = bytearray(dat_path.read_bytes())
+    secs = [x for x in parse_sections(data) if x.type_code == 0x1C]
+    if not secs:
+        return None
+    sec = secs[0]
+    decrypt_zone_objects(data, sec.data_start, sec.start, sec.size,
+                         load_key_tables(Path(FFXI_DIR) / "FFXiMain.dll")[0])
+    try:
+        coll = decode_collision(data, sec.data_start)
+    except Exception:
+        return None
+    if not coll or not coll.tris:
+        return None
+
+    floors = []
+    for t in coll.tris:
+        ax, ay, az = t.v0
+        ux, uy, uz = (t.v1[i] - t.v0[i] for i in range(3))
+        vx, vy, vz = (t.v2[i] - t.v0[i] for i in range(3))
+        nx = uy * vz - uz * vy
+        ny = uz * vx - ux * vz
+        nz = ux * vy - uy * vx
+        ln = (nx * nx + ny * ny + nz * nz) ** 0.5
+        if ln == 0 or abs(ny / ln) < 0.85:   # too steep to stand on
+            continue
+        floors.append((ln,
+                       (ax + t.v1[0] + t.v2[0]) / 3,
+                       (ay + t.v1[1] + t.v2[1]) / 3,
+                       (az + t.v1[2] + t.v2[2]) / 3))
+    if not floors:
+        return None
+    mx = sum(f[1] for f in floors) / len(floors)
+    mz = sum(f[3] for f in floors) / len(floors)
+    best = min(floors, key=lambda f: (f[1] - mx) ** 2 + (f[3] - mz) ** 2)
+    return round(best[1], 3), round(best[2], 3), round(best[3], 3)
+
+
 def _split_sql(text: str) -> list[str]:
     """Statements from a SQL script, dropping full-line `--` comments and blanks."""
     body = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("--"))
@@ -384,6 +435,54 @@ def _weat_subtree_range(data: bytes) -> tuple[int, int] | None:
             if depth == 0:
                 return start, s.start + s.size
     return None
+
+
+def _top_level_dir_close(data: bytes) -> int | None:
+    """Offset of the ``0x00`` that closes the DAT's first top-level directory.
+
+    Zone DATs wrap everything in a single named top-level dir (``town``, ``selp``,
+    ``f_yu`` ...). Grafted subtrees must land *inside* it, mirroring where a real
+    outdoor zone keeps its ``weat`` package.
+    """
+    depth = 0
+    opened = False
+    for s in parse_sections(data):
+        if s.type_code == 0x01:
+            depth += 1
+            opened = True
+        elif s.type_code == 0x00:
+            depth -= 1
+            if opened and depth == 0:
+                return s.start
+    return None
+
+
+def _graft_template_sky(model_path: Path, template_dat: Path, dst: Path) -> tuple[int, bool]:
+    """Write ``model_path``'s geometry to ``dst`` carrying the template's sky.
+
+    Pre-production zones have no ``weat`` subtree at all, so the client treats them
+    as indoor: black sky, no weather, and the instant-logout behaviour that comes
+    with it. Cloning the template's whole ``weat`` package in gives them a real
+    outdoor sky without touching a single triangle of their geometry.
+
+    Returns ``(bytes_grafted, already_outdoor)``.
+    """
+    tmpl_data = template_dat.read_bytes()
+    rng = _weat_subtree_range(tmpl_data)
+    if rng is None:
+        raise ValueError(f"No 'weat' subtree in template {template_dat.name}")
+    sky = tmpl_data[rng[0]:rng[1]]
+
+    model = bytearray(model_path.read_bytes())
+    if _weat_subtree_range(model) is not None:
+        dst.write_bytes(bytes(model))      # already outdoor — keep its own sky
+        return 0, True
+
+    ins = _top_level_dir_close(model)
+    if ins is None:
+        raise ValueError(f"No top-level directory in {model_path.name} — cannot graft sky")
+    dst.write_bytes(bytes(model[:ins]) + sky + bytes(model[ins:]))
+    return len(sky), False
 
 
 def _splice_sky(data: bytearray, sky_path: Path,
@@ -473,6 +572,10 @@ def _copy_template_companions(zone_id: int, tmpl: dict, subdir: int,
               help="Pull sky/environment sections (0x2F env + 0x05 VFX) from this DAT "
                    "(ROM-relative path or absolute). Normally not needed — the template "
                    "bundle already carries the sky.")
+@click.option("--model-dat", "model_dat", default=None, metavar="DAT",
+              help="Use this DAT's geometry instead of the template's, keeping the "
+                   "template's sky and weather. Pre-production zones are converted to "
+                   "the retail 0x64 placement stride automatically.")
 @click.option("--zone-id", type=int, default=None,
               help="Force a specific zone ID instead of auto-assigning from 400+.")
 @click.option("--apply-db/--no-apply-db", "apply_db", default=None,
@@ -482,9 +585,13 @@ def _copy_template_companions(zone_id: int, tmpl: dict, subdir: int,
               help="Scaffold scripts/zones/<name>/{IDs,Zone}.lua under the dev server "
                    "(XI_SERVER_DIR). The map server needs IDs.lua or it errors on the "
                    "custom zone at startup. Default: on when a server checkout is found.")
+@click.option("--spawn", "spawn", default=None, metavar="X,Y,Z",
+              help="Spawn point for the `!zone` entry. Default: derived from the "
+                   "zone's own collision (0,0,0 is usually underground).")
 @click.option("--dry-run", is_flag=True,
               help="Show what would be written without touching any files.")
-def cmd(zone_name: str | None, template: str, sky_dat: str | None, zone_id: int | None,
+def cmd(zone_name: str | None, template: str, sky_dat: str | None,
+        model_dat: str | None, zone_id: int | None, spawn: str | None,
         apply_db: bool | None, server_scripts: bool, dry_run: bool):
     """Create a new zone from a template bundle.
 
@@ -515,6 +622,8 @@ def cmd(zone_name: str | None, template: str, sky_dat: str | None, zone_id: int 
     click.echo(f"Template:  {template}  ({tmpl['label']})")
     if sky_dat:
         click.echo(f"Sky:       {sky_dat}")
+    if model_dat:
+        click.echo(f"Model:     {model_dat}  (template supplies the sky)")
 
     if dry_run:
         click.echo(click.style("Dry run — nothing written.", fg="cyan"))
@@ -528,10 +637,34 @@ def cmd(zone_name: str | None, template: str, sky_dat: str | None, zone_id: int 
         except FileNotFoundError as e:
             raise click.ClickException(str(e))
 
+    model_path: Path | None = None
+    if model_dat:
+        from xi.zone.xi_export import resolve_dat_path
+        try:
+            model_path = resolve_dat_path(model_dat)
+        except FileNotFoundError as e:
+            raise click.ClickException(str(e))
+
     _ensure_rom10()
 
     dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(tmpl["dat"], dst)
+    if model_path:
+        try:
+            grafted, already_outdoor = _graft_template_sky(model_path, Path(tmpl["dat"]), dst)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+        click.echo(f"  Model: {model_path.name} ({model_path.stat().st_size:,} bytes)")
+        if already_outdoor:
+            click.echo("  Sky:   model already has its own weat subtree — kept as-is")
+        else:
+            click.echo(f"  Sky:   grafted {grafted:,} bytes of weat subtree from the template")
+        # Pre-production zones store placements at 0x54; the client always reads 0x64.
+        from xi.zone.xi_patch_proto import patch_file
+        from xi.zone.xi_decrypt import load_key_tables
+        _t1, _ = load_key_tables(Path(FFXI_DIR) / "FFXiMain.dll")
+        click.echo(f"  Stride: {patch_file(dst, _t1)}")
+    else:
+        shutil.copy2(tmpl["dat"], dst)
 
     if sky_path:
         data = bytearray(dst.read_bytes())
@@ -588,6 +721,28 @@ def cmd(zone_name: str | None, template: str, sky_dat: str | None, zone_id: int 
 
     # Scaffold the per-zone server Lua (IDs.lua + Zone.lua) — folder name MUST match
     # zone_settings.name (the server derives the path from the zone's name).
+    # `!zone <id>` needs a zoneList row or it drops the player at 0,0,0 — which for
+    # a zone whose floor sits at negative y means spawning underground.
+    if spawn:
+        try:
+            sx, sy, sz = (float(v) for v in spawn.split(","))
+        except ValueError:
+            raise click.ClickException(f"--spawn must be X,Y,Z — got {spawn!r}")
+    else:
+        pt = suggest_spawn(dst)
+        sx, sy, sz = pt if pt else (0.0, 0.0, 0.0)
+        if pt:
+            click.echo(f"  Spawn:     {sx}, {sy}, {sz} (derived from collision)")
+        else:
+            click.echo(click.style("  Spawn:     no collision found — defaulting to 0,0,0", fg="yellow"))
+    handled, msg = register_zone_command_entry(zone_id, sx, sy, sz)
+    if handled:
+        click.echo(click.style(f"  !zone:     {msg}", fg="green"))
+    else:
+        click.echo(click.style(f"  !zone:     {msg}", fg="yellow"))
+        click.echo("             add to `local zoneList` in scripts/commands/zone.lua:")
+        click.echo("             " + zone_command_entry_line(zone_id, sx, sy, sz).strip())
+
     scaffolded = False
     if server_scripts:
         msg = write_server_zone_scripts(zone_id, resolved_name)

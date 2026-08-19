@@ -20,7 +20,7 @@ import click
 
 from xi.ftable.xi_core import (
     patch_table, ftable_path, vtable_path,
-    load_all_tables, scan_file_ids,
+    load_all_tables, scan_file_ids, load_tables,
 )
 from xi.tex.xi_recolor import recolour_zone_dat
 from xi.xi_config import FFXI_DIR
@@ -268,10 +268,33 @@ def _ensure_rom10():
         vt10.write_bytes(b'\x00' * vt_size)
     return ft10, vt10
 
+def _claimed_rom10_slots(subdir: int) -> set[int]:
+    """Slots already registered in FTABLE10 for ``ROM10/<subdir>``, whether or not
+    the DAT exists on disk.
+
+    A zone whose files were removed (e.g. a template donor packaged with
+    ``make-template``) keeps its table entry. Allocating over that slot silently
+    repoints the old zone id at the new file, so disk state alone is not enough.
+    """
+    tables = load_tables(10)
+    if not tables:
+        return set()
+    fdata, vdata = tables
+    claimed: set[int] = set()
+    for fid in range(len(vdata)):
+        if vdata[fid] != 10 or fid * 2 + 2 > len(fdata):
+            continue
+        ft_val = struct.unpack_from('<H', fdata, fid * 2)[0]
+        if (ft_val >> 7) == subdir:
+            claimed.add(ft_val & 0x7F)
+    return claimed
+
+
 def _next_free_slot(rom10_dir: Path, subdir: int = 1) -> int:
     d = rom10_dir / str(subdir)
     d.mkdir(parents=True, exist_ok=True)
     used = {int(f.stem) for f in d.glob('*.DAT') if f.stem.isdigit()}
+    used |= _claimed_rom10_slots(subdir)
     slot = 0
     while slot in used:
         slot += 1
