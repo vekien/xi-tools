@@ -270,12 +270,13 @@ def decode_palette(reader: Reader, width: int, height: int, paletted: bool) -> b
 def parse_texture(data: bytes, section: Section) -> Optional[TextureImage]:
     reader = Reader(data, section.data_start)
     tex_type = reader.u8()
-    # 0x81 is an older 8-bit-paletted variant (seen in prototype/beta zones, e.g.
-    # rom/0/28.dat). Same header + data layout as 0x91 — just a different format
-    # tag — so it decodes via the identical paletted path. Without it the whole
-    # zone parses with 0 textures and renders untextured. xim rejects 0x81 too;
-    # Noesis handles it, which is why Noesis renders these zones correctly.
-    if tex_type not in (0x81, 0x91, 0xA1, 0xB1):
+    # Paletted variants that share the 0x91 header + payload layout and decode via
+    # the identical path: 0x01 and 0x05 (pre-production zones — ROM/0/41 and 42 use
+    # 0x01 for every texture) and 0x81 (prototype/beta, e.g. rom/0/28.dat). Without
+    # them the zone parses with 0 textures and exports untextured. xim rejects these
+    # too; Noesis handles them, which is why Noesis renders the zones correctly.
+    # DXT is 0xA1. See docs/zone/prototype-zones.md.
+    if tex_type not in (0x01, 0x05, 0x81, 0x91, 0xA1, 0xB1):
         return None
 
     name = reader.string(0x10)

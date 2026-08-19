@@ -144,6 +144,39 @@ def _norm(name: str) -> str:
     return name.replace(" ", "").replace("_", "").lower()
 
 
+def _looks_like_submesh(data, p: int, section_end: int, stride: int) -> bool:
+    """True if `p` looks like a submesh header (texture name + sane counts).
+
+    Pre-production zones often leave the 16-byte texture name blank (all NUL/space),
+    so the name alone cannot gate it — the vertex and index counts have to check out.
+    See docs/zone/prototype-zones.md.
+    """
+    if p + 20 > section_end:
+        return False
+    printable = 0
+    blank = True
+    for i in range(16):
+        c = data[p + i]
+        if c in (0, 0x20):
+            continue
+        blank = False
+        if c < 0x20 or c > 0x7E:
+            return False
+        printable += 1
+    if not blank and printable < 2:
+        return False
+    num_verts = struct.unpack_from("<H", data, p + 16)[0]
+    if num_verts == 0 or num_verts > 20000:
+        return False
+    ni_at = p + 20 + num_verts * stride
+    if ni_at + 4 > section_end:
+        return False
+    num_idx = struct.unpack_from("<H", data, ni_at)[0]
+    if num_idx == 0 or num_idx > 60000:
+        return False
+    return ni_at + 4 + num_idx * 2 <= section_end
+
+
 def parse_zone_mesh_section(data: bytes, section) -> Tuple[str, List[ZonePrimitive]]:
     """Parse one decrypted 0x2E section into (mesh name, textured triangle prims)."""
     ds = section.data_start
@@ -157,14 +190,40 @@ def parse_zone_mesh_section(data: bytes, section) -> Tuple[str, List[ZonePrimiti
     if mesh_count0 == 0:
         return mesh_name, []  # collision / "hit" model: bounding box only, no geometry
 
+    # Modern layout: submesh stream offset at +0x3C, count at +0x40. Pre-production
+    # sections leave both zero and park the offset at +0x4C / +0x5C instead, and can
+    # chain SEVERAL groups (count + bbox + pad = 0x20, then more submeshes).
+    def _off_ok(v: int) -> bool:
+        return 0 < v < section.size - 0x20
+
     section1_off = struct.unpack_from("<I", data, ds + 0x3C)[0]
     mesh_count1 = struct.unpack_from("<I", data, ds + 0x40)[0]
-    p = def_start + section1_off
+    if not _off_ok(section1_off) or section1_off > 0x200:
+        for at in (0x4C, 0x5C, 0x50, 0x58):
+            alt = struct.unpack_from("<I", data, ds + at)[0]
+            if _off_ok(alt) and alt <= 0x200:
+                section1_off = alt
+                break
+    if not _off_ok(section1_off):
+        for at in (0x4C, 0x5C, 0x50, 0x58):
+            alt = struct.unpack_from("<I", data, ds + at)[0]
+            if _off_ok(alt):
+                section1_off = alt
+                break
+    if mesh_count1 == 0 or mesh_count1 > 256:
+        mesh_count1 = mesh_count0
+    if not _off_ok(section1_off):
+        return mesh_name, []
 
     stride = 48 if vertex_blend else 36
     prims: List[ZonePrimitive] = []
+    section_end = section.start + section.size
 
-    for _ in range(mesh_count1):
+    def _parse_one(cursor: List[int]) -> bool:
+        """Read one submesh at cursor[0], advancing it. False if not a submesh header."""
+        p = cursor[0]
+        if not _looks_like_submesh(data, p, section_end, stride):
+            return False
         texture_name = data[p : p + 0x10].split(b"\x00", 1)[0].decode("ascii", "replace").strip()
         p += 0x10
         num_verts, _flags = struct.unpack_from("<HH", data, p)
@@ -191,11 +250,14 @@ def parse_zone_mesh_section(data: bytes, section) -> Tuple[str, List[ZonePrimiti
         indices = list(struct.unpack_from("<%dH" % num_indices, data, p))
         p += num_indices * 2
         p = (p + 3) & ~3  # align0x04 after each mesh
+        # Some pre-production meshes leave the strip bit clear on data that is
+        # plainly a strip; an index count not divisible by 3 gives it away.
+        use_strip = is_strip or (num_indices > 3 and num_indices % 3 != 0)
 
         prim = ZonePrimitive(texture_name=texture_name or None,
                              alpha_blend=bool(_flags & 0x8000),
                              alpha_test=bool(_flags & 0x2000))
-        if is_strip:
+        if use_strip:
             # Degenerate triangles (two identical indices) are restart markers in
             # FFXI strips. Using t%2 for parity would count them and flip the
             # winding of every triangle after the restart. Track parity separately
@@ -224,6 +286,51 @@ def parse_zone_mesh_section(data: bytes, section) -> Tuple[str, List[ZonePrimiti
                     prim.colors.append(color)
         if prim.positions:
             prims.append(prim)
+        cursor[0] = p
+        return True
+
+    # Primary stream. Read while the headers keep looking like submeshes — a high
+    # mesh_count0 often means "N groups" with headers between the streams.
+    cursor = [def_start + section1_off]
+    for _ in range(64):
+        if not _parse_one(cursor):
+            break
+    high_water = cursor[0]
+
+    def _try_group_at(at: int) -> bool:
+        """A chained group: count(u32) + bbox(6xf32) + pad(u32) = 0x20, then submeshes."""
+        nonlocal high_water
+        if at + 0x30 > section_end or at + 0x20 < high_water:
+            return False
+        count2 = struct.unpack_from("<I", data, at)[0]
+        if count2 < 1 or count2 > 64:
+            return False
+        name_at = at + 0x20
+        if not _looks_like_submesh(data, name_at, section_end, stride):
+            return False
+        sub = [name_at]
+        n = 0
+        for _ in range(count2):
+            if not _parse_one(sub):
+                break
+            n += 1
+        if n:
+            cursor[0] = sub[0]
+            high_water = max(high_water, sub[0])
+        return n > 0
+
+    for _ in range(8):
+        if not _try_group_at(cursor[0]):
+            break
+    for at in (0x4C, 0x5C):                      # groups the cursor did not reach
+        off = struct.unpack_from("<I", data, ds + at)[0]
+        if not _off_ok(off) or off <= section1_off:
+            continue
+        if not _try_group_at(ds + off):
+            _try_group_at(def_start + off)
+        for _ in range(8):
+            if not _try_group_at(cursor[0]):
+                break
 
     return mesh_name, prims
 
