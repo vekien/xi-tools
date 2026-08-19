@@ -124,6 +124,17 @@ def _load_library() -> ctypes.CDLL:
             "  cmake -B build && cmake --build build --config Release\n"
             "  (or set XI_NAVMESH_LIB to a prebuilt xi_navmesh.dll)")
     lib = ctypes.CDLL(str(path))
+    # The entry point was renamed xi_* at some point, but the prebuilt libs that ship
+    # in xi/libs (and older local builds) still export the cexi_* name. Accept either
+    # so a stale-but-working DLL doesn't fail with a bare AttributeError.
+    for sym in ("xi_build_navmesh", "cexi_build_navmesh"):
+        if hasattr(lib, sym):
+            lib.xi_build_navmesh = getattr(lib, sym)
+            break
+    else:
+        raise AttributeError(
+            f"{path.name} exports neither xi_build_navmesh nor cexi_build_navmesh — "
+            f"rebuild it: cmake -B build && cmake --build build --config Release")
     lib.xi_build_navmesh.restype = ctypes.c_int
     lib.xi_build_navmesh.argtypes = [
         ctypes.POINTER(ctypes.c_float), ctypes.c_int,        # verts, nverts
@@ -159,7 +170,8 @@ def build_navmesh(verts: array.array, tris: array.array, out_path: Path,
 
 
 def build_navmesh_from_collision(source: Path, out_path: Path,
-                                 settings: Optional[NavSettings] = None) -> tuple:
+                                 settings: Optional[NavSettings] = None,
+                                 floors_only: float = 0.0) -> tuple:
     """Decode a zone DAT's collision and bake a .nav. Returns (out_path, n_tris, n_tiles).
 
     Vertices are converted FFXI world -> Detour space (x, -y, -z) so the navmesh
@@ -172,17 +184,35 @@ def build_navmesh_from_collision(source: Path, out_path: Path,
     if not data.tris:
         raise ValueError("zone has no collision geometry to build a navmesh from")
 
+    tri_src = data.tris
+    if floors_only > 0.0:
+        # Voxelise only near-horizontal surfaces. Recast otherwise carves the footprint
+        # of every wall, pillar and prop out of the mesh (correct for an agent, wrong if
+        # you want a continuous floor), leaving holes you would fall through.
+        # Normal COMPUTED from the vertices: the collision's stored normals are not
+        # face normals (they disagree with the geometry on ~68% of triangles in the
+        # zones checked), so filtering on them keeps walls and drops floors.
+        def _up(t):
+            ux, uy, uz = (t.v1[i] - t.v0[i] for i in range(3))
+            vx, vy, vz = (t.v2[i] - t.v0[i] for i in range(3))
+            nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+            L = (nx * nx + ny * ny + nz * nz) ** 0.5
+            return abs(ny) / L if L > 1e-9 else 0.0
+        tri_src = [t for t in data.tris if _up(t) > floors_only]
+        if not tri_src:
+            raise ValueError(f"no surfaces flatter than |normal.y| > {floors_only} to build from")
+
     # Non-indexed soup: 3 verts per tri, sequential indices. FFXI (x,y,z) -> Detour (x,-y,-z).
     # Vertex order is (v0, v2, v1): the (x,-y,-z) Z-negation flips triangle winding, so we
     # reverse the order here to keep face normals pointing up in Detour space (walkable).
     verts = array.array("f")
-    for t in data.tris:
+    for t in tri_src:
         for (x, y, z) in (t.v0, t.v2, t.v1):
             verts.append(x); verts.append(-y); verts.append(-z)
-    tris = array.array("i", range(3 * len(data.tris)))
+    tris = array.array("i", range(3 * len(tri_src)))
 
     n_tiles = build_navmesh(verts, tris, out_path, settings)
-    return Path(out_path), len(data.tris), n_tiles
+    return Path(out_path), len(tri_src), n_tiles
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +359,13 @@ def navmesh_triangles(path: Path) -> list:
                help="Max step/climb height the agent can traverse")
 @_click.option("--cell-size", type=float, default=0.40, show_default=True, help="Recast voxel cell size")
 @_click.option("--tile-size", type=float, default=256.0, show_default=True, help="Tile size in cells")
+@_click.option("--floors-only", type=float, default=0.0, show_default=True, metavar="NY",
+               help="Voxelise only surfaces with |normal.y| > NY, computed from the geometry. "
+                    "Only useful on zones whose floors are genuinely flat: on one prototype "
+                    "zone a 0.5 cut discarded 88% of the walkable area and left islands. "
+                    "Check the result before relying on it. 0 = use all collision (default).")
 def cmd(dat_path: str, output, agent_radius: float, agent_max_climb: float,
-        cell_size: float, tile_size: float):
+        cell_size: float, tile_size: float, floors_only: float):
     """Bake a server navmesh (.nav) for a zone from its collision mesh.
 
     Decodes the zone's 0x1C collision and builds a Detour NAVMESHSET via the native
@@ -354,7 +389,8 @@ def cmd(dat_path: str, output, agent_radius: float, agent_max_climb: float,
     settings = NavSettings(cell_size=cell_size, agent_radius=agent_radius,
                            agent_max_climb=agent_max_climb, tile_size=tile_size)
     try:
-        outp, n_tris, n_tiles = build_navmesh_from_collision(source, out, settings)
+        outp, n_tris, n_tiles = build_navmesh_from_collision(source, out, settings,
+                                                             floors_only=floors_only)
     except (FileNotFoundError, ValueError, RuntimeError) as e:
         raise _click.ClickException(str(e))
     _click.echo(f"Wrote navmesh:  {outp}")

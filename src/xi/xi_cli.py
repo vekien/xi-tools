@@ -56,6 +56,8 @@ from xi.zone     import xi_new           as zone_new
 from xi.zone     import xi_make_template as zone_make_template
 from xi.zone     import xi_zone_delete   as zone_drop
 from xi.zone     import xi_footsteps     as zone_footsteps
+from xi.zone     import xi_patch_proto   as zone_patch_proto
+from xi.zone     import xi_import_collision as zone_import_collision
 from xi.fx       import xi_list       as fx_list
 from xi.fx       import xi_dump         as fx_dump
 from xi.fx       import xi_delete       as fx_delete
@@ -389,6 +391,8 @@ zone.add_command(zone_make_template.cmd,      'make-template')
 zone.add_command(zone_new.scaffold_server_cmd, 'scaffold-server')
 zone.add_command(zone_drop.cmd,               'delete')
 zone.add_command(zone_footsteps.cmd,          'footsteps')
+zone.add_command(zone_patch_proto.cmd,        'patch-proto')
+zone.add_command(zone_import_collision.cmd,   'import-collision')
 zone_export.tree_cmd.hidden = True
 zone_list.cmd.hidden = True
 zone_inject.cmd.hidden = True
