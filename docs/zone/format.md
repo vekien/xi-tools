@@ -9,6 +9,11 @@ table (`0x1C` ZoneDef), textures (`0x20`), environment (`0x2F`), particles
 (`0x05`), sound pointers (`0x3D`), trigger volumes (`0x36` ZoneInteraction —
 sub-areas / zone lines / doors), directories (`0x01`). No skeleton/skinned mesh.
 
+> This page describes the **shipped** layout. The unreleased dev maps in `ROM/0/`
+> predate it — chained mesh groups and `0x54` placement records — and a parser
+> written against this page reads them as half-empty or garbage without erroring.
+> See [prototype-zones.md](prototype-zones.md).
+
 ## Key insight: meshes are local + instanced
 
 `0x2E` mesh vertices are in **local** space. The world is assembled from the

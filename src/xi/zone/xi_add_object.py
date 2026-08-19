@@ -30,11 +30,15 @@ from xi.xi_config import FFXI_DIR, editable_dat
 from xi.entity.anim.xi_export import parse_sections
 from xi.entity.mesh.xi_export import resolve_dat_path
 from xi.zone.xi_decrypt import decrypt_zone_objects, load_key_tables, reencrypt_zone_objects
-from xi.zone.xi_zonedef import SECTION_TYPE_ZONE_DEF, add_placements, parse_zonedef
+from xi.zone.xi_zonedef import (SECTION_TYPE_ZONE_DEF, add_placements, parse_zonedef,
+                                  zonedef_record_size)
 
 
-def _record_id(sec: bytes, ds: int, index: int) -> str:
-    base = ds + 0x20 + index * 0x64
+def _record_id(sec: bytes, ds: int, index: int, record_size: int | None = None) -> str:
+    if record_size is None:
+        n = struct.unpack_from("<I", sec, ds + 4)[0] & 0x00FFFFFF
+        record_size = zonedef_record_size(sec, ds, n)
+    base = ds + 0x20 + index * record_size
     return sec[base : base + 0x10].split(b"\x00", 1)[0].decode("ascii", "replace").strip()
 
 
@@ -94,7 +98,7 @@ def add_objects(dat_path: Path, additions: Sequence[Tuple[str, Tuple[float, floa
     bboxes = _mesh_bboxes(bytearray(data), table1, _table2)
 
     def _rec_trs(buf: bytes, idx: int):
-        b = 0x10 + 0x20 + idx * 0x64
+        b = 0x10 + 0x20 + idx * parse_zonedef(bytearray(buf), 0x10, 0, len(buf)).record_size
         return (struct.unpack_from("<3f", buf, b + 0x10),
                 struct.unpack_from("<3f", buf, b + 0x1C),
                 struct.unpack_from("<3f", buf, b + 0x28))

@@ -266,46 +266,80 @@ def _handle_http_or_ws(conn: socket.socket) -> str | None:
     return None
 
 
+def _ws_unmask(payload: bytes, mask: bytes) -> bytes:
+    """XOR-unmask a client frame in bulk.
+
+    The obvious per-byte generator costs ~1.3s on a 20 MB message (a collision bake
+    is easily that big); the int XOR does the same work in ~0.13s."""
+    n = len(payload)
+    key = (mask * (n // 4 + 1))[:n]
+    return (int.from_bytes(payload, "big") ^ int.from_bytes(key, "big")).to_bytes(n, "big")
+
+
 def _ws_recv_text(conn: socket.socket) -> str | None:
-    """Return decoded text frame, '' for ping handled, None on close/error."""
-    hdr = _recv_exact(conn, 2)
-    if not hdr:
-        return None
-    b0, b1 = hdr[0], hdr[1]
-    opcode = b0 & 0x0F
-    masked = bool(b1 & 0x80)
-    length = b1 & 0x7F
-    if length == 126:
-        ext = _recv_exact(conn, 2)
-        if not ext:
+    """Return one decoded text MESSAGE, '' for control frames handled, None on close.
+
+    Reassembles FRAGMENTED messages. Browsers split large sends (a collision bake,
+    a fat change-set) into a text frame with FIN=0 plus continuation frames; the
+    old code ignored FIN entirely and returned '' for the 0x0 continuation opcode,
+    so the request was silently dropped and the editor just timed out with no error
+    ("bridge timeout: zone.saveChanges" / a publish that never comes back).
+    Control frames are allowed to interleave between fragments, per RFC 6455.
+    """
+    chunks: list[bytes] = []
+    msg_opcode: int | None = None
+    while True:
+        hdr = _recv_exact(conn, 2)
+        if not hdr:
             return None
-        length = struct.unpack("!H", ext)[0]
-    elif length == 127:
-        ext = _recv_exact(conn, 8)
-        if not ext:
+        b0, b1 = hdr[0], hdr[1]
+        fin = bool(b0 & 0x80)
+        opcode = b0 & 0x0F
+        masked = bool(b1 & 0x80)
+        length = b1 & 0x7F
+        if length == 126:
+            ext = _recv_exact(conn, 2)
+            if not ext:
+                return None
+            length = struct.unpack("!H", ext)[0]
+        elif length == 127:
+            ext = _recv_exact(conn, 8)
+            if not ext:
+                return None
+            length = struct.unpack("!Q", ext)[0]
+        mask = _recv_exact(conn, 4) if masked else b"\x00\x00\x00\x00"
+        if mask is None:
             return None
-        length = struct.unpack("!Q", ext)[0]
-    mask = _recv_exact(conn, 4) if masked else b"\x00\x00\x00\x00"
-    if mask is None:
-        return None
-    payload = _recv_exact(conn, length) if length else b""
-    if payload is None:
-        return None
-    if masked:
-        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
-    if opcode == 0x8:  # close
-        return None
-    if opcode == 0x9:  # ping → pong
-        _ws_send_frame(conn, payload, opcode=0xA)
-        return ""
-    if opcode == 0xA:  # pong
-        return ""
-    if opcode != 0x1:  # text only
-        return ""
-    try:
-        return payload.decode("utf-8")
-    except UnicodeDecodeError:
-        return ""
+        payload = _recv_exact(conn, length) if length else b""
+        if payload is None:
+            return None
+        if masked and payload:
+            payload = _ws_unmask(payload, mask)
+
+        if opcode == 0x8:  # close
+            return None
+        if opcode in (0x9, 0xA):  # ping → pong / pong
+            if opcode == 0x9:
+                _ws_send_frame(conn, payload, opcode=0xA)
+            if msg_opcode is None:
+                return ""
+            continue          # mid-message control frame: keep reassembling
+        if opcode == 0x0:     # continuation
+            if msg_opcode is None:
+                return ""     # stray continuation — nothing to append to
+            chunks.append(payload)
+        else:
+            msg_opcode = opcode
+            chunks = [payload]
+
+        if not fin:
+            continue
+        if msg_opcode != 0x1:  # text only
+            return ""
+        try:
+            return b"".join(chunks).decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
 
 
 def _ws_send_frame(conn: socket.socket, payload: bytes, opcode: int = 0x1) -> None:
@@ -476,10 +510,39 @@ class BridgeServer:
     def _run_with_log_tee(self, handle_command, method, params, log_line):
         """Run handle_command; tee writes to stderr-like progress via log frames when possible."""
         class _Tee:
+            """stdout/stderr stand-in that mirrors writes to the client as log frames.
+
+            This has to look like a TEXT stream to click, or one ``click.echo`` inside
+            a handler kills the whole request. click sniffs a stream by probing
+            ``write(b"")``: if that does NOT raise it concludes the stream is BINARY,
+            wraps it in a TextIOWrapper, and then feeds us encoded bytes — surfacing
+            as ``TypeError: write() argument must be str, not bytes`` mid-publish
+            (``_dbg()`` in xi_apply_changes is what tripped it).
+
+            So: reject bytes like a real text stream, and expose the text-stream
+            attributes click checks so it uses us as-is instead of wrapping.
+            ``isatty() -> False`` also makes click strip ANSI rather than route
+            through colorama, keeping escape codes out of the log frames.
+            """
+            encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+            errors = "replace"
+
             def __init__(self, real):
                 self._real = real
                 self._buf = ""
+            def isatty(self):
+                return False
+            def writable(self):
+                return True
+            def readable(self):
+                return False
+            def seekable(self):
+                return False
             def write(self, s):
+                if isinstance(s, (bytes, bytearray)):
+                    # Deliberate: see the class docstring. Quietly accepting this is
+                    # exactly what made click misclassify the stream as binary.
+                    raise TypeError("write() argument must be str, not bytes")
                 if not s:
                     return 0
                 self._real.write(s)

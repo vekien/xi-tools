@@ -60,7 +60,8 @@ from xi.zone.xi_export import (
 from xi.zone.xi_import import _zero_placement
 from xi.zone.xi_zonedef import (add_placements, add_collision_transforms, add_to_culling_tables,
                                   assign_placements_to_nearest_leaf, expand_placement_bounds_points, parse_zonedef,
-                                  hide_placement, remove_index_from_its_leaf, TRANSFORM_SIZE, TRANSFORM_CULLGROUP)
+                                  hide_placement, remove_index_from_its_leaf, TRANSFORM_SIZE, TRANSFORM_CULLGROUP,
+                                  zonedef_record_size)
 from xi.fx.xi_core import (
     parse_sections as fx_parse_sections,
     EFFECT_TYPE,
@@ -138,9 +139,15 @@ def _xi_prefixed(name: str) -> str:
     return ("xi_" + name)[:16]
 
 
-def _read_name(data: bytes, data_start: int, index: int) -> str:
-    """Read the 16-char mesh_id of a placement record (null-terminated ASCII)."""
-    base = data_start + 0x20 + index * 0x64
+def _read_name(data: bytes, data_start: int, index: int, record_size: int | None = None) -> str:
+    """Read the 16-char mesh_id of a placement record (null-terminated ASCII).
+
+    record_size defaults to the zone's detected stride (0x64 retail / 0x54 proto);
+    pass it in when the caller already resolved it, to avoid re-detecting per record."""
+    if record_size is None:
+        node_count = struct.unpack_from("<I", data, data_start + 4)[0] & 0x00FFFFFF
+        record_size = zonedef_record_size(data, data_start, node_count)
+    base = data_start + 0x20 + index * record_size
     raw = data[base: base + 0x10]
     return raw.split(b"\x00")[0].decode("ascii", errors="replace").strip()
 
@@ -717,7 +724,7 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
             want_idx = ch.get("index")
             if want_idx is not None and 0 <= want_idx < node_count:
                 idx = want_idx
-            rec = zonedef.data_start + 0x20 + idx * 0x64
+            rec = zonedef.data_start + 0x20 + idx * zd.record_size
             data[rec:rec + 0x10] = name.encode("ascii", "replace")[:0x10].ljust(0x10, b" ")
             struct.pack_into("<3f", data, rec + 0x10, *ch["pos"])
             struct.pack_into("<3f", data, rec + 0x1C, *ch["rot"])
@@ -742,7 +749,7 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
                     queue.remove(pick)
                 elif want is not None and len(queue) > 1:
                     def _d2(i):
-                        px, py, pz = struct.unpack_from("<3f", data, zonedef.data_start + 0x20 + i * 0x64 + 0x10)
+                        px, py, pz = struct.unpack_from("<3f", data, zonedef.data_start + 0x20 + i * zd.record_size + 0x10)
                         return (px - want[0]) ** 2 + (py - want[1]) ** 2 + (pz - want[2]) ** 2
                     pick = min(queue, key=_d2)
                     queue.remove(pick)

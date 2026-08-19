@@ -12,6 +12,7 @@ writes the client DATs.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -99,7 +100,8 @@ def _zone_migration_sql(zone_id: int, name: str, donor: int,
         f"DELETE FROM `zone_weather` WHERE zone = {zone_id};\n"
         f"INSERT INTO `zone_weather` (zone, weather) SELECT {zone_id}, weather FROM `zone_weather` WHERE zone = {donor};\n"
         f"\n"
-        f"-- 3. Server build: ensure MAX_ZONEID >= {zone_id + 1} (patches/zone_max_512.patch) - code, not SQL.\n"
+        f"-- 3. Server build: ensure MAX_ZONEID > {zone_id} (src/map/zone.h) and MAX_ZONE > {zone_id}\n"
+        f"--    (scripts/enum/zone.lua) - code, not SQL. zone.h needs a map/world rebuild.\n"
         f"-- 4. Restart the map server + client.\n"
     )
 
@@ -230,6 +232,90 @@ def write_server_zone_scripts(zone_id: int, zone_name: str) -> str | None:
     if not written:
         return f"server scripts: kept existing (hand-authored) {zdir}"
     return f"server scripts: wrote {'+'.join(written)} → scripts/zones/{zone_name}/"
+
+
+# --------------------------------------------------------------------------
+# !zone spawn entry (scripts/commands/zone.lua)
+# --------------------------------------------------------------------------
+
+# Header the server repo already uses for the custom block at the end of
+# `zoneList`; we append under it, or create it if this is the first custom zone.
+_ZONE_CMD_HEADER = "-- Custom ROM10 zones"
+
+# Column the `},` of a zoneList entry lines up on in the stock file. Only a
+# fallback — the real value is measured off the existing entries.
+_ZONE_CMD_ALIGN = 55
+
+# `{ 0xGG, 0xMM, <zone id>, ...` — auto-translate group/message, then the id.
+_ZONE_CMD_ENTRY_RE = re.compile(r'^\s*\{\s*0x[0-9A-Fa-f]+\s*,\s*0x[0-9A-Fa-f]+\s*,\s*(\d+)\s*,')
+
+
+def zone_command_entry_line(zone_id: int, x: float = 0.0, y: float = 0.0,
+                            z: float = 0.0, align: int = _ZONE_CMD_ALIGN) -> str:
+    """One `zoneList` row for a custom zone: no auto-translate phrase (0x00/0x00,
+    so it's reachable by numeric id only) plus the spawn position."""
+    body = f"    {{ 0x00, 0x00, {zone_id}, {x:.2f}, {y:.2f}, {z:.2f}"
+    return body + " " * max(1, align - len(body)) + "},"
+
+
+def _zone_list_bounds(lines: list[str]) -> tuple[int, int]:
+    """(first line after `local zoneList =` opens, index of its closing `}`)."""
+    start = next((i for i, l in enumerate(lines) if l.strip().startswith("local zoneList")), None)
+    if start is None:
+        raise ValueError("no `local zoneList` table in zone.lua")
+    # The table opens on the next non-blank line ("{"), and the matching close is
+    # the first `}` back at column 0 — entries are all indented.
+    close = next((i for i in range(start + 1, len(lines)) if lines[i].rstrip() == "}"), None)
+    if close is None:
+        raise ValueError("unterminated `zoneList` table in zone.lua")
+    return start, close
+
+
+def register_zone_command_entry(zone_id: int, x: float = 0.0, y: float = 0.0,
+                                z: float = 0.0) -> tuple[bool, str]:
+    """Add a `!zone <id>` spawn entry for a custom zone to the dev server's
+    ``scripts/commands/zone.lua``.
+
+    `!zone` drops you at 0,0,0 for any zone missing from its ``zoneList``, so the
+    entry is what gives a custom zone a real spawn point. Idempotent — an entry
+    for *zone_id* that's already there is left alone (hand-tuned coordinates
+    survive a re-inject).
+
+    Returns ``(handled, message)``. ``handled`` is False when there's no server
+    checkout to edit; the caller should then print the line for the user to paste.
+    """
+    from xi.xi_config import XI_SERVER_DIR, server_zone_command_lua
+    path = server_zone_command_lua()
+    if path is None:
+        if not XI_SERVER_DIR:
+            return False, "XI_SERVER_DIR is not set"
+        return False, f"{Path(XI_SERVER_DIR) / 'scripts' / 'commands' / 'zone.lua'} not found"
+
+    raw = path.read_bytes().decode("utf-8")
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    lines = raw.splitlines()
+
+    try:
+        start, close = _zone_list_bounds(lines)
+    except ValueError as exc:
+        return False, f"{path}: {exc}"
+
+    for line in lines[start:close]:
+        m = _ZONE_CMD_ENTRY_RE.match(line)
+        if m and int(m.group(1)) == zone_id:
+            return True, f"!zone entry: already present in {path.name} (left as-is)"
+
+    # Line the new `},` up on whatever column the file already uses.
+    align = next((l.rstrip().rindex("},") for l in reversed(lines[start:close])
+                  if l.rstrip().endswith("},")), _ZONE_CMD_ALIGN)
+
+    insert = ([] if any(_ZONE_CMD_HEADER in l for l in lines[start:close])
+              else [f"    {_ZONE_CMD_HEADER}"])
+    insert.append(zone_command_entry_line(zone_id, x, y, z, align))
+
+    lines[close:close] = insert
+    path.write_bytes((newline.join(lines) + newline).encode("utf-8"))
+    return True, f"!zone entry: added zone {zone_id} to scripts/commands/zone.lua"
 
 
 def _split_sql(text: str) -> list[str]:
@@ -518,7 +604,8 @@ def cmd(zone_name: str | None, template: str, sky_dat: str | None, zone_id: int 
         click.echo(f"  - Apply the migration: mysql -u{DB_USER} {DB_NAME} < \"{mig_path}\"")
     if not scaffolded:
         click.echo(f"  - Create scripts/zones/{resolved_name}/IDs.lua (+ Zone.lua) on the server")
-    click.echo(f"  - Ensure MAX_ZONEID >= {zone_id + 1}  (patches/zone_max_512.patch — server build)")
+    click.echo(f"  - Ensure MAX_ZONEID > {zone_id} (src/map/zone.h, needs a rebuild) "
+               f"and MAX_ZONE > {zone_id} (scripts/enum/zone.lua)")
     click.echo(f"  - Set the spawn point: UPDATE zone_settings ... (x, y, z) for zone {zone_id}")
     click.echo(f"  - Restart map server + client")
 

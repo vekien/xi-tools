@@ -103,6 +103,8 @@ and per-object mesh (0x2A) import/export.
 | [zone/reset.md](zone/reset.md) | Restoring a zone DAT to pristine state |
 | [zone/templates.md](zone/templates.md) | Zone templates: snapshotting a curated zone for reuse |
 | [zone/zones.md](zone/zones.md) | Zone ID reference and custom zone creation |
+| [zone/prototype-zones.md](zone/prototype-zones.md) | Unreleased dev/prototype maps in `ROM/0/`: the older layout they use (chained mesh groups, `0x54` placements) and why they load half-empty |
+| [zone/prototype-collision.md](zone/prototype-collision.md) | Worked example (ROM/0/41 as zone 501): stride conversion incl. `.base`, collision size ceiling, rebuilding collision from scratch |
 | [mesh/format.md](mesh/format.md) | 0x2A mesh + 0x20 texture binary format, opcodes, engine constraints |
 | [mesh/export.md](mesh/export.md) | Exporting a mesh DAT to glTF/FBX |
 | [mesh/import.md](mesh/import.md) | Importing an edited mesh back into a DAT |

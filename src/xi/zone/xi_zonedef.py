@@ -33,7 +33,10 @@ from xi.common.xi_section import encode_section_meta
 
 SECTION_TYPE_ZONE_DEF = 0x1C
 
-OBJ_RECORD_SIZE = 0x64
+OBJ_RECORD_SIZE = 0x64          # retail placement record
+OBJ_RECORD_SIZE_PROTO = 0x54    # pre-production zones (ROM/0/29,31..42...): same
+                                # name/pos/rot/scale fields packed tighter, and no
+                                # fileIdLink at +0x50. See docs/zone/prototype-zones.md.
 OBJ_ARRAY_START = 0x20          # objects begin at data_start + 0x20
 OBJ_DRAW_DISTANCE = 0x40        # float: engine stops drawing the object past this range
 OBJ_CULLING_LINK = 0x48         # u32 offset to a culling table (or 0)
@@ -67,10 +70,48 @@ class ZoneDef:
     offset_fields: List[int]            # absolute positions of every relocatable offset u32
     nodes: List[SpaceNode]
     root_rel: int
+    record_size: int = OBJ_RECORD_SIZE   # 0x64 retail / 0x54 proto (zonedef_record_size)
 
 
 def _u32(buf, pos) -> int:
     return struct.unpack_from("<I", buf, pos)[0]
+
+
+
+def zonedef_record_size(buf, data_start: int, node_count: int) -> int:
+    """Placement record stride for this 0x1C section: 0x64 (retail) or 0x54 (proto).
+
+    Reading a 0x54 zone at 0x64 misaligns every record after the first, and WRITING
+    at the wrong stride shreds neighbouring records' names and scales — so this must
+    be resolved before any placement access, not assumed.
+
+    Mode (top byte of the u32 at data_start) is <= 5 on the pre-production zones, the
+    same modes that skip 0x1C decryption. Where mode is ambiguous, score both strides
+    by how many records yield a printable mesh id and take the clear winner.
+    """
+    mode = (_u32(buf, data_start) >> 24) & 0xFF
+    if node_count < 2:
+        return OBJ_RECORD_SIZE_PROTO if 0 < mode <= 5 else OBJ_RECORD_SIZE
+
+    def _score(stride: int) -> int:
+        good = 0
+        for i in range(min(node_count, 32)):
+            b = data_start + OBJ_ARRAY_START + i * stride
+            if b + 0x10 > len(buf):
+                break
+            raw = bytes(buf[b:b + 0x10])
+            end = raw.find(0)
+            name = raw if end < 0 else raw[:end]
+            if len(name) >= 2 and all(0x20 <= c <= 0x7E for c in name):
+                good += 1
+        return good
+
+    s54, s64 = _score(OBJ_RECORD_SIZE_PROTO), _score(OBJ_RECORD_SIZE)
+    if s64 > s54 + 2:
+        return OBJ_RECORD_SIZE
+    if s54 > s64 + 2:
+        return OBJ_RECORD_SIZE_PROTO
+    return OBJ_RECORD_SIZE_PROTO if 0 < mode <= 5 else OBJ_RECORD_SIZE
 
 
 def parse_zonedef(buf: bytearray, data_start: int, section_start: int, section_size: int) -> ZoneDef:
@@ -78,6 +119,7 @@ def parse_zonedef(buf: bytearray, data_start: int, section_start: int, section_s
     ds = data_start
     payload_end_rel = section_size - 0x10
     node_count = _u32(buf, ds + 4) & 0x00FFFFFF
+    record_size = zonedef_record_size(buf, ds, node_count)
     blocks = (buf[ds + 0xC], buf[ds + 0xD], buf[ds + 0xE], buf[ds + 0xF])
 
     collision_rel = _u32(buf, ds + 0x08)
@@ -97,8 +139,8 @@ def parse_zonedef(buf: bytearray, data_start: int, section_start: int, section_s
 
     # --- objects: each record's cullingTableLink @ +0x48 (rel offset into culling) ---
     for i in range(node_count):
-        rec = ds + OBJ_ARRAY_START + i * OBJ_RECORD_SIZE
-        if _u32(buf, rec + OBJ_CULLING_LINK) != 0:
+        rec = ds + OBJ_ARRAY_START + i * record_size
+        if record_size >= OBJ_RECORD_SIZE and _u32(buf, rec + OBJ_CULLING_LINK) != 0:
             offset_fields.append(rec + OBJ_CULLING_LINK)
 
     # --- space-partitioning tree: walk from root, collect idxRef + 4 child offsets ---
@@ -151,7 +193,7 @@ def parse_zonedef(buf: bytearray, data_start: int, section_start: int, section_s
         data_start=ds, section_start=section_start, section_size=section_size,
         payload_end_rel=payload_end_rel, node_count=node_count, blocks=blocks,
         header_offsets=header_offsets, offset_fields=offset_fields, nodes=nodes,
-        root_rel=spacetree_rel,
+        root_rel=spacetree_rel, record_size=record_size,
     )
 
 
@@ -290,8 +332,8 @@ def _closest_leaf_for_point(buf: bytearray, zd: ZoneDef, point: Sequence[float])
     return min(leaves, key=lambda n: _leaf_distance_sq(buf, n.pos, point))
 
 
-def _placement_pos(buf: bytearray, ds: int, index: int) -> Tuple[float, float, float]:
-    return struct.unpack_from("<3f", buf, ds + OBJ_ARRAY_START + index * OBJ_RECORD_SIZE + 0x10)
+def _placement_pos(buf: bytearray, ds: int, index: int, record_size: int) -> Tuple[float, float, float]:
+    return struct.unpack_from("<3f", buf, ds + OBJ_ARRAY_START + index * record_size + 0x10)
 
 
 def _nearest_placement_leaf(buf: bytearray, zd: ZoneDef, point: Sequence[float],
@@ -303,7 +345,7 @@ def _nearest_placement_leaf(buf: bytearray, zd: ZoneDef, point: Sequence[float],
         for idx in leaf.contained:
             if idx in exclude or idx >= zd.node_count:
                 continue
-            p = _placement_pos(buf, zd.data_start, idx)
+            p = _placement_pos(buf, zd.data_start, idx, zd.record_size)
             d = ((p[0] - point[0]) * (p[0] - point[0]) +
                  (p[1] - point[1]) * (p[1] - point[1]) +
                  (p[2] - point[2]) * (p[2] - point[2]))
@@ -412,8 +454,9 @@ def add_placements(sec: bytearray, new_objs: Sequence[Tuple[int, Tuple[float, fl
     if n_add == 0:
         return bytearray(sec)
 
-    D = OBJ_RECORD_SIZE * n_add
-    objs_end_rel = OBJ_ARRAY_START + zd.node_count * OBJ_RECORD_SIZE
+    rsize = zd.record_size
+    D = rsize * n_add
+    objs_end_rel = OBJ_ARRAY_START + zd.node_count * rsize
     insert_abs = ds + objs_end_rel
 
     # --- build the new record bytes (copied from each src; TRS / id patched) ---
@@ -421,8 +464,8 @@ def add_placements(sec: bytearray, new_objs: Sequence[Tuple[int, Tuple[float, fl
     # keep the source record's values (used when only relocating, not re-orienting).
     blob = bytearray()
     for (src_index, position, rotation, scale, new_id) in new_objs:
-        src = ds + OBJ_ARRAY_START + src_index * OBJ_RECORD_SIZE
-        rec = bytearray(sec[src:src + OBJ_RECORD_SIZE])
+        src = ds + OBJ_ARRAY_START + src_index * rsize
+        rec = bytearray(sec[src:src + rsize])
         if new_id is not None:
             rec[0:0x10] = new_id.encode("ascii", "replace")[:0x10].ljust(0x10, b" ")
         struct.pack_into("<3f", rec, 0x10, *position)
@@ -581,7 +624,7 @@ def hide_placement(sec: bytearray, ds: int, index: int, coll_rel: int, far: floa
     to the zone — the moment the camera pulls in near the new object it crashes. The
     append-only state (every object still fully registered) is known-good, so we keep the
     DAT in that state and simply relocate the unwanted object far out of view/reach."""
-    rec = ds + OBJ_ARRAY_START + index * OBJ_RECORD_SIZE
+    rec = ds + OBJ_ARRAY_START + index * parse_zonedef(sec, ds, 0, len(sec)).record_size
     px, py, pz = struct.unpack_from("<3f", sec, rec + 0x10)
     struct.pack_into("<3f", sec, rec + 0x10, px, py + far, pz)
     if coll_rel:
@@ -785,3 +828,73 @@ def add_to_culling_tables(sec: bytearray, new_index: int, table_indices=None) ->
     _pack32(new, ds, (meta & 0xFF000000) | ((padded - ds - 8) & 0x00FFFFFF))
     _pack32(new, 4, encode_section_meta(padded, SECTION_TYPE_ZONE_DEF, what="0x1C ZoneDef section"))
     return new
+
+
+# ---------------------------------------------------------------------------
+# 0x54 -> 0x64 record conversion (make a pre-production zone readable by the client)
+# ---------------------------------------------------------------------------
+
+def convert_zonedef_to_retail_stride(sec: bytearray) -> Tuple[bytearray, int]:
+    """Rewrite a *decrypted* 0x1C section's placement array from 0x54 to 0x64 records.
+
+    The retail client's ZoneDef reader (FUN_10177ef0 in FFXiMain) advances placement
+    records by a hardcoded 0x64 with no branch on the mode byte, so it misreads every
+    pre-production zone: only the records that happen to land on a printable name and
+    sane floats get drawn, the rest are silently dropped. Widening the records to 0x64
+    (extra 16 bytes zeroed, so no fileIdLink / culling link) is what makes the client
+    agree with the file.
+
+    The array grows by node_count * 0x10, so everything after it shifts down. The
+    collision block is re-serialized at its new base rather than patched, which fixes
+    all of its internal offsets at once.
+
+    Returns (new_section, delta_bytes). Raises if the section is already 0x64.
+    """
+    from xi.zone.xi_collision import parse_collision_raw, serialize_collision_raw
+
+    ds = 0x10
+    zd = parse_zonedef(sec, ds, 0, len(sec))
+    if zd.record_size == OBJ_RECORD_SIZE:
+        raise ValueError("already retail-stride (0x64)")
+
+    n = zd.node_count
+    delta = n * (OBJ_RECORD_SIZE - OBJ_RECORD_SIZE_PROTO)
+    old_objs_end = OBJ_ARRAY_START + n * OBJ_RECORD_SIZE_PROTO
+    new_objs_end = OBJ_ARRAY_START + n * OBJ_RECORD_SIZE
+
+    coll_rel = zd.header_offsets["collision"]
+    if coll_rel and coll_rel != old_objs_end:
+        raise ValueError(f"collision block is not immediately after the object array "
+                         f"(coll={coll_rel:#x}, objs_end={old_objs_end:#x}) — unhandled layout")
+    if zd.header_offsets["spacetree"] not in (0, 2):
+        raise ValueError("zone has a space tree — relocation of tree nodes is not implemented")
+
+    raw = parse_collision_raw(sec, ds, zd.payload_end_rel) if coll_rel else None
+
+    out = bytearray(sec[:ds + OBJ_ARRAY_START])          # section header + 0x1C header
+    for i in range(n):                                   # widen every record
+        src = ds + OBJ_ARRAY_START + i * OBJ_RECORD_SIZE_PROTO
+        out += sec[src:src + OBJ_RECORD_SIZE_PROTO]
+        out += bytes(OBJ_RECORD_SIZE - OBJ_RECORD_SIZE_PROTO)
+
+    if raw is not None:
+        raw.coll_rel = new_objs_end                      # serializer recomputes from this
+        out += serialize_collision_raw(raw)
+
+    # header offsets that pointed at the collision block
+    for off in (0x08, 0x14):                             # collision, culling
+        if _u32(out, ds + off) == coll_rel:
+            _pack32(out, ds + off, new_objs_end)
+
+    # payload length (low 24 bits at data_start; top byte is the mode, leave it alone)
+    meta = _u32(out, ds)
+    _pack32(out, ds, (meta & 0xFF000000) | ((meta & 0x00FFFFFF) + delta))
+    struct.pack_into("<I", out, ds + 4, (n & 0x00FFFFFF) | (_u32(out, ds + 4) & 0xFF000000))
+
+    # section meta: size must cover the grown payload, 16-byte aligned. Keep the
+    # original flag bits (is_shadow / ver_num / ...) — only size and type change.
+    out += bytes((-len(out)) & 0xF)
+    flags = _u32(sec, 4)
+    struct.pack_into("<I", out, 4,
+                     encode_section_meta(len(out), SECTION_TYPE_ZONE_DEF, flags))
+    return out, delta

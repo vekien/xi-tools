@@ -232,9 +232,11 @@ def parse_zone_def(data: bytearray, section, table1: bytes) -> List[Placement]:
     """Decrypt + parse the 0x1C ZoneDef into object placements (id + TRS)."""
     node_count = decrypt_zone_objects(data, section.data_start, section.start, section.size, table1)
     ds = section.data_start
+    from xi.zone.xi_zonedef import zonedef_record_size
+    record_size = zonedef_record_size(data, ds, node_count)   # 0x64 retail / 0x54 proto
     placements: List[Placement] = []
     for i in range(node_count):
-        b = ds + 0x20 + i * 0x64
+        b = ds + 0x20 + i * record_size
         mesh_id = data[b : b + 0x10].split(b"\x00", 1)[0].decode("ascii", "replace").strip()
         pos = struct.unpack_from("<3f", data, b + 0x10)
         rot = struct.unpack_from("<3f", data, b + 0x1C)

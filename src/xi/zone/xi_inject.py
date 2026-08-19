@@ -354,11 +354,20 @@ def _find_zone_by_name(name: str, zone_names: list[str]) -> int | None:
                if lower in zname.lower().replace('_', ' ')]
     return matches[0][0] if len(matches) == 1 else None
 
+# Custom zones start at 400. The ceiling matches the server's MAX_ZONEID and must
+# stay under 856: for zones >= 0x100 the client derives event/dialog file ids as
+# model+1100/+1700, only 600 apart, so zone Z's event DAT would land on zone
+# Z-600's dialog DAT. 800 keeps a margin.
+CUSTOM_ZONE_MIN = 400
+CUSTOM_ZONE_MAX = 800   # exclusive
+
+
 def _next_free_zone_id(tables: dict) -> int:
-    for zid in range(400, 512):
+    for zid in range(CUSTOM_ZONE_MIN, CUSTOM_ZONE_MAX):
         if not scan_file_ids([zone_model_file_id(zid)], tables):
             return zid
-    raise click.ClickException('No free zone IDs in range 400–511.')
+    raise click.ClickException(
+        f'No free zone IDs in range {CUSTOM_ZONE_MIN}–{CUSTOM_ZONE_MAX - 1}.')
 
 
 # ---------------------------------------------------------------------------
@@ -519,8 +528,27 @@ def cmd(name: str, clone: str, hue: float | None, saturation: float | None,
         register_zone_file(fid, sd, sl)   # ROM10 + base tables
 
     click.echo(click.style(f'\n✓ Zone {zone_id} "{name}" registered.', fg='green'))
+
+    # !zone spawn entry — edited in place when XI_SERVER_DIR points at a checkout,
+    # otherwise printed for the user to paste.
+    from xi.zone.xi_new import (   # lazy: xi_new imports this module
+        register_zone_command_entry, zone_command_entry_line, _ZONE_CMD_HEADER,
+    )
+    handled, msg = register_zone_command_entry(zone_id)
+    if handled:
+        click.echo(f'  {msg}')
+    else:
+        click.echo(click.style(f'\n  warning: cannot edit the !zone command ({msg}).', fg='yellow'))
+        click.echo('  Set XI_SERVER_DIR, or add this to `local zoneList` in '
+                   'scripts/commands/zone.lua,')
+        click.echo('  just above its closing `}`:')
+        click.echo(click.style(f'\n    {_ZONE_CMD_HEADER}', fg='cyan'))
+        click.echo(click.style(zone_command_entry_line(zone_id), fg='cyan'))
+
     click.echo(f'\nServer-side TODO:')
-    click.echo(f'  1. Apply patches/zone_max_512.patch (MAX_ZONEID >= {zone_id + 1})')
+    click.echo(f'  1. Ensure MAX_ZONEID > {zone_id} (src/map/zone.h) and MAX_ZONE '
+               f'> {zone_id} (scripts/enum/zone.lua)')
     click.echo(f'  2. INSERT INTO zone_settings VALUES ({zone_id}, ...)')
-    click.echo(f'  3. Create scripts/zones/{name.replace(" ", "_")}/')
+    click.echo(f'  3. Create scripts/zones/{name.replace(" ", "_")}/ '
+               f'(`xi zone scaffold-server --zone-id {zone_id}` once the DB row exists)')
     click.echo(f'  4. Restart server + client')

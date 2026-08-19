@@ -165,15 +165,16 @@ def _zone_tree_payload(dat: Path) -> dict:
 @click.option("--fx", "with_fx", is_flag=True, help="Emit zone visual effects for DAT_PATH.")
 @click.option("--objects", is_flag=True, help="Emit object/placement records for DAT_PATH.")
 @click.option("--rooms", is_flag=True, help="When DAT_PATH is omitted, include unnamed room DATs.")
+@click.option("--dev", is_flag=True, help="When DAT_PATH is omitted, include curated dev/prototype DATs.")
 @click.option("--search", "query", default=None, help="When DAT_PATH is omitted, filter zones by name.")
 @click.option("--output", "output", type=click.Path(path_type=Path), default=None)
 def zone_json_cmd(dat_path: str | None, tree: bool, with_fx: bool, objects: bool,
-                  rooms: bool, query: str | None, output: Path | None):
+                  rooms: bool, dev: bool, query: str | None, output: Path | None):
     """Emit zone listings or DAT inspection data as JSON."""
     if dat_path is None:
         from xi.zone.xi_list import get_zone_entries
 
-        zones = get_zone_entries(path_prefix="game/", include_rooms=rooms)
+        zones = get_zone_entries(path_prefix="game/", include_rooms=rooms, include_dev=dev)
         if query:
             q = query.lower()
             zones = [z for z in zones if q in z["name"].lower()]

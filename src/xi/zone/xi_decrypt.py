@@ -88,6 +88,8 @@ def _zone_objects_mask_names(buf: bytearray, data_start: int, node_count: int) -
     """XOR each object's 16-char name with 0x55 (self-inverse: mask == unmask)."""
     name_pos = data_start + 0x20  # offsetFrom(section, 0x30) == data_start + 0x20
     for i in range(node_count):
+        # 0x64 is correct here: this pass only runs for mode > 0x1A, and every known
+        # 0x54 (pre-production) zone is mode <= 5, i.e. never encrypted.
         base = name_pos + i * 0x64
         for j in range(0x10):
             buf[base + j] ^= 0x55

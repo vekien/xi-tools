@@ -8,6 +8,8 @@ a zone DAT (`ROM/<dir>/<dat>.DAT`). Mirrors the `xi zone` command group.
 | Command | Doc | What it does |
 |---|---|---|
 | `zone json` | [zones.md](zones.md) | List every FFXI zone and its DAT path (via FTABLE) |
+| `zone json --dev` | [prototype-zones.md](prototype-zones.md) | Also list the unreleased dev/prototype maps in `ROM/0/` — read this before parsing or publishing to one |
+| — | [prototype-collision.md](prototype-collision.md) | Worked example: getting a `0x54` prototype zone playable — stride conversion, collision limits, what not to try |
 | `zone export` | [export.md](export.md) | Export a whole zone (meshes + placements + textures) to GLB/FBX |
 | `zone import` | [import.md](import.md) | Import an edited whole-zone GLB (move/rotate/scale/delete + mesh-merge) |
 | `zone import-json` | [import-json.md](import-json.md) | Apply a JSON change-set from the web level editor |

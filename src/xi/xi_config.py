@@ -286,6 +286,16 @@ def server_zone_scripts_dir() -> Path | None:
     p = Path(XI_SERVER_DIR) / 'scripts' / 'zones'
     return p if p.is_dir() else None
 
+
+def server_zone_command_lua() -> Path | None:
+    """`scripts/commands/zone.lua` under the dev server checkout — the `!zone`
+    GM command, whose `zoneList` holds each zone's spawn point. None if
+    XI_SERVER_DIR is unset or the file isn't there."""
+    if not XI_SERVER_DIR:
+        return None
+    p = Path(XI_SERVER_DIR) / 'scripts' / 'commands' / 'zone.lua'
+    return p if p.is_file() else None
+
 TEXCONV_PATH = os.environ.get('TEXCONV_PATH',
     'texconv' if _IS_LINUX else os.path.join(XI_TOOLS_DIR, 'misc', 'texconv.exe'))
 

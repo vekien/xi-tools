@@ -103,7 +103,59 @@ def zone_file_id(zone_id: int) -> int:
     return 0x64 + zone_id if zone_id < 0x100 else 0x147B3 + (zone_id - 0x100)
 
 
-def get_zone_entries(path_prefix: str = 'game/', include_rooms: bool = False) -> list[dict]:
+DEV_GROUP = 'Dev / Prototype'
+
+# Hand-curated leftover development maps. These never shipped as playable zones:
+# they have no entry in the zone-name table and no zone id, so neither the named
+# scan above nor the FTABLE room scan can surface them — they are listed by path.
+#
+# Names marked "?" are inferred from the mesh/texture names inside each DAT
+# (e.g. ROM/0/39 carries `ghe_jk0`/`uge_ie*` textures → Ghelsba), not from any
+# official source. Rename freely.
+#
+# Most of these use the pre-production layout — 0x54 placement records and/or
+# multi-group meshes. They LOAD, but publishing edits back is not supported:
+# the writer hardcodes the 0x64 record size. See xi.zone.xi_zonedef.
+DEV_ZONES: list[tuple[str, str]] = [
+    ('ROM/1/5.DAT',  'Character Creation'),
+    ('ROM/0/28.DAT', 'Dev Town — windmill + bridge'),
+    ('ROM/0/29.DAT', 'Dev Snowfield'),                      # snowfiel* textures
+    ('ROM/0/30.DAT', 'Dev Snowfield 2'),                    # setugen = 雪原
+    ('ROM/0/31.DAT', 'Dev Cave + Waterfall'),               # gratest_cave / _taki
+    ('ROM/0/32.DAT', 'Dev Boss Test'),                      # ren_testboss_a
+    ('ROM/0/33.DAT', 'Dev Castle Town'),                    # gratest_* walls/towers
+    ('ROM/0/34.DAT', 'Dev Desert'),                         # sabaku = 砂漠
+    ('ROM/0/35.DAT', 'Dev Forest — moss test'),             # m_koke = 苔 (moss)
+    ('ROM/0/36.DAT', 'Dev Cliffs + Forest'),                # cliff_f1 / forest_g
+    ('ROM/0/37.DAT', 'Dev World Map / diorama?'),           # anai syama* + ship
+    ('ROM/0/38.DAT', 'Dev Mountain Terrain'),               # yama, gake = cliff
+    ('ROM/0/39.DAT', 'Fort Ghelsba prototype?'),            # ghe_jk0, uge_ie*
+    ('ROM/0/40.DAT', 'Dev Test Plane'),                     # 100 flat tiles, 400x400
+    ('ROM/0/41.DAT', 'Castle prototype — very early?'),     # mix12_28castle*
+    ('ROM/0/42.DAT', 'Tower prototype?'),                   # twr2bai tower_*
+    ('ROM/0/43.DAT', "Northern San d'Oria prototype?"),     # origin san_d/san_g/ron_w
+    ('ROM/0/44.DAT', 'Bastok interior prototype?'),         # r_1ba02_room
+    ('ROM/0/46.DAT', "Ru'Lude Gardens prototype (untextured)"),  # 3 nation crests, ekken
+    ('ROM/0/47.DAT', "Chateau d'Oraguille prototype?"),     # uwa_*, monsyou, e_ekken
+    ('ROM/0/48.DAT', 'Selbina prototype (untextured)'),     # ami = nets, cen_shop
+    ('ROM/0/49.DAT', 'Ship / airship room prototype?'),     # sroom_*, ship_roo
+]
+
+
+def get_dev_entries(path_prefix: str = 'game/') -> list[dict]:
+    """Curated dev/prototype DATs (see DEV_ZONES), skipping any not on disk.
+
+    No 'id' key — these have no zone id, same as room entries.
+    """
+    out = []
+    for dat, name in DEV_ZONES:
+        if (Path(FFXI_DIR) / dat).is_file():
+            out.append({'name': name, 'path': path_prefix + dat, 'group': DEV_GROUP})
+    return out
+
+
+def get_zone_entries(path_prefix: str = 'game/', include_rooms: bool = False,
+                     include_dev: bool = False) -> list[dict]:
     name_path = Path(FFXI_DIR) / ZONE_NAME_DAT
     names = parse_dmsg(name_path.read_bytes())
     tables = load_all_tables()
@@ -125,6 +177,9 @@ def get_zone_entries(path_prefix: str = 'game/', include_rooms: bool = False) ->
         zones.append({'id': zone_id, 'name': name, 'path': path_prefix + dat})
 
     zones.sort(key=lambda z: z['name'].lower())
+
+    if include_dev:
+        zones += get_dev_entries(path_prefix=path_prefix)
 
     if include_rooms:
         zones += get_room_entries(path_prefix=path_prefix, _known_tables=tables)
@@ -197,12 +252,16 @@ def get_room_entries(path_prefix: str = 'game/', _known_tables=None) -> list[dic
               help='Prefix used for DAT paths in JSON output.')
 @click.option('--rooms', is_flag=True, default=False,
               help='Include unnamed zone DATs (rooms, private zones) as a Rooms group.')
+@click.option('--dev', is_flag=True, default=False,
+              help='Include curated dev/prototype DATs as a "Dev / Prototype" group.')
 @click.option('--search', '-s', default=None, metavar='TEXT',
               help='Filter to zones whose name contains TEXT (case-insensitive).')
-def cmd(as_json: bool, output: Path | None, path_prefix: str, rooms: bool, search: str | None):
+def cmd(as_json: bool, output: Path | None, path_prefix: str, rooms: bool, dev: bool,
+        search: str | None):
     """List FFXI zones resolved through FTABLE."""
     try:
-        zones = get_zone_entries(path_prefix=path_prefix, include_rooms=rooms)
+        zones = get_zone_entries(path_prefix=path_prefix, include_rooms=rooms,
+                                 include_dev=dev)
     except Exception as e:
         raise click.ClickException(str(e)) from e
 
