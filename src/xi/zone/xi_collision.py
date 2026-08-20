@@ -1038,12 +1038,31 @@ def clear_collision(sec: bytearray) -> bytearray:
         struct.pack_into("<I", kept_transforms, _i * _TF_SIZE + _TF_CULLGROUP, 0)
     empty_raw = RawCollision(
         coll_rel=raw.coll_rel,
-        # PRESERVE the space-tree index count (collision header +0x18) — it mirrors
-        # node_count, NOT the collision geometry we're zeroing. add_placements later
-        # INCREMENTS it by the placements it registers (xi_zonedef.py:488-490), so
-        # zeroing it here under-allocates the engine's visible-object cull buffer and
-        # crashes large outdoor zones (2150 objects vs idxCount 0/1). Keep it intact.
-        idx_count=raw.idx_count,
+        # ZERO the space-tree index count (collision header +0x18).
+        #
+        # This one is counter-intuitive and was diagnosed from a crash dump. The
+        # client relocates the section's stored offsets into pointers on load. With
+        # idx_count > 0 it runs a SECOND, per-node pass that re-visits the pair
+        # graph's mesh references -- so every `mesh` word in a pair gets the section
+        # base added TWICE and becomes a wild pointer. The client then faults on the
+        # first collision query (FFXiMain +0x168069, `MOV EBP,[ECX+8]`), which for a
+        # zone you just entered is the ground-height query, i.e. an instant crash.
+        #
+        # Proof from pol.exe's dump: pair@0x7A9B18 holds mesh=0x176100 and the
+        # section loaded at base 0x36791530, so the pointer should be 0x36907630;
+        # ECX at the fault was 0x6D098B60 == base + base + 0x176100. The transform
+        # word in the SAME pair relocated correctly once.
+        #
+        # Baked collision is reachable only through the grid->group->pair graph (one
+        # shared identity transform, no per-node ownership), so the per-node pass has
+        # nothing legitimate to do and zeroing it is correct for a --replace.
+        #
+        # Earlier note claimed zeroing this under-allocates the visible-object cull
+        # buffer and crashed a 2150-object zone. That was observed for a zone whose
+        # placements still owned collision; it does not apply to a flat re-bake, and
+        # rom/0/33 (690 placements) loads and runs with it zeroed. If a huge zone ever
+        # regresses, that is the trade-off to revisit -- not this line in isolation.
+        idx_count=0,
         meshes=[],
         transforms=kept_transforms,
         transforms_old_off=raw.transforms_old_off,
