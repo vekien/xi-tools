@@ -992,11 +992,18 @@ def add_collision(sec: bytearray, tris: Sequence[AuthoredTri],
     if delta:
         from xi.zone.xi_zonedef import parse_zonedef
         cb_abs = ds + raw.coll_rel
+        # Only bump values that could actually BE offsets. parse_zonedef's
+        # offset_fields is heuristic and includes at least one float (ds+0x18,
+        # e.g. 3.4956 -> 0x405FB76B); read as an integer that is ~1.08 billion, so
+        # an unguarded `val >= old_map_off` test "relocates" it and silently
+        # corrupts the value on every bake. A real offset is always inside the
+        # section payload.
+        payload_limit = len(sec) - ds
         for fpos in parse_zonedef(sec, ds, 0, len(sec)).offset_fields:
             if fpos >= cb_abs:
                 continue
             val = _u32(new, fpos)
-            if val >= old_map_off:
+            if old_map_off <= val < payload_limit:
                 _pack32(new, fpos, val + delta)
 
     total = len(new)
