@@ -471,7 +471,20 @@ def _graft_template_sky(model_path: Path, template_dat: Path, dst: Path) -> tupl
     rng = _weat_subtree_range(tmpl_data)
     if rng is None:
         raise ValueError(f"No 'weat' subtree in template {template_dat.name}")
-    sky = tmpl_data[rng[0]:rng[1]]
+
+    # Rebuild the subtree section by section, dropping the same types _splice_sky
+    # drops: weather VFX (0x05), sound (0x3D), water (0x25) and line (0x3E) all
+    # reference resources that live OUTSIDE the weat subtree, so carrying them into
+    # a zone that has no such resources crashes the client on load. The 0x01/0x00
+    # directory sections are kept, so the tree stays balanced.
+    sky = bytearray()
+    for sec in parse_sections(tmpl_data):
+        if not (rng[0] <= sec.start < rng[1]):
+            continue
+        if sec.type_code in _SKY_DROP_TYPES:
+            continue
+        sky += tmpl_data[sec.start:sec.start + sec.size]
+    sky = bytes(sky)
 
     model = bytearray(model_path.read_bytes())
     if _weat_subtree_range(model) is not None:
