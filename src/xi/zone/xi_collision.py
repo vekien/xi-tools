@@ -992,12 +992,15 @@ def add_collision(sec: bytearray, tris: Sequence[AuthoredTri],
     if delta:
         from xi.zone.xi_zonedef import parse_zonedef
         cb_abs = ds + raw.coll_rel
-        # Only bump values that could actually BE offsets. parse_zonedef's
-        # offset_fields is heuristic and includes at least one float (ds+0x18,
-        # e.g. 3.4956 -> 0x405FB76B); read as an integer that is ~1.08 billion, so
-        # an unguarded `val >= old_map_off` test "relocates" it and silently
-        # corrupts the value on every bake. A real offset is always inside the
-        # section payload.
+        # Only bump values that could actually BE offsets. ds+0x18 is a genuine
+        # offset field -- the client reads it as `slot[0x19] = ds + [ds+0x18]`, a
+        # 256-entry x 0x4c resource table (FFXiMain 10178001..10178014) -- but old
+        # pre-production zones carry garbage there (rom/0/33: 0x405FB76B, rom/0/41:
+        # 0x428F4658; rom/0/28 and retail hold sane offsets). The client ignores it
+        # on those zones because the table is gated on the format version byte at
+        # ds+0x03 being >= 0x12, and they are version 5-8. Relocating a garbage
+        # value is meaningless and only makes it harder to recognise, so bound the
+        # test: a real offset is always inside the section payload.
         payload_limit = len(sec) - ds
         for fpos in parse_zonedef(sec, ds, 0, len(sec)).offset_fields:
             if fpos >= cb_abs:
