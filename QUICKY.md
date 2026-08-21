@@ -225,7 +225,7 @@ xi ui tex si ROM/0/2.DAT
 xi ui tex sx ROM/119/50.DAT --ffxi "<FFXI_PIVOT_DIR>"
 xi ui tex si ROM/119/50.DAT --ffxi "<FFXI_PIVOT_DIR>"
 
-# Resizing is automatic — sprite source rects are rescaled from the geometry sheet
+# Edited PNGs are resampled to the size the game expects (titlwin -> 1024, ex1us -> 256)
 xi ui tex si ROM/119/50.DAT
 xi ui tex si ROM/119/50.DAT --no-resize        # import textures, leave rects alone
 xi ui tex si ROM/119/50.DAT --repair-rects     # rebuild rects from the reference sheet

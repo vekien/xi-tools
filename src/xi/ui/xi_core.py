@@ -695,3 +695,14 @@ def scale_layout_rects(data: bytearray, resized: dict) -> list:
                 struct.pack_into('<4H', data, off + pre + SRC_RECT_OFFSET, *new)
                 changed.append((name, off, rect, new))
     return changed
+
+
+def canonical_texture_sizes(dat_file: Path) -> dict:
+    """Texture name -> the pixel size the game expects, from the reference sheet.
+
+    The size a sprite is laid out for is a property of the client's screen layout, not
+    of whatever PNG happens to be sitting in the export folder. Import resamples to this
+    so the texture always matches what the DAT's sprite records already address.
+    """
+    model = sheet_reference(dat_file)
+    return dict(model[0]) if model else {}

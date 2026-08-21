@@ -159,27 +159,25 @@ from `255x255` to `1023x1023` made the full texture render at the same on-screen
 the client downsamples the larger source into the unchanged destination quad, which is
 the supersampling that buys sharpness.
 
-### How rects are kept in sync
+### Textures are fitted to the size the game expects
 
-The import already knows what changed: it resized `titlwin` from 1024 to 2048, so every
-rect pointing into `titlwin` is multiplied by 2. That is the whole mechanism.
+The size of a UI texture is fixed by the client's screen layout, not by whatever PNG is
+in the export folder. `titlwin` is 1024x1024 because that is what its sprite records
+address; feeding a 2048 or a 512 PNG does not change that.
+
+So import resamples on the way in:
 
 ```
-imported titlwin.dds [DXT3 -> DXT3] 1024x1024 -> 2048x2048 -> titlwin
-layout: titlwin src 1024x562@(0,304) -> 2048x1124@(0,608)
-layout: titlwin src 139x27@(8,15)    -> 278x54@(16,30)
+rebuilt titlwin.png -> titlwin.dds [DXT3; ...; fit 2048x2048 -> 1024x1024]
+rebuilt ex1us.png   -> ex1us.dds   [DXT3; ...; fit 512x512 -> 256x256]
 ```
 
-Using the delta from the import itself means no reference file is consulted, nothing has
-to be matched up sprite-by-sprite, and it cannot double-apply — it only runs for a
-texture whose size actually changed in that run. Re-importing at the same size reports
-nothing, and going 2048 back to 1024 restores the original values exactly.
+Edit at whatever resolution suits you. The texture entry, the chunk size and every
+sprite rect stay exactly as they were, because nothing about the DAT's geometry changed.
 
-A whole-texture extent is remapped rather than multiplied: `1023` on a 1024px texture
-becomes `2047`, not `2046`, because that field is an inclusive extent. Atlas coordinates
-scale proportionally.
-
-`--no-resize` skips the pass, leaving a resized texture pointing at its old sub-region.
+The target comes from the reference sheet, falling back to the size the DAT already
+holds — **never** from the PNG. A texture the sheet does not cover keeps its current
+size, which is still the DAT's own truth rather than the file's.
 
 ### Record header
 

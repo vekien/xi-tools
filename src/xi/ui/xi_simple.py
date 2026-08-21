@@ -5,9 +5,9 @@ import click
 
 import xi.xi_config as _cfg
 from xi.xi_config import ensure_base, output_path_for, read_path_for
-from xi.ui.xi_core import (compression_name, output_file_names, parse_dds, parse_textures,
-                           replace_texture, resolve_layout_reference, scale_layout_rects,
-                           sync_layout_rects, write_dds)
+from xi.ui.xi_core import (canonical_texture_sizes, compression_name, output_file_names,
+                           parse_dds, parse_textures, replace_texture,
+                           resolve_layout_reference, sync_layout_rects, write_dds)
 from xi.utils.xi_core import convert_dds_to_png, convert_png_to_dds
 
 
@@ -89,6 +89,16 @@ def _apply_alpha_scale(png_path: Path, factor: float, out_path: Path) -> Path:
     r, g, b, a = im.split()
     a = a.point(lambda v: min(255, round(v * factor)))
     Image.merge('RGBA', (r, g, b, a)).save(out_path)
+    return out_path
+
+
+def _fit_png(png_path: Path, size: tuple, out_path: Path) -> Path:
+    """Resample a PNG to `size`. Returns the path to feed the DDS encoder."""
+    from PIL import Image
+    with Image.open(png_path) as im:
+        if (im.width, im.height) == tuple(size):
+            return png_path
+        im.resize(tuple(size), Image.LANCZOS).save(out_path)
     return out_path
 
 
@@ -180,12 +190,15 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
     filenames = output_file_names(entries)
     entry_by_filename = dict(zip(filenames, entries))
     alpha_scales = _read_alpha_sidecar(work_dir)
+    canonical = canonical_texture_sizes(dat_file)
     tmp_dir = work_dir / '.alpha'
     for filename in filenames:
         png_path = work_dir / f'{Path(filename).stem}.png'
         dds_path = work_dir / filename
         if not png_path.exists():
             continue
+
+        entry = entry_by_filename[filename]
 
         # Undo the brightening sx applied, so the DAT gets FFXI's own alpha back.
         boost = float(alpha_scales.get(png_path.stem, 1.0))
@@ -194,14 +207,28 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
             tmp_dir.mkdir(parents=True, exist_ok=True)
             source_png = _apply_alpha_scale(png_path, 1.0 / boost, tmp_dir / png_path.name)
 
+        # Resample to the size the game expects. The target comes from the reference
+        # sheet, falling back to what the DAT already holds -- never from the PNG. The
+        # sprite records address this texture in absolute pixels, so its size is fixed
+        # by the client's layout: edit at whatever resolution suits you and it is fitted
+        # on the way in, leaving the mapping untouched.
+        target = tuple(canonical.get(entry.name) or (entry.width, entry.height))
+        fit_note = ''
+        from PIL import Image
+        with Image.open(source_png) as probe:
+            have = (probe.width, probe.height)
+        if have != target:
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            source_png = _fit_png(source_png, target, tmp_dir / f'fit_{png_path.name}')
+            fit_note = f'; fit {have[0]}x{have[1]} -> {target[0]}x{target[1]}'
+
         _analysis, dds_format, format_reason = convert_png_to_dds(
             source_png,
             dds_path,
             requested_format=requested_format.lower(),
             match_source=str(dds_path) if requested_format.lower() == 'auto' and dds_path.exists() else None,
         )
-        entry = entry_by_filename[filename]
-        note = '' if boost == 1.0 else f'; alpha /{boost:.3g}'
+        note = ('' if boost == 1.0 else f'; alpha /{boost:.3g}') + fit_note
         click.echo(
             f'  rebuilt {png_path.name} -> {dds_path.name} '
             f'[{dds_format}; source {compression_name(entry)}; {format_reason}{note}]'
@@ -216,7 +243,6 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
 
     replaced = 0
     missing = 0
-    resized: dict = {}
     for entry, filename in reversed(list(zip(entries, filenames))):
         dds_path = work_dir / filename
         if not dds_path.exists():
@@ -231,19 +257,12 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
             raise click.ClickException(str(e))
         now_size = f'{entry.width}x{entry.height}'
         grew = '' if was_size == now_size else f' {was_size} -> {now_size}'
-        if grew:
-            resized[entry.name] = (tuple(int(v) for v in was_size.split('x')),
-                                   (entry.width, entry.height))
         click.echo(
             f'  imported {filename} [{was} -> {compression_name(entry)}]{grew} '
             f'-> {entry.name or "unnamed"}'
         )
         replaced += 1
 
-    if fix_layout:
-        for name, off, was, now in scale_layout_rects(data, resized):
-            click.echo(f'  layout: {name} @0x{off:06x} src {was[0]}x{was[1]}@({was[2]},{was[3]}) '
-                       f'-> {now[0]}x{now[1]}@({now[2]},{now[3]})')
     if repair:
         _fix_layout(data, dat_file, reference)
 
