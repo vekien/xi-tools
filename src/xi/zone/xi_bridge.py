@@ -323,6 +323,12 @@ def handle_command(method: str, params: dict):
         return _versions(params)            # list snapshots — read-only, no lock
     if method == "zone.versionGet":
         return _version_get(params)         # fetch one snapshot — read-only, no lock
+    if method == "title.timeline":
+        return _title_timeline(params)      # title screen segments, optionally one zone
+    if method == "title.cameraSet":
+        return _title_camera_set(params)    # write camera keyframes back
+    if method == "title.setZone":
+        return _title_set_zone(params)      # point a segment at another zone
     if method == "zone.navmesh":
         return _navmesh(params)
     if method == "zone.navmesh.generate":
@@ -447,6 +453,156 @@ def handle_command(method: str, params: dict):
         if method == "zone.replaceCollision":
             return _replace_collision(params)
     raise ValueError(f"unknown method: {method}")
+
+
+
+# ── Title screen scene ────────────────────────────────────────────────────────
+# The login screen flies real zones as a live background (ROM/0/23.DAT). A zone that
+# appears there owns a family of camera routes in the same format cutscene routes use,
+# so the editor can show and edit them in the viewport it already has.
+
+def _title_dat() -> Path:
+    from xi.xi_config import FFXI_DIR, read_path_for
+    return read_path_for(Path(FFXI_DIR) / "ROM/0/23.DAT")
+
+
+def _title_section_payload(data: bytes, zone, nodes, names) -> dict:
+    from xi.title.xi_title import (family_tracks, parse_stream, parse_track, shot_list,
+                                   tracks_for)
+    records = parse_stream(data, zone)
+    named = set(tracks_for(zone, nodes))
+    cameras = []
+    for tname in family_tracks(zone, nodes):
+        track = parse_track(data, tname, nodes[tname])
+        cameras.append({
+            "name": track.name,
+            "offset": track.offset,
+            "weatherChange": track.name in named,
+            "shape": "spline" if len(track.keyframes) > 2 else "line",
+            "keyframes": [{"t": k.t, "eye": list(k.eye), "look": list(k.look),
+                           "focal": k.focal, "fovDeg": round(k.fov_deg, 3)}
+                          for k in track.keyframes],
+        })
+    return {
+        "section": zone.index,
+        "offset": zone.offset,
+        "zoneId": zone.zone_id,
+        "zoneName": names[zone.zone_id] if 0 <= zone.zone_id < len(names) else "",
+        "weather": [{"order": i, "tag": r.tag, "offset": r.offset,
+                     "fogRgb": list(r.rgb) if r.rgb else None,
+                     "fogNear": r.fog_near, "fogFar": r.fog_far, "camera": r.track}
+                    for i, r in enumerate(shot_list(records), 1)],
+        "timing": [r.value for r in records if r.kind == "timing"],
+        "cameras": cameras,
+    }
+
+
+def _title_zone_names() -> list:
+    try:
+        from xi.xi_config import FFXI_DIR
+        from xi.zone.xi_list import ZONE_NAME_DAT, parse_dmsg
+        return parse_dmsg((Path(FFXI_DIR) / ZONE_NAME_DAT).read_bytes())
+    except Exception:
+        return []
+
+
+def _title_timeline(params: dict) -> dict:
+    """Title screen segments, optionally only those using one zone.
+
+    `zoneId` is what the editor passes when a zone is open: an empty `sections` list
+    means this zone never appears on the title screen, which is how the UI decides
+    whether to offer a Title section at all.
+    """
+    from xi.title.xi_title import parse_nodes, parse_zones
+
+    path = _title_dat()
+    if not path.exists():
+        return {"sections": [], "error": f"not found: {path}"}
+    data = path.read_bytes()
+    nodes = parse_nodes(data)
+    names = _title_zone_names()
+    want = params.get("zoneId")
+    sections = [_title_section_payload(data, z, nodes, names)
+                for z in parse_zones(data)
+                if want is None or z.zone_id == int(want)]
+    return {"dat": str(path), "sections": sections}
+
+
+def _title_camera_set(params: dict) -> dict:
+    """Write camera keyframes back into the title scene.
+
+    Takes `{tracks: [{name, keyframes:[{t, eye, look, focal|fovDeg}]}]}`. A track's
+    keyframe count cannot grow -- nodes sit in a fixed layout with the next node
+    immediately after -- so a longer list is refused rather than silently truncated.
+    """
+    import struct as _struct
+
+    from xi.title.xi_title import (KEYFRAME_STRIDE, NODE_COUNT_OFF, NODE_KEYFRAME_OFF,
+                                   fov_to_focal, parse_nodes)
+    from xi.xi_config import ensure_base, output_path_for
+
+    path = _title_dat()
+    if not path.exists():
+        return {"ok": False, "error": f"not found: {path}"}
+    data = bytearray(path.read_bytes())
+    nodes = parse_nodes(bytes(data))
+
+    written, skipped = [], []
+    for t in params.get("tracks") or []:
+        name = t.get("name")
+        off = nodes.get(name)
+        if off is None:
+            skipped.append({"name": name, "reason": "no such track"})
+            continue
+        frames = t.get("keyframes") or []
+        have = _struct.unpack_from("<I", data, off + NODE_COUNT_OFF)[0]
+        if len(frames) > have:
+            skipped.append({"name": name,
+                            "reason": f"{len(frames)} keyframes but the track holds {have}"})
+            continue
+        for i, k in enumerate(frames):
+            base = off + NODE_KEYFRAME_OFF + i * KEYFRAME_STRIDE
+            ex, ey, ez = (float(v) for v in k["eye"])
+            lx, ly, lz = (float(v) for v in k["look"])
+            focal = (float(k["focal"]) if "focal" in k
+                     else fov_to_focal(float(k["fovDeg"])) if "fovDeg" in k else 350.0)
+            _struct.pack_into("<4f", data, base, ex, ey, ez, focal)
+            _struct.pack_into("<3f", data, base + 0x10, lx, ly, lz)
+            _struct.pack_into("<f", data, base + 0x20, float(k.get("t", i)))
+        written.append({"name": name, "keyframes": len(frames)})
+
+    out = output_path_for(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        ensure_base(out)
+    out.write_bytes(data)
+    return {"ok": True, "dat": str(out), "written": written, "skipped": skipped}
+
+
+def _title_set_zone(params: dict) -> dict:
+    """Point a title screen section at a different zone id."""
+    import struct as _struct
+
+    from xi.title.xi_title import parse_zones
+    from xi.xi_config import ensure_base, output_path_for
+
+    path = _title_dat()
+    if not path.exists():
+        return {"ok": False, "error": f"not found: {path}"}
+    data = bytearray(path.read_bytes())
+    section = int(params.get("section") or 0)
+    zone_id = int(params.get("zoneId"))
+    match = next((z for z in parse_zones(data) if z.index == section), None)
+    if match is None:
+        return {"ok": False, "error": f"no section {section}"}
+    _struct.pack_into("<I", data, match.offset, zone_id)
+    out = output_path_for(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        ensure_base(out)
+    out.write_bytes(data)
+    return {"ok": True, "dat": str(out), "section": section,
+            "was": match.zone_id, "now": zone_id}
 
 
 def _navmesh(params: dict) -> dict:
