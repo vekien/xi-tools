@@ -239,6 +239,7 @@ xi ui gen-sheet
 xi ui gen-sheet ROM/119/50.DAT ROM/119/51.DAT ROM/280/15.DAT
 
 xi title
+xi title export                               # everything -> exports/title/data.json
 xi title list                                 # title screen zones, cameras, weather
 xi title weather --section 12
 xi title timeline                             # shot list per segment (--json to save)

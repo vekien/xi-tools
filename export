@@ -1,0 +1,2466 @@
+{
+ "dat": "D:\\cexi\\catseyexi-client\\Game\\FINAL FANTASY XI\\ROM\\0\\23.DAT",
+ "sections": [
+  {
+   "section": 1,
+   "zone_id": 68,
+   "zone_name": "Aydeewa Subterrane",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "fine",
+     "offset": 57092,
+     "fog_near": 1800,
+     "fog_far": 1800,
+     "fog_rgb": [
+      160,
+      187,
+      13
+     ],
+     "camera": "crz1",
+     "camera_has_keyframes": false,
+     "timing": [
+      50,
+      40,
+      30,
+      30,
+      50,
+      30,
+      80
+     ]
+    }
+   ],
+   "timing": [
+    50,
+    40,
+    30,
+    30,
+    50,
+    30,
+    80
+   ],
+   "ambient": [
+    {
+     "offset": 57228,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 57252,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 57368,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 57512,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 57640,
+     "rgba": [
+      123,
+      6,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 2,
+   "zone_id": 51,
+   "zone_name": "Wajaom Woodlands",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "fine",
+     "offset": 57684,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": [
+      176,
+      211,
+      78
+     ],
+     "camera": "cgn0",
+     "camera_has_keyframes": true,
+     "timing": [
+      50,
+      50,
+      50,
+      20,
+      50,
+      60
+     ]
+    }
+   ],
+   "timing": [
+    50,
+    50,
+    50,
+    20,
+    50,
+    60
+   ],
+   "ambient": [
+    {
+     "offset": 57936,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 58040,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 58168,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 3,
+   "zone_id": 61,
+   "zone_name": "Mount Zhayolm",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 58340,
+     "fog_near": 1000,
+     "fog_far": 980,
+     "fog_rgb": [
+      128,
+      198,
+      19
+     ],
+     "camera": "1101",
+     "camera_has_keyframes": true,
+     "timing": [
+      150,
+      110,
+      250,
+      170,
+      110,
+      135,
+      200,
+      130
+     ]
+    }
+   ],
+   "timing": [
+    150,
+    110,
+    250,
+    170,
+    110,
+    135,
+    200,
+    130
+   ],
+   "ambient": [
+    {
+     "offset": 58320,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 58536,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 58584,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 58640,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 58664,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 58828,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59000,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 4,
+   "zone_id": 54,
+   "zone_name": "Arrapago Reef",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 59172,
+     "fog_near": 600,
+     "fog_far": 600,
+     "fog_rgb": [
+      32,
+      130,
+      33
+     ],
+     "camera": "9c01",
+     "camera_has_keyframes": true,
+     "timing": [
+      100,
+      130,
+      100,
+      100
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "snow",
+     "offset": 59672,
+     "fog_near": 15,
+     "fog_far": 780,
+     "fog_rgb": null,
+     "camera": "9c12",
+     "camera_has_keyframes": true,
+     "timing": [
+      120,
+      140
+     ]
+    }
+   ],
+   "timing": [
+    100,
+    130,
+    100,
+    100,
+    120,
+    140
+   ],
+   "ambient": [
+    {
+     "offset": 59152,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59224,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59268,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59324,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59380,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59436,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59484,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59528,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59572,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59616,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59640,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59700,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 59808,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 5,
+   "zone_id": 50,
+   "zone_name": "Aht Urhgan Whitegate",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 59988,
+     "fog_near": 1000,
+     "fog_far": 980,
+     "fog_rgb": [
+      32,
+      130,
+      33
+     ],
+     "camera": "8c01",
+     "camera_has_keyframes": true,
+     "timing": [
+      145,
+      85,
+      105
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "suny",
+     "offset": 60360,
+     "fog_near": 2000,
+     "fog_far": 1900,
+     "fog_rgb": [
+      112,
+      200,
+      33
+     ],
+     "camera": "8c10",
+     "camera_has_keyframes": true,
+     "timing": []
+    }
+   ],
+   "timing": [
+    145,
+    85,
+    105
+   ],
+   "ambient": [
+    {
+     "offset": 59968,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 60164,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 60328,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 60400,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 6,
+   "zone_id": 130,
+   "zone_name": "Ru'Aun Gardens",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "fine",
+     "offset": 60592,
+     "fog_near": 800,
+     "fog_far": 800,
+     "fog_rgb": null,
+     "camera": "3c01",
+     "camera_has_keyframes": false,
+     "timing": [
+      150,
+      100,
+      150,
+      180
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "fine",
+     "offset": 60828,
+     "fog_near": 800,
+     "fog_far": 900,
+     "fog_rgb": [
+      0,
+      0,
+      0
+     ],
+     "camera": "3c09",
+     "camera_has_keyframes": true,
+     "timing": [
+      135,
+      175
+     ]
+    }
+   ],
+   "timing": [
+    150,
+    100,
+    150,
+    180,
+    135,
+    175
+   ],
+   "ambient": [
+    {
+     "offset": 60572,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 60868,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 60916,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 61028,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 7,
+   "zone_id": 123,
+   "zone_name": "Yuhtunga Jungle",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 61204,
+     "fog_near": 800,
+     "fog_far": 800,
+     "fog_rgb": [
+      80,
+      63,
+      22
+     ],
+     "camera": "2c01",
+     "camera_has_keyframes": true,
+     "timing": [
+      80,
+      100,
+      180,
+      200,
+      200,
+      200
+     ]
+    }
+   ],
+   "timing": [
+    80,
+    100,
+    180,
+    200,
+    200,
+    200
+   ],
+   "ambient": [
+    {
+     "offset": 61184,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 61476,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 61660,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 61716,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 61740,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 61776,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 8,
+   "zone_id": 121,
+   "zone_name": "The Sanctuary of Zi'Tah",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 61956,
+     "fog_near": 600,
+     "fog_far": 600,
+     "fog_rgb": [
+      32,
+      83,
+      20
+     ],
+     "camera": "1c01",
+     "camera_has_keyframes": true,
+     "timing": [
+      120
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "clod",
+     "offset": 62120,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": null,
+     "camera": "1c05",
+     "camera_has_keyframes": false,
+     "timing": [
+      230,
+      200
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "suny",
+     "offset": 62244,
+     "fog_near": 0,
+     "fog_far": 1000,
+     "fog_rgb": [
+      224,
+      251,
+      20
+     ],
+     "camera": "1c08",
+     "camera_has_keyframes": true,
+     "timing": [
+      200,
+      200,
+      155,
+      150,
+      150
+     ]
+    }
+   ],
+   "timing": [
+    120,
+    230,
+    200,
+    200,
+    200,
+    155,
+    150,
+    150
+   ],
+   "ambient": [
+    {
+     "offset": 61936,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 62448,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 62552,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 9,
+   "zone_id": 141,
+   "zone_name": "Fort Ghelsba",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 62724,
+     "fog_near": 799,
+     "fog_far": 800,
+     "fog_rgb": [
+      96,
+      54,
+      30
+     ],
+     "camera": "cgh0",
+     "camera_has_keyframes": true,
+     "timing": [
+      70
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "fine",
+     "offset": 62816,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": null,
+     "camera": "cgh2",
+     "camera_has_keyframes": true,
+     "timing": [
+      40,
+      90
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "suny",
+     "offset": 62916,
+     "fog_near": 300,
+     "fog_far": 300,
+     "fog_rgb": null,
+     "camera": "cghc",
+     "camera_has_keyframes": true,
+     "timing": [
+      60
+     ]
+    },
+    {
+     "order": 4,
+     "weather": "fine",
+     "offset": 63020,
+     "fog_near": 300,
+     "fog_far": 300,
+     "fog_rgb": [
+      128,
+      145,
+      57
+     ],
+     "camera": "cgh7",
+     "camera_has_keyframes": true,
+     "timing": [
+      20,
+      100
+     ]
+    }
+   ],
+   "timing": [
+    70,
+    40,
+    90,
+    60,
+    20,
+    100
+   ],
+   "ambient": [
+    {
+     "offset": 62704,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 63084,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 63292,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 63416,
+     "rgba": [
+      123,
+      6,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 10,
+   "zone_id": 126,
+   "zone_name": "Qufim Island",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "fine",
+     "offset": 63460,
+     "fog_near": 600,
+     "fog_far": 600,
+     "fog_rgb": [
+      16,
+      38,
+      21
+     ],
+     "camera": "cqf0",
+     "camera_has_keyframes": true,
+     "timing": [
+      30,
+      60,
+      120
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "aura",
+     "offset": 63664,
+     "fog_near": 400,
+     "fog_far": 400,
+     "fog_rgb": [
+      64,
+      159,
+      62
+     ],
+     "camera": "cqf4",
+     "camera_has_keyframes": true,
+     "timing": [
+      20,
+      80
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "fine",
+     "offset": 63764,
+     "fog_near": 700,
+     "fog_far": 700,
+     "fog_rgb": [
+      64,
+      227,
+      9
+     ],
+     "camera": "cqf6",
+     "camera_has_keyframes": true,
+     "timing": [
+      60
+     ]
+    },
+    {
+     "order": 4,
+     "weather": "aura",
+     "offset": 63892,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": [
+      176,
+      23,
+      26
+     ],
+     "camera": "cqf9",
+     "camera_has_keyframes": true,
+     "timing": [
+      400
+     ]
+    }
+   ],
+   "timing": [
+    30,
+    60,
+    120,
+    20,
+    80,
+    60,
+    400
+   ],
+   "ambient": [
+    {
+     "offset": 63632,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 64012,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 11,
+   "zone_id": 111,
+   "zone_name": "Beaucedine Glacier",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "clod",
+     "offset": 64180,
+     "fog_near": 800,
+     "fog_far": 800,
+     "fog_rgb": [
+      128,
+      245,
+      32
+     ],
+     "camera": "cga0",
+     "camera_has_keyframes": true,
+     "timing": [
+      60
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "mist",
+     "offset": 64272,
+     "fog_near": 800,
+     "fog_far": 800,
+     "fog_rgb": [
+      0,
+      141,
+      39
+     ],
+     "camera": "cga1",
+     "camera_has_keyframes": true,
+     "timing": [
+      40,
+      70
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "clod",
+     "offset": 64384,
+     "fog_near": 600,
+     "fog_far": 600,
+     "fog_rgb": [
+      240,
+      95,
+      40
+     ],
+     "camera": "cga3",
+     "camera_has_keyframes": true,
+     "timing": [
+      60
+     ]
+    },
+    {
+     "order": 4,
+     "weather": "snow",
+     "offset": 64440,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": [
+      128,
+      36,
+      46
+     ],
+     "camera": "cga4",
+     "camera_has_keyframes": true,
+     "timing": [
+      40
+     ]
+    },
+    {
+     "order": 5,
+     "weather": "mist",
+     "offset": 64520,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": [
+      16,
+      78,
+      56
+     ],
+     "camera": "cga6",
+     "camera_has_keyframes": true,
+     "timing": []
+    },
+    {
+     "order": 6,
+     "weather": "snow",
+     "offset": 64568,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": [
+      0,
+      141,
+      39
+     ],
+     "camera": "cga7",
+     "camera_has_keyframes": true,
+     "timing": []
+    },
+    {
+     "order": 7,
+     "weather": "mist",
+     "offset": 64616,
+     "fog_near": 300,
+     "fog_far": 300,
+     "fog_rgb": [
+      128,
+      198,
+      19
+     ],
+     "camera": "cgaa",
+     "camera_has_keyframes": true,
+     "timing": [
+      80
+     ]
+    },
+    {
+     "order": 8,
+     "weather": "clod",
+     "offset": 64728,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": [
+      144,
+      243,
+      18
+     ],
+     "camera": "cgab",
+     "camera_has_keyframes": true,
+     "timing": []
+    }
+   ],
+   "timing": [
+    60,
+    40,
+    70,
+    60,
+    40,
+    80
+   ],
+   "ambient": [
+    {
+     "offset": 64160,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 64688,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 64708,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 64792,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 64920,
+     "rgba": [
+      123,
+      6,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 12,
+   "zone_id": 106,
+   "zone_name": "North Gustaberg",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 64964,
+     "fog_near": 900,
+     "fog_far": 900,
+     "fog_rgb": [
+      0,
+      141,
+      39
+     ],
+     "camera": "cgu1",
+     "camera_has_keyframes": true,
+     "timing": [
+      20
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "fine",
+     "offset": 65044,
+     "fog_near": 0,
+     "fog_far": 100,
+     "fog_rgb": [
+      32,
+      29,
+      29
+     ],
+     "camera": "",
+     "camera_has_keyframes": false,
+     "timing": [
+      40,
+      60,
+      80
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "mist",
+     "offset": 65304,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": [
+      64,
+      206,
+      75
+     ],
+     "camera": "cgu8",
+     "camera_has_keyframes": true,
+     "timing": []
+    },
+    {
+     "order": 4,
+     "weather": "clod",
+     "offset": 65352,
+     "fog_near": 350,
+     "fog_far": 350,
+     "fog_rgb": [
+      32,
+      137,
+      11
+     ],
+     "camera": "cgua",
+     "camera_has_keyframes": true,
+     "timing": [
+      60,
+      50
+     ]
+    },
+    {
+     "order": 5,
+     "weather": "fine",
+     "offset": 65440,
+     "fog_near": 1500,
+     "fog_far": 1500,
+     "fog_rgb": [
+      64,
+      18,
+      23
+     ],
+     "camera": "cgu5",
+     "camera_has_keyframes": true,
+     "timing": []
+    }
+   ],
+   "timing": [
+    20,
+    40,
+    60,
+    80,
+    60,
+    50
+   ],
+   "ambient": [
+    {
+     "offset": 65092,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 65128,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 65196,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 65504,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 13,
+   "zone_id": 104,
+   "zone_name": "Jugner Forest",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 65684,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": [
+      32,
+      21,
+      22
+     ],
+     "camera": "6c01",
+     "camera_has_keyframes": true,
+     "timing": [
+      190,
+      145,
+      170,
+      100,
+      130
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "fine",
+     "offset": 66024,
+     "fog_near": 600,
+     "fog_far": 600,
+     "fog_rgb": null,
+     "camera": "6c12",
+     "camera_has_keyframes": true,
+     "timing": [
+      100
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "suny",
+     "offset": 66092,
+     "fog_near": 0,
+     "fog_far": 130,
+     "fog_rgb": [
+      48,
+      229,
+      23
+     ],
+     "camera": "",
+     "camera_has_keyframes": false,
+     "timing": [
+      200,
+      165
+     ]
+    }
+   ],
+   "timing": [
+    190,
+    145,
+    170,
+    100,
+    130,
+    100,
+    200,
+    165
+   ],
+   "ambient": [
+    {
+     "offset": 65664,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 65924,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 65980,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 66004,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 66268,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 66392,
+     "rgba": [
+      123,
+      6,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 14,
+   "zone_id": 102,
+   "zone_name": "La Theine Plateau",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 66496,
+     "fog_near": 900,
+     "fog_far": 900,
+     "fog_rgb": null,
+     "camera": "s102",
+     "camera_has_keyframes": true,
+     "timing": [
+      200
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "rain",
+     "offset": 66600,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": null,
+     "camera": "s202",
+     "camera_has_keyframes": true,
+     "timing": []
+    },
+    {
+     "order": 3,
+     "weather": "suny",
+     "offset": 66648,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": null,
+     "camera": "s203",
+     "camera_has_keyframes": false,
+     "timing": [
+      300,
+      200
+     ]
+    }
+   ],
+   "timing": [
+    200,
+    200,
+    300,
+    200
+   ],
+   "ambient": [
+    {
+     "offset": 66764,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 66848,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67128,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 15,
+   "zone_id": 103,
+   "zone_name": "Valkurm Dunes",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 67184,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": null,
+     "camera": "c101",
+     "camera_has_keyframes": true,
+     "timing": [
+      50,
+      30,
+      50,
+      50,
+      50,
+      50
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "fine",
+     "offset": 67688,
+     "fog_near": 0,
+     "fog_far": 500,
+     "fog_rgb": null,
+     "camera": "c302",
+     "camera_has_keyframes": true,
+     "timing": [
+      50,
+      30,
+      50
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "dryw",
+     "offset": 67844,
+     "fog_near": 1,
+     "fog_far": 500,
+     "fog_rgb": null,
+     "camera": "c401",
+     "camera_has_keyframes": false,
+     "timing": []
+    }
+   ],
+   "timing": [
+    50,
+    30,
+    50,
+    50,
+    50,
+    50,
+    50,
+    30,
+    50
+   ],
+   "ambient": [
+    {
+     "offset": 67300,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67332,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67376,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67432,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67488,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67536,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67568,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67624,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67812,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67872,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 67952,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 16,
+   "zone_id": 109,
+   "zone_name": "Pashhow Marshlands",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "clod",
+     "offset": 68628,
+     "fog_near": 800,
+     "fog_far": 800,
+     "fog_rgb": [
+      112,
+      200,
+      33
+     ],
+     "camera": "7c01",
+     "camera_has_keyframes": false,
+     "timing": [
+      100,
+      40,
+      128
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "suny",
+     "offset": 68760,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": null,
+     "camera": "7c03",
+     "camera_has_keyframes": true,
+     "timing": [
+      50,
+      145,
+      130,
+      150,
+      270
+     ]
+    }
+   ],
+   "timing": [
+    100,
+    40,
+    128,
+    50,
+    145,
+    130,
+    150,
+    270
+   ],
+   "ambient": [
+    {
+     "offset": 68608,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 68932,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 68956,
+     "rgba": [
+      125,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 69068,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 17,
+   "zone_id": 2,
+   "zone_name": "Carpenters' Landing",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 69252,
+     "fog_near": 700,
+     "fog_far": 700,
+     "fog_rgb": [
+      32,
+      21,
+      22
+     ],
+     "camera": "4c01",
+     "camera_has_keyframes": true,
+     "timing": [
+      50,
+      125
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "rain",
+     "offset": 69388,
+     "fog_near": 465,
+     "fog_far": 465,
+     "fog_rgb": null,
+     "camera": "4c06",
+     "camera_has_keyframes": true,
+     "timing": []
+    },
+    {
+     "order": 3,
+     "weather": "clod",
+     "offset": 69460,
+     "fog_near": 0,
+     "fog_far": 700,
+     "fog_rgb": null,
+     "camera": "4c10",
+     "camera_has_keyframes": false,
+     "timing": []
+    },
+    {
+     "order": 4,
+     "weather": "fine",
+     "offset": 69552,
+     "fog_near": 700,
+     "fog_far": 700,
+     "fog_rgb": null,
+     "camera": "4c07",
+     "camera_has_keyframes": true,
+     "timing": [
+      700,
+      130,
+      170
+     ]
+    }
+   ],
+   "timing": [
+    50,
+    125,
+    700,
+    130,
+    170
+   ],
+   "ambient": [
+    {
+     "offset": 69232,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 69440,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 69488,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 69612,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 69748,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 18,
+   "zone_id": 29,
+   "zone_name": "Riverne - Site #B01",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 69924,
+     "fog_near": 800,
+     "fog_far": 800,
+     "fog_rgb": [
+      96,
+      155,
+      34
+     ],
+     "camera": "1001",
+     "camera_has_keyframes": true,
+     "timing": [
+      110,
+      60,
+      120
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "clod",
+     "offset": 70104,
+     "fog_near": 900,
+     "fog_far": 900,
+     "fog_rgb": null,
+     "camera": "1006",
+     "camera_has_keyframes": true,
+     "timing": [
+      125,
+      120
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "fine",
+     "offset": 70240,
+     "fog_near": 600,
+     "fog_far": 600,
+     "fog_rgb": [
+      96,
+      141,
+      78
+     ],
+     "camera": "1009",
+     "camera_has_keyframes": true,
+     "timing": [
+      140,
+      140
+     ]
+    }
+   ],
+   "timing": [
+    110,
+    60,
+    120,
+    125,
+    120,
+    140,
+    140
+   ],
+   "ambient": [
+    {
+     "offset": 69904,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 70208,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 70380,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 19,
+   "zone_id": 33,
+   "zone_name": "Al'Taieu",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 70548,
+     "fog_near": 800,
+     "fog_far": 800,
+     "fog_rgb": [
+      32,
+      21,
+      22
+     ],
+     "camera": "5c03",
+     "camera_has_keyframes": true,
+     "timing": [
+      150,
+      100
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "clod",
+     "offset": 70696,
+     "fog_near": 25,
+     "fog_far": 600,
+     "fog_rgb": null,
+     "camera": "5c07",
+     "camera_has_keyframes": true,
+     "timing": [
+      120,
+      150
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "clod",
+     "offset": 70844,
+     "fog_near": 300,
+     "fog_far": 300,
+     "fog_rgb": null,
+     "camera": "5c11",
+     "camera_has_keyframes": true,
+     "timing": [
+      100,
+      100
+     ]
+    }
+   ],
+   "timing": [
+    150,
+    100,
+    120,
+    150,
+    100,
+    100
+   ],
+   "ambient": [
+    {
+     "offset": 70528,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 70676,
+     "rgba": [
+      124,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 70724,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 70960,
+     "rgba": [
+      4,
+      6,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 71008,
+     "rgba": [
+      16,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 71052,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 71176,
+     "rgba": [
+      123,
+      6,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 20,
+   "zone_id": 4,
+   "zone_name": "Bibiki Bay",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "fine",
+     "offset": 71220,
+     "fog_near": 600,
+     "fog_far": 600,
+     "fog_rgb": [
+      48,
+      229,
+      23
+     ],
+     "camera": "cpa0",
+     "camera_has_keyframes": true,
+     "timing": [
+      60,
+      40,
+      30,
+      80,
+      30
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "suny",
+     "offset": 71608,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": [
+      128,
+      245,
+      32
+     ],
+     "camera": "cpaa",
+     "camera_has_keyframes": true,
+     "timing": [
+      60
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "fine",
+     "offset": 71760,
+     "fog_near": 500,
+     "fog_far": 600,
+     "fog_rgb": [
+      0,
+      0,
+      0
+     ],
+     "camera": "cpad",
+     "camera_has_keyframes": true,
+     "timing": [
+      250
+     ]
+    }
+   ],
+   "timing": [
+    60,
+    40,
+    30,
+    80,
+    30,
+    60,
+    250
+   ],
+   "ambient": [
+    {
+     "offset": 71428,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 71552,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 71728,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 71800,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 71904,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 72040,
+     "rgba": [
+      123,
+      6,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 21,
+   "zone_id": 24,
+   "zone_name": "Lufaise Meadows",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "suny",
+     "offset": 72084,
+     "fog_near": 800,
+     "fog_far": 990,
+     "fog_rgb": [
+      224,
+      253,
+      78
+     ],
+     "camera": "ct16",
+     "camera_has_keyframes": false,
+     "timing": [
+      30,
+      0,
+      80,
+      60
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "mist",
+     "offset": 72444,
+     "fog_near": 500,
+     "fog_far": 480,
+     "fog_rgb": [
+      48,
+      128,
+      19
+     ],
+     "camera": "ct1a",
+     "camera_has_keyframes": true,
+     "timing": []
+    },
+    {
+     "order": 3,
+     "weather": "suny",
+     "offset": 72492,
+     "fog_near": 1000,
+     "fog_far": 1000,
+     "fog_rgb": [
+      0,
+      141,
+      39
+     ],
+     "camera": "ct12",
+     "camera_has_keyframes": false,
+     "timing": [
+      30
+     ]
+    },
+    {
+     "order": 4,
+     "weather": "thdr",
+     "offset": 72572,
+     "fog_near": 1500,
+     "fog_far": 1500,
+     "fog_rgb": [
+      224,
+      89,
+      47
+     ],
+     "camera": "ct14",
+     "camera_has_keyframes": true,
+     "timing": []
+    }
+   ],
+   "timing": [
+    30,
+    0,
+    80,
+    60,
+    30
+   ],
+   "ambient": [
+    {
+     "offset": 72156,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 72636,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 72760,
+     "rgba": [
+      123,
+      6,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "section": 22,
+   "zone_id": 25,
+   "zone_name": "Misareaux Coast",
+   "shots": [
+    {
+     "order": 1,
+     "weather": "thdr",
+     "offset": 72804,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": [
+      224,
+      253,
+      78
+     ],
+     "camera": "ct23",
+     "camera_has_keyframes": true,
+     "timing": [
+      50
+     ]
+    },
+    {
+     "order": 2,
+     "weather": "mist",
+     "offset": 72896,
+     "fog_near": 500,
+     "fog_far": 500,
+     "fog_rgb": [
+      64,
+      65,
+      36
+     ],
+     "camera": "ct20",
+     "camera_has_keyframes": true,
+     "timing": [
+      30
+     ]
+    },
+    {
+     "order": 3,
+     "weather": "suny",
+     "offset": 72988,
+     "fog_near": 1300,
+     "fog_far": 1300,
+     "fog_rgb": [
+      224,
+      50,
+      41
+     ],
+     "camera": "ct25",
+     "camera_has_keyframes": true,
+     "timing": [
+      40,
+      50,
+      60
+     ]
+    }
+   ],
+   "timing": [
+    50,
+    30,
+    40,
+    50,
+    60
+   ],
+   "ambient": [
+    {
+     "offset": 73072,
+     "rgba": [
+      15,
+      3,
+      0,
+      0
+     ]
+    },
+    {
+     "offset": 73244,
+     "rgba": [
+      0,
+      2,
+      0,
+      0
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -332,3 +332,123 @@ def timeline_cmd(output, dat_path, section, as_json, ffxi):
     click.echo('note: this is the order within a segment. Which segment the title screen '
                'picks on launch is not identifiable in this file -- if the zone differs '
                'between launches it is chosen at runtime, not stored here.')
+
+
+DATA_JSON = Path('exports/title/data.json')
+
+# The login screen is assembled from more than the scene file: the panel, logos and
+# expansion banners live in a UI container, one per locale.
+TITLE_UI = {
+    'en': 'ROM/119/50.DAT',
+    'jp': 'ROM/91/16.DAT',
+    'de': 'ROM/176/74.DAT',
+    'fr': 'ROM/178/13.DAT',
+}
+
+
+def _ui_textures(rel: str) -> dict:
+    """Texture inventory for one locale's title UI container."""
+    from xi.ui.xi_core import compression_name, parse_textures
+    from xi.ui.xi_palette import parse_palettized
+
+    path = Path(_cfg.FFXI_DIR) / rel
+    if not path.exists():
+        return {'dat': rel, 'present': False, 'textures': []}
+    data = path.read_bytes()
+    tex = [{'name': e.name, 'width': e.width, 'height': e.height,
+            'format': compression_name(e), 'pixel_format': e.pixel_format}
+           for e in parse_textures(data)]
+    tex += [{'name': t.name, 'width': t.width, 'height': t.height,
+             'format': 'palettized', 'pixel_format': None}
+            for t in parse_palettized(data)]
+    return {'dat': rel, 'present': True, 'bytes': len(data), 'textures': tex}
+
+
+@click.command('export')
+@click.argument('output', metavar='JSON_FILE', required=False)
+@click.option('--dat', 'dat_path', default=None, metavar='DAT_FILE')
+@click.option('--ffxi', default=None, metavar='DIR')
+def export_cmd(output, dat_path, ffxi):
+    """Dump everything the title screen is made of to one JSON file.
+
+    Writes exports/title/data.json: the scene timeline with every camera path, the UI
+    textures for each locale, and what is known about the music.
+    """
+    _apply_ffxi(ffxi)
+    out_json = Path(output) if output else DATA_JSON
+    path = resolve(dat_path)
+    data = path.read_bytes()
+    nodes = parse_nodes(data)
+    zones = parse_zones(data)
+    names = _zone_names()
+
+    sections = []
+    for z in zones:
+        records = parse_stream(data, z)
+        shots = shot_list(records)
+        named = set(tracks_for(z, nodes))
+        cameras = []
+        for tname in family_tracks(z, nodes):
+            track = parse_track(data, tname, nodes[tname])
+            cameras.append({
+                'name': track.name,
+                'offset': track.offset,
+                'weather_change': track.name in named,
+                'keyframes': [{'t': k.t, 'eye': list(k.eye), 'look': list(k.look),
+                               'distance': k.view_distance} for k in track.keyframes],
+            })
+        sections.append({
+            'section': z.index,
+            'offset': z.offset,
+            'zone_id': z.zone_id,
+            'zone_name': _name_of(names, z.zone_id),
+            'file_table_index': z.file_table_index,
+            'weather': [{'order': i, 'tag': r.tag, 'offset': r.offset,
+                         'fog_rgb': list(r.rgb) if r.rgb else None,
+                         'fog_near': r.fog_near, 'fog_far': r.fog_far,
+                         'camera': r.track}
+                        for i, r in enumerate(shots, 1)],
+            'timing': [r.value for r in records if r.kind == 'timing'],
+            'ambient': [{'offset': r.offset, 'rgba': list(r.rgba)}
+                        for r in records if r.kind == 'ambient' and r.rgba],
+            'cameras': cameras,
+        })
+
+    doc = {
+        'timeline': {
+            'dat': str(path),
+            'bytes': len(data),
+            'play_order': {
+                'first': 'North Gustaberg on a fresh client launch',
+                'subsequent': 'changes on each return from character select',
+                'stored_here': False,
+                'note': 'No permutation of the sections exists in this file as u8, u16 '
+                        'or u32, and every section header is zeros. Both behaviours are '
+                        'decided at runtime, so changing them means patching the client, '
+                        'not this DAT.',
+            },
+            'sections': sections,
+        },
+        'ui': {locale: _ui_textures(rel) for locale, rel in TITLE_UI.items()},
+        'music': {
+            'resolved': False,
+            'note': 'No title or lobby DAT references a sound: ROM/0/23, ROM/0/1, '
+                    'ROM/0/2, ROM/0/24 and ROM/119/50 all report zero sound references. '
+                    'The track is selected by the client, not the data.',
+            'catalog_hint': 'uv run xi audio json --type music',
+        },
+    }
+
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(doc, indent=1), encoding='utf-8')
+
+    cams = sum(len(s['cameras']) for s in sections)
+    kfs = sum(len(c['keyframes']) for s in sections for c in s['cameras'])
+    shots_n = sum(len(s['weather']) for s in sections)
+    ui_n = sum(len(v['textures']) for v in doc['ui'].values())
+    click.echo(f'wrote {out_json}')
+    click.echo(f'  timeline : {len(sections)} sections, {shots_n} weather shots, '
+               f'{cams} cameras, {kfs} keyframes')
+    click.echo(f'  ui       : {ui_n} textures across '
+               f'{sum(1 for v in doc["ui"].values() if v["present"])} locale(s)')
+    click.echo(f'  music    : unresolved (selected by the client)')
