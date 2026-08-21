@@ -102,6 +102,12 @@ def _fit_png(png_path: Path, size: tuple, out_path: Path) -> Path:
     return out_path
 
 
+def _png_digest(path: Path) -> str:
+    """Content hash of a PNG, used to tell an untouched export from replaced art."""
+    import hashlib
+    return hashlib.sha1(path.read_bytes()).hexdigest()
+
+
 def _read_alpha_sidecar(work_dir: Path) -> dict:
     import json
     f = work_dir / ALPHA_SIDECAR
@@ -150,7 +156,10 @@ def simple_extract_cmd(dat_path: str, raw_alpha: bool, ffxi: str | None):
         convert_dds_to_png(dds_path, png_path)
         boost = 1.0 if raw_alpha else _alpha_boost_png(png_path)
         if boost != 1.0:
-            alpha_scales[png_path.stem] = boost
+            # The digest pins the factor to these exact bytes. Import only undoes the
+            # boost for a file that is still the one written here; art the user replaced
+            # is taken at face value, since its alpha was authored, not brightened.
+            alpha_scales[png_path.stem] = {'factor': boost, 'sha1': _png_digest(png_path)}
         note = '' if boost == 1.0 else f' alpha x{boost:.3g}'
         click.echo(f'  extracted {dds_name} [{compression_name(entry)}]{note} -> {png_path.name}')
         written += 1
@@ -200,8 +209,23 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
 
         entry = entry_by_filename[filename]
 
-        # Undo the brightening sx applied, so the DAT gets FFXI's own alpha back.
-        boost = float(alpha_scales.get(png_path.stem, 1.0))
+        # Undo the brightening sx applied -- but only for a PNG that is still byte-for-byte
+        # the one sx wrote. Applying it to hand-authored art squashes full-range alpha into
+        # the lower half, and DXT3's 4-bit alpha then quantises that to a handful of steps:
+        # measured 7.2 dB alpha PSNR (11 distinct levels collapsing to 3) against 56.4 dB
+        # when left alone.
+        rec = alpha_scales.get(png_path.stem)
+        boost = 1.0
+        if isinstance(rec, dict):
+            if rec.get('sha1') == _png_digest(png_path):
+                boost = float(rec.get('factor', 1.0))
+        elif rec:
+            # Sidecar predates digests, so there is no way to tell an untouched export
+            # from replaced art. Leave the alpha alone: over-brightening a texture is a
+            # visible but recoverable mistake, while squashing it through DXT3's 4-bit
+            # alpha destroys detail that cannot be got back. Re-run sx to get a digest.
+            boost = 1.0
+
         source_png = png_path
         if boost != 1.0:
             tmp_dir.mkdir(parents=True, exist_ok=True)
