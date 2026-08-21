@@ -15,15 +15,13 @@ from xi.ui.xi_core import (compression_name, output_file_names, parse_dds, parse
 @click.option('--output-dat', default=None,
               help='Write to a different DAT path instead of overwriting DAT_FILE.')
 @click.option('--reference', default=None, metavar='DAT',
-              help='Unmodified DAT to read original sprite rects from.')
-@click.option('--no-layout-fixup', 'fix_layout', is_flag=True, default=True, flag_value=False,
-              help='Do not repoint sprite source rects after a resize.')
-@click.option('--allow-resize', is_flag=True,
-              help='Permit a .dds whose dimensions differ from the DAT entry. Safe for a '
-                   'whole-texture sprite; wrong for an atlas (its source rects live in the '
-                   'layout chunk and are not rescaled).')
+              help='Unmodified DAT to read original sprite rects from. Defaults to the '
+                   'built-in reference sheet, then <dat>.base.')
+@click.option('--no-resize', 'fix_layout', is_flag=True, default=True, flag_value=False,
+              help='Import the textures but leave sprite source rects alone (the reference '
+                   'sheet is not consulted).')
 def cmd(dat_path: str, texture_dir: str, output_dat: str | None, reference: str | None,
-        fix_layout: bool, allow_resize: bool):
+        fix_layout: bool):
     """Import edited .dds files from a folder back into a UI container DAT.
 
     DAT_FILE can be an absolute path or a path relative to the FFXI directory.
@@ -72,7 +70,7 @@ def cmd(dat_path: str, texture_dir: str, output_dat: str | None, reference: str 
         was_size = f'{entry.width}x{entry.height}'
         try:
             dds = parse_dds(dds_path)
-            replace_texture(data, entry, dds, allow_resize=allow_resize)
+            replace_texture(data, entry, dds)
         except ValueError as e:
             raise click.ClickException(str(e))
 

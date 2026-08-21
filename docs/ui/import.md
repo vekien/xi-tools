@@ -29,9 +29,8 @@ Example:
 | Option | Description |
 |---|---|
 | `--output-dat PATH` | Write to a new DAT instead of overwriting `DAT_FILE` |
-| `--allow-resize` | Accept a `.dds` whose dimensions differ from the DAT entry, and repoint its sprite source rects (see below) |
+| `--no-resize` | Import the textures but leave sprite source rects alone (the reference sheet is not consulted) |
 | `--reference DAT` | Pristine DAT to read original sprite rects from. Defaults to the built-in sheet, then `<dat>.base` |
-| `--no-layout-fixup` | With `--allow-resize`, leave source rects alone |
 
 `--format` and `--all-themes` are **only** on `xi ui tex si`, not on `import`.
 
@@ -102,7 +101,6 @@ overwriting all 8 DATs. The source skin imports from its own folder.
 Each replacement `.dds` must:
 
 - be a classic DDS file with `DXT1`, `DXT3`, or `DXT5` FourCC
-- match the original texture dimensions, unless `--allow-resize` is passed
 - have a compressed payload size consistent with its format and dimensions
 
 If a file fails validation, the import stops with an error.
@@ -136,7 +134,7 @@ touch the chunk header.
 
 ---
 
-## Sprite source rects (layout fixup)
+## Sprite source rects (resizing)
 
 Enlarging a texture is not enough on its own. The sprite mapping lives in the
 container's `0x31` chunk (`lobb`), as records introduced by a 4-byte marker, an
@@ -176,6 +174,17 @@ tags instead of assuming a fixed header.
 Payloads carry a variable prefix: 41-byte records put the quad at +0, 42-byte ones at
 +1. Rather than trust the length, each candidate offset is validated by checking that
 the source rect it yields fits inside the texture.
+
+### Dimension changes are accepted by default
+
+A `.dds`/`.png` whose pixel size differs from the DAT entry is imported as-is: the entry
+header, the chunk's section size and the sprite source rects all move with it. There is
+no flag to opt in, because with the geometry sheet in place a resize is an ordinary
+edit rather than a risky one.
+
+`--no-resize` imports the textures but skips the rect pass entirely. A texture whose size
+changed then keeps pointing at its old sub-region and renders cropped — useful only when
+you intend to hand-edit the mapping yourself.
 
 ### Where the original geometry comes from
 

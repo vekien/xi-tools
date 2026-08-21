@@ -98,9 +98,9 @@ Notes:
   now always passes `-srgb` so both sides are tagged sRGB and the conversions
   cancel. Nothing to configure; `--gamma-convert` on `xi utils png2dds` opts
   back into texconv's stock behaviour if you ever need it.
-- **Resizing is allowed** with `--allow-resize`, which also repoints the sprite's
-  source rect — see [import.md](import.md#sprite-source-rects-layout-fixup). Without
-  that flag a dimension mismatch is rejected.
+- **Resizing is automatic.** Import a bigger or smaller PNG and the sprite's source
+  rect is rescaled with it — see
+  [import.md](import.md#sprite-source-rects-resizing).
 - **Where it writes:** by default `si` writes the patched DAT back in place
   under `FFXI_DIR` (the pristine bytes are kept in a `<dat>.base` backup).
   Pass `--output-dat PATH` to write elsewhere.

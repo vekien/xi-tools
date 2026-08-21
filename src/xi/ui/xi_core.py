@@ -345,24 +345,17 @@ def rescale_layout_rects(data: bytearray, tex_name: str, old_size: tuple[int, in
     return changed, partial
 
 
-def replace_texture(data: bytearray, entry: TextureEntry, dds: DdsTexture,
-                    allow_resize: bool = False) -> None:
+def replace_texture(data: bytearray, entry: TextureEntry, dds: DdsTexture) -> None:
     """Patch `dds` over `entry` in `data`, resizing the chunk if the payload changed.
+
+    A different pixel size is accepted: the entry header, the chunk's section size and
+    the sprite source rects that point into the texture are all brought along, the last
+    by `sync_layout_rects` once every texture is in place.
 
     `data` is mutated in place and may change length. Patch entries back-to-front
     (see `_resize_chunk`) so a resize never invalidates a txd_offset still to come.
-
-    `allow_resize` permits a different pixel size. Safe for a sprite that maps as a
-    whole texture (the `lobb` record for `20logo` drives 256x256 and 512x512 alike),
-    but NOT for an atlas: glyph and icon sheets carry source rectangles in texture
-    pixels, and those live in a separate layout chunk this function never touches.
     """
     if dds.width != entry.width or dds.height != entry.height:
-        if not allow_resize:
-            raise ValueError(
-                f'{entry.name or "unnamed"}: DDS is {dds.width}x{dds.height} but DAT entry is '
-                f'{entry.width}x{entry.height} (pass allow_resize to change it)'
-            )
         entry.width = dds.width
         entry.height = dds.height
 
@@ -447,13 +440,22 @@ def write_dds(entry: TextureEntry, out_path: Path) -> None:
 
 
 def _record_prefix(data: bytes, off: int, length: int, tex_wh: tuple[int, int]) -> int | None:
-    """Byte offset of the quad within a payload, or None if no reading fits.
+    """Byte offset of the quad within a payload, or None if it cannot be located.
 
-    Payloads carry a variable prefix: 41-byte records start at +0, 42-byte ones at +1.
-    Rather than trust the length, each candidate is validated by checking the source
-    rect it yields actually fits inside the texture, which is self-correcting for the
-    handful of longer variants.
+    Payloads carry a variable prefix. The length settles it for the two common shapes:
+    41-byte records start at +0, 42-byte at +1 -- verified against all 1230 records in
+    ROM/119/50. Other lengths fall back to trying each candidate and keeping the one
+    whose source rect fits inside the texture.
+
+    Length is checked BEFORE the fit test on purpose. Fit alone cannot find a rect that
+    is already wrong: a 480x96 rect left behind on a texture shrunk to 256 fits nothing,
+    so a fit-only lookup makes the record invisible and it can never be repaired.
     """
+    if length == 41:
+        return 0
+    if length == 42:
+        return 1
+
     w, h = tex_wh
     for pre in (0, 1):
         if length < pre + SRC_RECT_OFFSET + 8:

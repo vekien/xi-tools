@@ -159,8 +159,7 @@ def simple_extract_cmd(dat_path: str, raw_alpha: bool, ffxi: str | None):
 
 
 def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format: str,
-                allow_resize: bool = False, fix_layout: bool = True,
-                reference: str | None = None) -> None:
+                fix_layout: bool = True, reference: str | None = None) -> None:
     """Rebuild DDS from the PNGs in work_dir and patch them into dat_file -> out_file."""
     if not work_dir.exists() or not work_dir.is_dir():
         raise click.ClickException(f'Working directory not found: {work_dir}')
@@ -224,7 +223,7 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
         was_size = f'{entry.width}x{entry.height}'
         try:
             dds = parse_dds(dds_path)
-            replace_texture(data, entry, dds, allow_resize=allow_resize)
+            replace_texture(data, entry, dds)
         except ValueError as e:
             raise click.ClickException(str(e))
         now_size = f'{entry.width}x{entry.height}'
@@ -291,21 +290,18 @@ def _seed_theme_from_source(source_dir: Path, theme_dat: Path) -> Path:
     show_default=True,
     help='DDS compression format. auto preserves the existing extracted DDS format.',
 )
-@click.option('--allow-resize', is_flag=True,
-              help='Permit a .png whose dimensions differ from the DAT entry. Safe for a '
-                   'whole-texture sprite; wrong for an atlas (its source rects live in the '
-                   'layout chunk and are not rescaled).')
 @click.option('--reference', default=None, metavar='DAT',
               help='Unmodified DAT to read original sprite rects from. Defaults to the '
-                   'retail DAT at the same ROM path under FFXI_DIR, then <dat>.base.')
-@click.option('--no-layout-fixup', 'fix_layout', is_flag=True, default=True, flag_value=False,
-              help='Do not repoint sprite source rects after a resize (leaves the client '
-                   'sampling the old sub-region of the new texture).')
+                   'built-in reference sheet, then <dat>.base.')
+@click.option('--no-resize', 'fix_layout', is_flag=True, default=True, flag_value=False,
+              help='Import the textures but leave sprite source rects alone. The reference '
+                   'sheet is not consulted, so a texture whose size changed keeps pointing at '
+                   'the old sub-region and renders cropped.')
 @click.option('--all-themes', is_flag=True,
               help='Window skins only (ROM/0/14..21): apply this theme\'s edited PNGs to ALL skins and import each.')
 @click.option('--ffxi', default=None, metavar='DIR',
               help='Override FFXI_DIR for this command (e.g. a pivot/override root).')
-def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: str, allow_resize: bool,
+def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: str,
                       reference: str | None, fix_layout: bool, all_themes: bool, ffxi: str | None):
     """Convert edited PNG files back to DDS and import them into a UI DAT.
 
@@ -345,7 +341,7 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
                 continue
             work = source_dir if theme_id == stem_id else _seed_theme_from_source(source_dir, theme_dat)
             _import_one(theme_dat, output_path_for(theme_dat), work, requested_format,
-                        allow_resize, fix_layout, reference)
+                        fix_layout, reference)
             click.echo()
         click.echo('All themes updated.')
         return
@@ -358,4 +354,4 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
         # Default: write the DAT back in place.
         out_file = output_path_for(dat_file)
     _import_one(dat_file, out_file, _default_export_dir(dat_file), requested_format,
-                allow_resize, fix_layout, reference)
+                fix_layout, reference)
