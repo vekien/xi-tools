@@ -67,6 +67,7 @@ from xi.fx       import xi_export       as fx_export
 from xi.tex      import xi_list       as tex_list
 from xi.tex      import xi_export      as tex_export
 from xi.tex      import xi_import     as tex_import
+from xi.title    import xi_title_cmds as title_cmds
 from xi.ui       import xi_extract   as ui_export
 from xi.ui       import xi_gen_sheet as ui_gen_sheet
 from xi.ui       import xi_list      as ui_list
@@ -334,6 +335,17 @@ ui_tex.add_command(ui_simple.simple_extract_cmd,'sx')
 ui_tex.add_command(ui_simple.simple_import_cmd, 'si')
 
 ui.add_command(ui_gen_sheet.cmd, 'gen-sheet')
+
+
+@cli.group('title')
+def title():
+    """Title/login screen scene — zones, camera paths and weather (ROM/0/23.DAT)."""
+
+
+title.add_command(title_cmds.list_cmd,      'list')
+title.add_command(title_cmds.set_zone_cmd,  'set-zone')
+title.add_command(title_cmds.camera_group,  'camera')
+title.add_command(title_cmds.weather_cmd,   'weather')
 
 
 @ui.group('layout')

@@ -238,6 +238,13 @@ xi ui tex si ROM/119/50.DAT --hd-only ex1us
 xi ui gen-sheet
 xi ui gen-sheet ROM/119/50.DAT ROM/119/51.DAT ROM/280/15.DAT
 
+xi title
+xi title list                                 # title screen zones, cameras, weather
+xi title weather --section 12
+xi title set-zone 12 115                      # swap a segment's zone
+xi title camera export cams.json              # camera paths -> JSON (exact round trip)
+xi title camera import cams.json
+
 xi ui layout
 xi ui layout damv-pos
 xi ui layout menu-pos
