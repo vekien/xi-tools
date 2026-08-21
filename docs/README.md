@@ -26,6 +26,7 @@ and a UE5 engine port where they confirm or clarify format details.
 - [Gear & Equipment](#gear--equipment)
 - [Mounts](#mounts)
 - [UI Textures](#ui-textures)
+- [Title Screen](#title-screen)
 - [Entity & NPC](#entity--npc)
 - [Object Placement](#object-placement)
 - [Key Items](#key-items)
@@ -226,6 +227,19 @@ Commands live under `xi ui tex …` and `xi ui layout …`.
 | [ui/list.md](ui/list.md) | `xi ui tex list` — list UI DATs by magic |
 | [ui/extract.md](ui/extract.md) | Redirect — there is no `extract` command |
 | [utils/texture.md](utils/texture.md) | DDS ↔ PNG conversion helpers |
+
+---
+
+## Title Screen
+
+The login screen flies real in-game zones as a live 3D background. `ROM/0/23.DAT`
+(`titl`) holds which zones appear, the camera routes through each, and the weather and
+fog per segment. Commands live under `xi title …`.
+
+| Doc | Summary |
+|-----|---------|
+| [title/README.md](title/README.md) | `xi title` — list, timeline, weather, camera round trip, zone swap |
+| [dats/ROM_0_23.md](dats/ROM_0_23.md) | The `titl` format: scene nodes, camera keyframes, zone sections, weather records |
 
 ---
 
