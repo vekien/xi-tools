@@ -68,6 +68,7 @@ from xi.tex      import xi_list       as tex_list
 from xi.tex      import xi_export      as tex_export
 from xi.tex      import xi_import     as tex_import
 from xi.ui       import xi_extract   as ui_export
+from xi.ui       import xi_gen_sheet as ui_gen_sheet
 from xi.ui       import xi_list      as ui_list
 from xi.ui       import xi_damv_pos  as ui_damv_pos
 from xi.ui       import xi_import    as ui_import
@@ -331,6 +332,8 @@ ui_tex.add_command(ui_import.cmd,               'import')
 ui_tex.add_command(ui_list.list_cmd,            'list')
 ui_tex.add_command(ui_simple.simple_extract_cmd,'sx')
 ui_tex.add_command(ui_simple.simple_import_cmd, 'si')
+
+ui.add_command(ui_gen_sheet.cmd, 'gen-sheet')
 
 
 @ui.group('layout')

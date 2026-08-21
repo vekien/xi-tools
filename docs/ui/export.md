@@ -33,6 +33,7 @@ Example:
 | `--output-dir DIR` | Directory to write `.dds` files (default: `exports/ui/<stem>/`) |
 | `--json` | Also write a `manifest.json` listing all extracted textures |
 | `--list` | Print texture list without extracting files |
+| `--raw-alpha` (`sx`) | Write FFXI's raw half-scale alpha instead of brightening it for editing — see [below](#alpha-is-stored-at-half-scale) |
 
 ---
 
@@ -97,7 +98,9 @@ Notes:
   now always passes `-srgb` so both sides are tagged sRGB and the conversions
   cancel. Nothing to configure; `--gamma-convert` on `xi utils png2dds` opts
   back into texconv's stock behaviour if you ever need it.
-- **Keep it 1024×1024.** Import validation rejects any dimension mismatch.
+- **Resizing is allowed** with `--allow-resize`, which also repoints the sprite's
+  source rect — see [import.md](import.md#sprite-source-rects-layout-fixup). Without
+  that flag a dimension mismatch is rejected.
 - **Where it writes:** by default `si` writes the patched DAT back in place
   under `FFXI_DIR` (the pristine bytes are kept in a `<dat>.base` backup).
   Pass `--output-dat PATH` to write elsewhere.
@@ -187,6 +190,51 @@ Extracted 9 textures to exports/ui/50/
 
 ---
 
+## Alpha is stored at half scale
+
+FFXI stores UI texture alpha at **half scale**: `0x80` (128) means fully opaque, not
+`0xFF`. A raw export therefore opens at roughly 50% opacity and is unpleasant to edit.
+
+DXT3's alpha is 4-bit, so it can only encode multiples of 17 and cannot hold 128
+exactly. The encoder dithers between `119` (7x17) and `136` (8x17) in equal measure to
+average 127.5 — that 119/136 pair is the fingerprint of a half-scale texture:
+
+```
+ex1us   alpha values: 0 (7936px), 119 (28800px), 136 (28800px)
+```
+
+`ui tex sx` now brightens alpha to full range on export and restores it on import, so
+the PNGs look in an editor the way they look in game. `--raw-alpha` opts out.
+
+### Why the factor is per-texture, not a flat x2
+
+The zone and mesh exporters use a flat `--alpha-scale 2.0` (see
+[zone/export.md](../zone/export.md#texture-opacity---alpha-scale)). That is wrong for UI
+DATs, because a single DAT mixes conventions:
+
+| Texture | Peak alpha | Convention |
+|---|--:|---|
+| `ex1us`, `ex2us`, `ex5us`, `otp`, `wardrb` | 136 | half scale |
+| `abxy360` | 204 | partial |
+| `titlwin`, `20logo`, `chmkfnt`, `b1n` | 255 | full scale |
+
+A flat x2 would clamp the already-opaque ones to 255, and the x0.5 inverse would bring
+them back as **128** — silently making `20logo` and `titlwin` half transparent.
+
+So the factor is `255 / peak_alpha` per texture, which never clamps and is therefore
+exactly invertible. Each factor is written to `alpha-scale.json` in the export folder;
+`si` reads it back and divides by the same value. Textures already at 255 get factor
+1.0 and are not touched.
+
+Verified round-trip on `ROM/119/50`: `ex1us` returns as `0 / 119 / 136` with identical
+pixel counts, and `20logo`'s 16-step alpha gradient is unchanged.
+
+**If the sidecar is missing** (an export made before this change, or a hand-assembled
+folder) no scaling is applied on import — the PNGs are taken as-is. Re-run `sx` to
+regenerate both the PNGs and the sidecar.
+
+---
+
 ## DXT compression formats
 
 FFXI uses three variants of DXT block compression. All store RGB colour the same
@@ -197,7 +245,7 @@ differ only in how alpha is handled:
 |---|---|---|---|---|---|
 | **DXT1** | `1TXD` | 4 | 1-bit punch-through (optional) | 8 bytes | Opaque tiles, hard-cutout UI elements |
 | **DXT3** | `3TXD` | 8 | 4-bit explicit per-pixel (0–15 levels) | 16 bytes | Logos, title window, job/status icons |
-| **DXT5** | `5TXD` | 8 | Interpolated between 2 anchor values (0–255) | 16 bytes | Smooth alpha gradients (not yet observed) |
+| **DXT5** | `5TXD` | 8 | Interpolated between 2 anchor values (0–255) | 16 bytes | Smooth alpha gradients (supported, unused by retail) |
 
 The TXD magic byte encodes the format: `1TXD` → DXT1, `3TXD` → DXT3, `5TXD` → DXT5.
 
@@ -211,8 +259,39 @@ tile frames — where alpha is either fully opaque or hard-cutout.
 in `ROM/280/15.DAT`, and every texture in `ROM/0/2.DAT`.  DXT3's 4-bit explicit
 alpha gives clean edges without gradient bleeding.
 
-**DXT5** would be preferred for soft alpha (smoke, glow, fur), but has not been
-observed in the UI DATs scanned so far.
+**DXT5** would be preferred for soft alpha (smoke, glow, fur), but **the client does
+not render it — do not use it.** Tested 2026-08-20: every texture in `ROM/119/50.DAT`
+re-encoded to `5TXD` (chunk sizes correctly resized, chunk walk verified contiguous)
+rendered as flat grey on the title screen. Reverted.
+
+This confirms the assertion in
+[entity/mesh/xi_import.py](../../src/xi/entity/mesh/xi_import.py) that the game reads
+only DXT1 and DXT3, and extends it from the entity path to the UI path.
+
+No retail asset uses DXT5 either. A scan of the whole shipped ROM tree
+(`ROM` … `ROM10`, ~10 GB) turned up four raw `5TXD` byte hits, all coincidences
+inside compressed payloads — no `0xa1` entry marker, garbage dimensions. Zero real
+DXT5 textures ship in the game.
+
+`FFXiMain.dll` does carry format-name tables — `1TXD 2TXD 3TXD 4TXD 5TXD` at
+`0x285dc` (twice) and `DXT1 DXT2 DXT3 DXT4 DXT5` at `0x29080`, next to the
+`CYyTex` / `CYyTexBase` / `CYyTexMng` class names. **These are not proof of support**;
+they include `DXT2` and `DXT4`, which the format never uses, so they are almost
+certainly a name lookup for diagnostics rather than a decode dispatch. The grey-screen
+test above overrides them.
+
+Untested hypothesis for *why* it fails: the decoder may select on the `pixel_format`
+u16 at entry+31 (`4` = DXT1+alpha, `8` = opaque, `32` = seen on `titlwin`/`abxy360`)
+rather than on the `xTXD` magic. `replace_texture` preserves that field, so the engine
+would have kept decoding as DXT1/DXT3 while the bytes were DXT5. Nobody has traced the
+real dispatch site.
+
+### Changing format on import
+
+`xi ui tex si --format dxt5` re-encodes every texture in the DAT — it works
+mechanically but produces a DAT the client cannot display, per above. DXT1 → DXT3
+doubles a texture's payload (4 bpp → 8 bpp), which resizes its `0x20` chunk; see
+[import.md](import.md#format-changes-resize-chunks).
 
 ### Pitch and size formulas
 

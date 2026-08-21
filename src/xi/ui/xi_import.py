@@ -5,7 +5,8 @@ from pathlib import Path
 import click
 
 from xi.xi_config import FFXI_DIR, ensure_base, output_path_for
-from xi.ui.xi_core import compression_name, output_file_names, parse_dds, parse_textures, replace_texture
+from xi.ui.xi_core import (compression_name, output_file_names, parse_dds, parse_textures,
+                           replace_texture, resolve_layout_reference, sync_layout_rects)
 
 
 @click.command('import')
@@ -13,7 +14,16 @@ from xi.ui.xi_core import compression_name, output_file_names, parse_dds, parse_
 @click.argument('texture_dir', metavar='TEXTURE_DIR')
 @click.option('--output-dat', default=None,
               help='Write to a different DAT path instead of overwriting DAT_FILE.')
-def cmd(dat_path: str, texture_dir: str, output_dat: str | None):
+@click.option('--reference', default=None, metavar='DAT',
+              help='Unmodified DAT to read original sprite rects from.')
+@click.option('--no-layout-fixup', 'fix_layout', is_flag=True, default=True, flag_value=False,
+              help='Do not repoint sprite source rects after a resize.')
+@click.option('--allow-resize', is_flag=True,
+              help='Permit a .dds whose dimensions differ from the DAT entry. Safe for a '
+                   'whole-texture sprite; wrong for an atlas (its source rects live in the '
+                   'layout chunk and are not rescaled).')
+def cmd(dat_path: str, texture_dir: str, output_dat: str | None, reference: str | None,
+        fix_layout: bool, allow_resize: bool):
     """Import edited .dds files from a folder back into a UI container DAT.
 
     DAT_FILE can be an absolute path or a path relative to the FFXI directory.
@@ -58,20 +68,31 @@ def cmd(dat_path: str, texture_dir: str, output_dat: str | None):
             missing += 1
             continue
 
+        was = compression_name(entry)   # replace_texture updates the entry in place
+        was_size = f'{entry.width}x{entry.height}'
         try:
             dds = parse_dds(dds_path)
-            replace_texture(data, entry, dds)
+            replace_texture(data, entry, dds, allow_resize=allow_resize)
         except ValueError as e:
             raise click.ClickException(str(e))
 
         replaced += 1
+        now_size = f'{entry.width}x{entry.height}'
+        grew = '' if was_size == now_size else f' {was_size} -> {now_size}'
         click.echo(
-            f'  imported {filename} [{dds.fourcc.decode()} -> {compression_name(entry)}] '
+            f'  imported {filename} [{was} -> {compression_name(entry)}]{grew} '
             f'-> {entry.name or "unnamed"}'
         )
 
     if replaced == 0:
         raise click.ClickException(f'No matching .dds files found in {folder}')
+
+    if fix_layout:
+        ref, how = resolve_layout_reference(dat_file, reference)
+        click.echo(f'  layout: using {how}')
+        for name, off, old, new in sync_layout_rects(data, ref):
+            click.echo(f'  layout: {name} @0x{off:06x} src {old[0]}x{old[1]}@({old[2]},{old[3]}) '
+                       f'-> {new[0]}x{new[1]}@({new[2]},{new[3]})')
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
     if out_file.exists():

@@ -225,6 +225,13 @@ xi ui tex si ROM/0/2.DAT
 xi ui tex sx ROM/119/50.DAT --ffxi "<FFXI_PIVOT_DIR>"
 xi ui tex si ROM/119/50.DAT --ffxi "<FFXI_PIVOT_DIR>"
 
+# Resize a texture: --allow-resize also rescales its sprite source rects
+xi ui tex si ROM/119/50.DAT --allow-resize
+
+# Rebuild the sprite-geometry sheet from PRISTINE (retail) DATs
+xi ui gen-sheet
+xi ui gen-sheet ROM/119/50.DAT ROM/119/51.DAT ROM/280/15.DAT
+
 xi ui layout
 xi ui layout damv-pos
 xi ui layout menu-pos
