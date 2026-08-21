@@ -242,8 +242,8 @@ xi title
 xi title list                                 # title screen zones, cameras, weather
 xi title weather --section 12
 xi title set-zone 12 115                      # swap a segment's zone
-xi title camera export cams.json              # camera paths -> JSON (exact round trip)
-xi title camera import cams.json
+xi title camera export                        # -> exports/title/camera.json (exact round trip)
+xi title camera import                        # <- exports/title/camera.json
 
 xi ui layout
 xi ui layout damv-pos

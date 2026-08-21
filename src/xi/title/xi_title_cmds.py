@@ -29,6 +29,11 @@ def _apply_ffxi(ffxi):
         _cfg.FFXI_DIR = ffxi
 
 
+# There is only ever one camera file, so the path is a default rather than an argument.
+# Mirrors where the UI commands put their work: exports/<area>/...
+CAMERA_JSON = Path('exports/title/camera.json')
+
+
 # ---------------------------------------------------------------------------
 
 @click.command('list')
@@ -111,7 +116,7 @@ def camera_group():
 
 
 @camera_group.command('export')
-@click.argument('output', metavar='JSON_FILE')
+@click.argument('output', metavar='JSON_FILE', required=False)
 @click.option('--dat', 'dat_path', default=None, metavar='DAT_FILE')
 @click.option('--section', type=int, default=None, help='Only this zone section.')
 @click.option('--ffxi', default=None, metavar='DIR')
@@ -120,8 +125,11 @@ def camera_export_cmd(output, dat_path, section, ffxi):
 
     Each keyframe is an eye position, a look-at point and a normalised time, which is
     what a viewer needs to replay the shot -- no engine-specific packing.
+
+    Writes exports/title/camera.json unless a path is given.
     """
     _apply_ffxi(ffxi)
+    out_json = Path(output) if output else CAMERA_JSON
     path = resolve(dat_path)
     data = path.read_bytes()
     nodes = parse_nodes(data)
@@ -153,15 +161,16 @@ def camera_export_cmd(output, dat_path, section, ffxi):
             })
         doc['sections'].append(entry)
 
-    Path(output).write_text(json.dumps(doc, indent=1), encoding='utf-8')
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(doc, indent=1), encoding='utf-8')
     total = sum(len(t['keyframes']) for s in doc['sections'] for t in s['tracks'])
-    click.echo(f'wrote {output}: {len(doc["sections"])} section(s), '
+    click.echo(f'wrote {out_json}: {len(doc["sections"])} section(s), '
                f'{sum(len(s["tracks"]) for s in doc["sections"])} track(s), '
                f'{total} keyframes')
 
 
 @camera_group.command('import')
-@click.argument('json_file', metavar='JSON_FILE')
+@click.argument('json_file', metavar='JSON_FILE', required=False)
 @click.option('--dat', 'dat_path', default=None, metavar='DAT_FILE')
 @click.option('--output', default=None, metavar='DAT_FILE', help='Write elsewhere.')
 @click.option('--ffxi', default=None, metavar='DIR')
@@ -171,12 +180,17 @@ def camera_import_cmd(json_file, dat_path, output, ffxi):
     Tracks are matched by name. A keyframe count may not grow: the nodes sit in a fixed
     layout with the next node immediately after, so extra frames would overwrite it.
     Supplying fewer than a track holds leaves the remainder untouched.
+
+    Reads exports/title/camera.json unless a path is given.
     """
     _apply_ffxi(ffxi)
+    src = Path(json_file) if json_file else CAMERA_JSON
+    if not src.exists():
+        raise click.ClickException(f'{src} not found. Run `xi title camera export` first.')
     path = resolve(dat_path)
     data = bytearray(path.read_bytes())
     nodes = parse_nodes(bytes(data))
-    doc = json.loads(Path(json_file).read_text(encoding='utf-8'))
+    doc = json.loads(src.read_text(encoding='utf-8'))
 
     written = skipped = 0
     for sec in doc.get('sections', []):
