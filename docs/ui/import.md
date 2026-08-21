@@ -29,7 +29,9 @@ Example:
 | Option | Description |
 |---|---|
 | `--output-dat PATH` | Write to a new DAT instead of overwriting `DAT_FILE` |
-| `--no-resize` | Import the textures but leave sprite source rects alone (the reference sheet is not consulted) |
+| `--hd` | Keep PNGs larger than the expected size at their own resolution and scale their sprite rects to match |
+| `--hd-only NAMES` | Comma-separated textures to apply `--hd` to; implies `--hd` |
+| `--no-resize` | Import the textures but leave sprite source rects alone |
 | `--repair-rects` | Rebuild every sprite rect from a reference. For a DAT left inconsistent by an earlier edit |
 | `--reference DAT` | With `--repair-rects`, the pristine DAT to read from. Defaults to the built-in sheet, then `<dat>.base` |
 
@@ -172,12 +174,51 @@ rebuilt titlwin.png -> titlwin.dds [DXT3; ...; fit 2048x2048 -> 1024x1024]
 rebuilt ex1us.png   -> ex1us.dds   [DXT3; ...; fit 512x512 -> 256x256]
 ```
 
-Edit at whatever resolution suits you. The texture entry, the chunk size and every
-sprite rect stay exactly as they were, because nothing about the DAT's geometry changed.
-
 The target comes from the reference sheet, falling back to the size the DAT already
-holds — **never** from the PNG. A texture the sheet does not cover keeps its current
-size, which is still the DAT's own truth rather than the file's.
+holds — **never** from the PNG.
+
+### Going past vanilla resolution — `--hd`
+
+Fitting down caps quality at vanilla, and vanilla is not where the ceiling should be:
+these sprites are drawn **magnified**. Each expansion banner is a 240x48 region of
+`ex1us` filling roughly 375x74 real pixels, so the source is upscaled before it ever
+reaches the screen.
+
+`--hd` keeps a larger PNG at its own resolution and scales that texture's sprite rects
+to match, turning the upscale into a downsample:
+
+```bash
+uv run xi ui tex si ROM/119/50.DAT --hd
+uv run xi ui tex si ROM/119/50.DAT --hd-only ex1us,ex2us
+```
+
+```
+hd: ex1us 256x256 -> 512x512 (chunk 65632 -> 262240)
+layout: ex1us src 240x48@(0,0)   -> 480x96@(0,0)
+layout: ex1us src 240x48@(0,48)  -> 480x96@(0,96)
+```
+
+`--hd-only NAMES` restricts it to specific textures and implies `--hd`. Everything not
+selected takes the normal fit-to-canonical path.
+
+This was the single biggest quality change of anything tried on these textures.
+
+### Why not a palettized texture
+
+UI containers also support a palettized format (`0xB1`, see
+[xi_palette.py](../../src/xi/ui/xi_palette.py)) — 8-bit indices into a 256-entry RGBA
+palette, with 8-bit alpha per entry instead of DXT3's 4-bit. On paper it wins: measured
+on a real expansion-logo texture, 33.9 dB against 30.9 dB for DXT3 at the same size,
+with exact alpha.
+
+It renders correctly, and it still lost. 255 palette entries shared across five banners
+band visibly on smooth gradients, where DXT3 picks different colours for every 4x4 block
+and so has thousands across the image. On a logo with soft gradients the gap ran the
+other way by 25 dB (53.5 DXT3 against 28.6 palettized).
+
+**Resolution was the win; the encoder was not.** `--hd` writes DXT. The palettized
+reader is kept because retail DATs contain around 2100 such textures — `ROM/0/0` has one
+in a UI container — and a tool that cannot see them would silently skip them on import.
 
 ### Record header
 

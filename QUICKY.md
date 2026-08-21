@@ -230,6 +230,10 @@ xi ui tex si ROM/119/50.DAT
 xi ui tex si ROM/119/50.DAT --no-resize        # import textures, leave rects alone
 xi ui tex si ROM/119/50.DAT --repair-rects     # rebuild rects from the reference sheet
 
+# Go past vanilla resolution: keep a bigger PNG and scale its sprite rects to match
+xi ui tex si ROM/119/50.DAT --hd
+xi ui tex si ROM/119/50.DAT --hd-only ex1us
+
 # Rebuild the sprite-geometry sheet from PRISTINE (retail) DATs
 xi ui gen-sheet
 xi ui gen-sheet ROM/119/50.DAT ROM/119/51.DAT ROM/280/15.DAT

@@ -164,6 +164,20 @@ def simple_extract_cmd(dat_path: str, raw_alpha: bool, ffxi: str | None):
         click.echo(f'  extracted {dds_name} [{compression_name(entry)}]{note} -> {png_path.name}')
         written += 1
 
+    # Palettized (0xB1) textures have no xTXD, so parse_textures cannot see them. Export
+    # them too, or the folder silently omits any texture --hd has converted and a
+    # re-import would leave it untouched while reporting success on everything else.
+    from xi.ui.xi_palette import parse_palettized, to_image
+    for tex in parse_palettized(data):
+        png_path = out_dir / f'{tex.name}.png'
+        to_image(tex).save(png_path)
+        # to_image already restores full-range alpha from FFXI's half scale, and the
+        # import side halves it again, so this pair needs no sidecar entry.
+        alpha_scales.pop(tex.name, None)
+        click.echo(f'  extracted {tex.name} [palettized {tex.width}x{tex.height}] '
+                   f'-> {png_path.name}')
+        written += 1
+
     import json
     sidecar = out_dir / ALPHA_SIDECAR
     if alpha_scales:
@@ -178,9 +192,98 @@ def simple_extract_cmd(dat_path: str, raw_alpha: bool, ffxi: str | None):
                    f'{ALPHA_SIDECAR} records the factors so import restores them.')
 
 
+def _hd_pass(data: bytearray, work_dir: Path, canonical: dict, requested_format: str,
+             only: set | None = None) -> list:
+    """Write oversized PNGs as DXT textures at their own resolution.
+
+    A UI sprite is normally fitted back to the size its records address, which caps it
+    at vanilla. That is the real quality ceiling: the expansion banners are drawn
+    magnified -- a 240x48 region fills roughly 375x74 real pixels -- so the source is
+    upscaled before it ever reaches the screen. Keeping the texture large and scaling
+    its sprite rects turns that into a downsample.
+
+    The encoder stays DXT. A palettized (0xB1) version was tried and measured better on
+    paper (33.9 dB against 30.9), but 255 palette entries shared across five banners
+    band visibly on smooth gradients, which DXT avoids by choosing different colours per
+    4x4 block. Resolution was the win; the encoder was not.
+
+    Chunks are replaced back-to-front so a size change never invalidates an offset still
+    to come.
+    """
+    from PIL import Image
+    from xi.ui.xi_core import parse_dds
+    from xi.ui.xi_palette import build_dxt_chunk, find_texture_chunk
+
+    targets = []
+    for name, (cw, ch) in canonical.items():
+        if only and name not in only:
+            continue
+        png = work_dir / f'{name}.png'
+        if not png.exists():
+            continue
+        with Image.open(png) as probe:
+            size = (probe.width, probe.height)
+        if size[0] > cw or size[1] > ch:
+            targets.append((name, size))
+
+    tmp = work_dir / '.alpha'
+    done = []
+    for name, size in sorted(targets, key=lambda t: -(find_texture_chunk(data, t[0]) or {}).get('off', 0)):
+        loc = find_texture_chunk(data, name)
+        if loc is None:
+            continue
+        tmp.mkdir(parents=True, exist_ok=True)
+        scaled = tmp / f'hd_{name}.png'
+        Image.open(work_dir / f'{name}.png').convert('RGBA').resize(size, Image.LANCZOS).save(scaled)
+        dds_path = tmp / f'hd_{name}.dds'
+        fmt = requested_format.lower()
+        convert_png_to_dds(scaled, dds_path, requested_format='dxt3' if fmt == 'auto' else fmt)
+        chunk = build_dxt_chunk(loc['tag'], loc['info'], loc['parent'], name, parse_dds(dds_path))
+        data[loc['off']:loc['off'] + loc['bytes']] = chunk
+        done.append((name, (loc['width'], loc['height']), size, loc['bytes'], len(chunk)))
+    return done
+
+
+def _restore_dxt(data: bytearray, work_dir: Path, canonical: dict, hd_names: set,
+                 requested_format: str) -> list:
+    """Rewrite palettized textures back to DXT at canonical size, unless kept as HD.
+
+    Nothing writes palettized textures any more, but a DAT edited by an earlier build
+    can still hold them, and `parse_textures` matches only `xTXD` -- so such a chunk is
+    invisible to the normal import loop and would be stuck permanently. This makes the
+    state recoverable with a plain import.
+    """
+    from PIL import Image
+    from xi.ui.xi_core import parse_dds
+    from xi.ui.xi_palette import build_dxt_chunk, find_texture_chunk, parse_palettized
+
+    stuck = [t for t in parse_palettized(data) if t.name not in hd_names]
+    done = []
+    for tex in sorted(stuck, key=lambda t: -t.chunk_off):
+        png = work_dir / f'{tex.name}.png'
+        if not png.exists():
+            continue
+        loc = find_texture_chunk(data, tex.name)
+        if loc is None:
+            continue
+        target = tuple(canonical.get(tex.name) or (tex.width, tex.height))
+        tmp = work_dir / '.alpha'
+        tmp.mkdir(parents=True, exist_ok=True)
+        fitted = tmp / f'restore_{tex.name}.png'
+        Image.open(png).convert('RGBA').resize(target, Image.LANCZOS).save(fitted)
+        dds_path = tmp / f'restore_{tex.name}.dds'
+        fmt = requested_format.lower()
+        convert_png_to_dds(fitted, dds_path, requested_format='dxt3' if fmt == 'auto' else fmt)
+        chunk = build_dxt_chunk(loc['tag'], loc['info'], loc['parent'], tex.name,
+                                parse_dds(dds_path))
+        data[loc['off']:loc['off'] + loc['bytes']] = chunk
+        done.append((tex.name, (tex.width, tex.height), target))
+    return done
+
+
 def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format: str,
                 fix_layout: bool = True, reference: str | None = None,
-                repair: bool = False) -> None:
+                repair: bool = False, hd: bool = False, hd_only_arg: str | None = None) -> None:
     """Rebuild DDS from the PNGs in work_dir and patch them into dat_file -> out_file."""
     if not work_dir.exists() or not work_dir.is_dir():
         raise click.ClickException(f'Working directory not found: {work_dir}')
@@ -200,6 +303,19 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
     entry_by_filename = dict(zip(filenames, entries))
     alpha_scales = _read_alpha_sidecar(work_dir)
     canonical = canonical_texture_sizes(dat_file)
+    hd_only = {n.strip() for n in hd_only_arg.split(',') if n.strip()} if hd_only_arg else None
+    hd = hd or bool(hd_only)
+    hd_names = set()
+    if hd:
+        from PIL import Image as _Img
+        for _n, (_cw, _ch) in canonical.items():
+            if hd_only and _n not in hd_only:
+                continue
+            _p = work_dir / f'{_n}.png'
+            if _p.exists():
+                with _Img.open(_p) as _im:
+                    if _im.width > _cw or _im.height > _ch:
+                        hd_names.add(_n)
     tmp_dir = work_dir / '.alpha'
     for filename in filenames:
         png_path = work_dir / f'{Path(filename).stem}.png'
@@ -236,6 +352,8 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
         # sprite records address this texture in absolute pixels, so its size is fixed
         # by the client's layout: edit at whatever resolution suits you and it is fitted
         # on the way in, leaving the mapping untouched.
+        if entry.name in hd_names:
+            continue                    # handled by the palettized pass below
         target = tuple(canonical.get(entry.name) or (entry.width, entry.height))
         fit_note = ''
         from PIL import Image
@@ -268,6 +386,8 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
     replaced = 0
     missing = 0
     for entry, filename in reversed(list(zip(entries, filenames))):
+        if entry.name in hd_names:
+            continue
         dds_path = work_dir / filename
         if not dds_path.exists():
             missing += 1
@@ -286,6 +406,21 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
             f'-> {entry.name or "unnamed"}'
         )
         replaced += 1
+
+    for name, was, now in _restore_dxt(data, work_dir, canonical, hd_names, requested_format):
+        click.echo(f'  restored {name} {was[0]}x{was[1]} palettized -> {now[0]}x{now[1]} DXT')
+
+    if hd:
+        for name, was, now, oldb, newb in _hd_pass(data, work_dir, canonical,
+                                                   requested_format, hd_only):
+            click.echo(f'  hd: {name} {was[0]}x{was[1]} -> {now[0]}x{now[1]} '
+                       f'(chunk {oldb} -> {newb})')
+
+    if fix_layout or hd:
+        ref, how = resolve_layout_reference(dat_file, reference)
+        for name, off, w, n in sync_layout_rects(data, ref):
+            click.echo(f'  layout: {name} @0x{off:06x} src {w[0]}x{w[1]}@({w[2]},{w[3]}) '
+                       f'-> {n[0]}x{n[1]}@({n[2]},{n[3]})')
 
     if repair:
         _fix_layout(data, dat_file, reference)
@@ -349,6 +484,13 @@ def _seed_theme_from_source(source_dir: Path, theme_dat: Path) -> Path:
 @click.option('--no-resize', 'fix_layout', is_flag=True, default=True, flag_value=False,
               help='Import the textures but leave sprite source rects alone, so a texture '
                    'whose size changed keeps pointing at the old sub-region.')
+@click.option('--hd', is_flag=True,
+              help='Keep a PNG larger than the size the game expects at its own resolution '
+                   'and scale its sprite rects to match, instead of fitting it down. '
+                   'Sprites are drawn magnified, so this is the single biggest quality win.')
+@click.option('--hd-only', 'hd_only_arg', default=None, metavar='NAMES',
+              help='Comma-separated texture names to apply --hd to, e.g. "ex1us,ex2us". '
+                   'Implies --hd; everything else takes the normal DXT path.')
 @click.option('--repair-rects', 'repair', is_flag=True,
               help='Also rebuild every sprite rect from the reference sheet. For a DAT left '
                    'inconsistent by an earlier edit; not needed for a normal import.')
@@ -357,8 +499,8 @@ def _seed_theme_from_source(source_dir: Path, theme_dat: Path) -> Path:
 @click.option('--ffxi', default=None, metavar='DIR',
               help='Override FFXI_DIR for this command (e.g. a pivot/override root).')
 def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: str,
-                      reference: str | None, fix_layout: bool, repair: bool,
-                      all_themes: bool, ffxi: str | None):
+                      reference: str | None, fix_layout: bool, hd: bool, hd_only_arg: str | None,
+                      repair: bool, all_themes: bool, ffxi: str | None):
     """Convert edited PNG files back to DDS and import them into a UI DAT.
 
     The working folder is derived automatically from the DAT path:
@@ -397,7 +539,7 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
                 continue
             work = source_dir if theme_id == stem_id else _seed_theme_from_source(source_dir, theme_dat)
             _import_one(theme_dat, output_path_for(theme_dat), work, requested_format,
-                        fix_layout, reference, repair)
+                        fix_layout, reference, repair, hd, hd_only_arg)
             click.echo()
         click.echo('All themes updated.')
         return
@@ -410,4 +552,4 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
         # Default: write the DAT back in place.
         out_file = output_path_for(dat_file)
     _import_one(dat_file, out_file, _default_export_dir(dat_file), requested_format,
-                fix_layout, reference, repair)
+                fix_layout, reference, repair, hd, hd_only_arg)

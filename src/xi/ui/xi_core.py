@@ -486,7 +486,7 @@ def _rects_by_owner(data: bytes) -> dict:
     pairing against a reference: it is in screen coordinates, so unlike the source rect
     it does not move when the texture is resized.
     """
-    dims = {e.name: (e.width, e.height) for e in parse_textures(data)}
+    dims = all_texture_sizes(data)
     records = parse_layout_records(data)
     out: dict[str, list] = {}
     for i, (_name, off, length) in enumerate(records):
@@ -584,7 +584,7 @@ def sync_layout_rects(data: bytearray,
 
     Returns (texture_name, payload_offset, old_rect, new_rect) per rect changed.
     """
-    dims = {e.name: (e.width, e.height) for e in parse_textures(data)}
+    dims = all_texture_sizes(data)
     cur = _rects_by_owner(data)
     ref_dims, ref_rects = ref if ref else ({}, {})
     changed = []
@@ -706,3 +706,17 @@ def canonical_texture_sizes(dat_file: Path) -> dict:
     """
     model = sheet_reference(dat_file)
     return dict(model[0]) if model else {}
+
+
+def all_texture_sizes(data: bytes) -> dict:
+    """Texture name -> (width, height), covering DXT and palettized entries alike.
+
+    The layout passes need every texture's size, and a texture converted to a palette
+    has no `xTXD` for `parse_textures` to find. Without this, resizing such a texture
+    would silently skip its sprite rects.
+    """
+    from xi.ui.xi_palette import parse_palettized
+    sizes = {e.name: (e.width, e.height) for e in parse_textures(data)}
+    for t in parse_palettized(data):
+        sizes[t.name] = (t.width, t.height)
+    return sizes
