@@ -9,7 +9,8 @@ import click
 import xi.xi_config as _cfg
 from xi.xi_config import ensure_base, output_path_for
 from xi.title.xi_title import (KEYFRAME_STRIDE, NODE_COUNT_OFF, NODE_KEYFRAME_OFF,
-                               parse_nodes, parse_track, parse_zones, resolve, tracks_for)
+                               parse_nodes, parse_stream, parse_track, parse_zones,
+                               resolve, shot_list, tracks_for)
 
 
 def _zone_names() -> list:
@@ -257,3 +258,72 @@ def weather_cmd(dat_path, section, ffxi):
                        f'near={w.fog_near:5} far={w.fog_far:5} '
                        f'blend {w.blend_in}/{w.blend_out}  track={w.track or "-"}')
         click.echo()
+
+
+TIMELINE_JSON = Path('exports/title/timeline.json')
+
+
+@click.command('timeline')
+@click.argument('output', metavar='JSON_FILE', required=False)
+@click.option('--dat', 'dat_path', default=None, metavar='DAT_FILE')
+@click.option('--section', type=int, default=None, help='Only this zone section.')
+@click.option('--json', 'as_json', is_flag=True, help='Write JSON as well as printing.')
+@click.option('--ffxi', default=None, metavar='DIR')
+def timeline_cmd(output, dat_path, section, as_json, ffxi):
+    """Show each segment's shot list -- weather, camera and timing, in play order.
+
+    A zone section is a stream rather than a table, so reading it in file order gives
+    the sequence the segment plays: each weather state names the camera track that flies
+    while it is showing, and the timing entries between them carry the frame counts.
+
+    Which section plays first is NOT in this file as far as the data shows -- see the
+    note printed at the end.
+    """
+    _apply_ffxi(ffxi)
+    path = resolve(dat_path)
+    data = path.read_bytes()
+    nodes = parse_nodes(data)
+    zones = parse_zones(data)
+    names = _zone_names()
+
+    doc = {'dat': str(path), 'sections': []}
+    for z in zones:
+        if section and z.index != section:
+            continue
+        records = parse_stream(data, z)
+        shots = shot_list(records)
+        entry = {'section': z.index, 'zone_id': z.zone_id,
+                 'zone_name': _name_of(names, z.zone_id), 'shots': [], 'timing': []}
+
+        click.echo(f'section {z.index}  zone {z.zone_id} ({_name_of(names, z.zone_id)})')
+        for i, r in enumerate(shots, 1):
+            has_cam = r.track in nodes
+            frames = [t.value for t in records
+                      if t.kind == 'timing' and r.offset < t.offset <
+                      (shots[i].offset if i < len(shots) else z.end)]
+            click.echo(f'   {i}. {r.tag:5} fog {r.fog_near:5}/{r.fog_far:<5} '
+                       f'{"rgb%-16s" % (str(r.rgb),) if r.rgb else "":<20}'
+                       f'camera={r.track or "-":6}{"" if has_cam else " (no keyframes)"}'
+                       + (f'  timing={frames}' if frames else ''))
+            entry['shots'].append({
+                'order': i, 'weather': r.tag, 'offset': r.offset,
+                'fog_near': r.fog_near, 'fog_far': r.fog_far,
+                'fog_rgb': list(r.rgb) if r.rgb else None,
+                'camera': r.track, 'camera_has_keyframes': has_cam,
+                'timing': frames,
+            })
+        entry['timing'] = [r.value for r in records if r.kind == 'timing']
+        entry['ambient'] = [{'offset': r.offset, 'rgba': list(r.rgba)}
+                            for r in records if r.kind == 'ambient' and r.rgba]
+        doc['sections'].append(entry)
+        click.echo()
+
+    if as_json or output:
+        out_json = Path(output) if output else TIMELINE_JSON
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+        out_json.write_text(json.dumps(doc, indent=1), encoding='utf-8')
+        click.echo(f'wrote {out_json}')
+
+    click.echo('note: this is the order within a segment. Which segment the title screen '
+               'picks on launch is not identifiable in this file -- if the zone differs '
+               'between launches it is chosen at runtime, not stored here.')

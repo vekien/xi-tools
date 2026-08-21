@@ -346,6 +346,7 @@ title.add_command(title_cmds.list_cmd,      'list')
 title.add_command(title_cmds.set_zone_cmd,  'set-zone')
 title.add_command(title_cmds.camera_group,  'camera')
 title.add_command(title_cmds.weather_cmd,   'weather')
+title.add_command(title_cmds.timeline_cmd,  'timeline')
 
 
 @ui.group('layout')

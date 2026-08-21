@@ -53,7 +53,11 @@ import click
 import xi.xi_config as _cfg
 
 MAGIC = b'titl'
-NODE_TYPE = 0x486
+# Two node type constants are in use, and both hold the same keyframe layout. Matching
+# only 0x486 silently drops every 0x606 node -- which is most of the multi-keyframe
+# camera paths, including cgu1 and cgu8 (3 keyframes each against the 2 that 0x486
+# nodes carry).
+NODE_TYPES = (0x486, 0x606)
 NODE_COUNT_OFF = 0x20
 NODE_KEYFRAME_OFF = 0x30
 KEYFRAME_STRIDE = 0x30
@@ -63,6 +67,7 @@ WEATHER_TAGS = (b'clod', b'mist', b'snow', b'suny', b'fine', b'rain', b'thdr',
                 b'dryw', b'aura', b'loop')
 REC_WEATHER = 0x037D
 REC_DURATION = 0x0210
+REC_END = 0x037C
 REC_AMBIENT = 0x030F
 FOG_FLAGS = 0x0604
 
@@ -112,7 +117,7 @@ def parse_nodes(data: bytes) -> dict:
     """Every tagged scene node, by tag name."""
     out = {}
     for off in range(0x20, len(data) - 8):
-        if struct.unpack_from('<I', data, off + 4)[0] != NODE_TYPE:
+        if struct.unpack_from('<I', data, off + 4)[0] not in NODE_TYPES:
             continue
         tag = data[off:off + 4]
         if all(0x20 <= c < 0x7F for c in tag):
@@ -200,3 +205,74 @@ def resolve(dat_path: str | None) -> Path:
     if data[:4] != MAGIC:
         raise click.ClickException(f'{p} is not a title scene (magic {data[:4]!r}, expected titl)')
     return p
+
+
+@dataclass
+class Record:
+    """One entry in a zone section's ordered record stream."""
+    kind: str          # 'weather' | 'timing' | 'ambient' | 'end'
+    offset: int
+    tag: str = ''
+    rgb: tuple = None
+    fog_near: int = 0
+    fog_far: int = 0
+    track: str = ''
+    value: int = 0
+    rgba: tuple = None
+
+
+def parse_stream(data: bytes, zone: ZoneSection) -> list:
+    """Walk a zone section in file order.
+
+    The section is a stream, not a table: weather states, timing entries and ambient
+    colours appear in the order the segment plays them, so reading it in order is what
+    gives the shot list. Widths come from the record type; anything unrecognised is
+    stepped over two bytes at a time rather than guessed at.
+    """
+    out = []
+    k = zone.offset + 16
+    while k < zone.end - 8:
+        tag = data[k:k + 4]
+        kind16 = struct.unpack_from('<H', data, k)[0]
+
+        if tag in WEATHER_TAGS:
+            shape = struct.unpack_from('<H', data, k + 4)[0]
+            if shape == REC_WEATHER:
+                near, far = struct.unpack_from('<2H', data, k + 20)
+                out.append(Record('weather', k, tag.decode(),
+                                  (data[k + 12], data[k + 13], data[k + 14]), near, far,
+                                  data[k + 24:k + 32].split(b'\x00')[0].decode('ascii', 'replace')))
+                k += 32
+                continue
+            if shape == FOG_FLAGS:
+                near, far = struct.unpack_from('<2H', data, k + 8)
+                out.append(Record('weather', k, tag.decode(), None, near, far,
+                                  data[k + 12:k + 20].split(b'\x00')[0].decode('ascii', 'replace')))
+                k += 28
+                continue
+
+        if kind16 == REC_DURATION:
+            out.append(Record('timing', k, value=struct.unpack_from('<H', data, k + 6)[0]))
+            k += 8
+            continue
+        if kind16 == REC_END:
+            out.append(Record('end', k))
+            k += 8
+            continue
+        if kind16 == REC_AMBIENT:
+            lo, hi = struct.unpack_from('<2H', data, k + 4)
+            out.append(Record('ambient', k, value=lo, fog_far=hi,
+                              rgba=tuple(data[k + 12:k + 16])))
+            k += 16
+            continue
+        k += 2
+    return out
+
+
+def shot_list(records: list) -> list:
+    """Weather segments in play order, each with the camera it hands to.
+
+    A weather record names the control track that flies while it is showing, so the
+    stream in order is the sequence of shots.
+    """
+    return [r for r in records if r.kind == 'weather']
