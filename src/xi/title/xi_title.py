@@ -208,6 +208,24 @@ def tracks_for(zone: ZoneSection, nodes: dict, resolved_only: bool = True) -> li
     return sorted(names)
 
 
+def family_tracks(zone: ZoneSection, nodes: dict) -> list:
+    """Every camera node belonging to this zone, not just the ones weather records name.
+
+    A zone owns a whole prefix family -- `cgu*` is North Gustaberg, `cqf*` is Qufim --
+    and the segment plays them as consecutive shots. Weather records name only the few
+    that coincide with a weather change, so listing those alone under-reports badly:
+    North Gustaberg names 4 but has 11, which matches the dozen shots visible on screen.
+
+    The family is keyed on the first three characters, since `cga`/`cgh`/`cgn`/`cgu` are
+    different zones that all begin `cg`. A zone can draw on more than one family, so the
+    union over its referenced names is taken rather than assuming a single prefix.
+    """
+    prefixes = {t[:3] for t in tracks_for(zone, nodes) if len(t) >= 3}
+    if not prefixes:
+        return []
+    return sorted(n for n in nodes if n[:3] in prefixes)
+
+
 def resolve(dat_path: str | None) -> Path:
     p = Path(dat_path) if dat_path else Path(_cfg.FFXI_DIR) / 'ROM/0/23.DAT'
     if not p.is_absolute():

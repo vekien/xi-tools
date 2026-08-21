@@ -9,8 +9,8 @@ import click
 import xi.xi_config as _cfg
 from xi.xi_config import ensure_base, output_path_for
 from xi.title.xi_title import (KEYFRAME_STRIDE, NODE_COUNT_OFF, NODE_KEYFRAME_OFF,
-                               parse_nodes, parse_stream, parse_track, parse_zones,
-                               resolve, shot_list, tracks_for)
+                               family_tracks, parse_nodes, parse_stream, parse_track,
+                               parse_zones, resolve, shot_list, tracks_for)
 
 
 def _zone_names() -> list:
@@ -55,7 +55,8 @@ def list_cmd(dat_path, as_json, ffxi):
             'section': z.index, 'offset': z.offset, 'zone_id': z.zone_id,
             'zone_name': _name_of(names, z.zone_id),
             'file_table_index': z.file_table_index,
-            'tracks': tracks_for(z, nodes),
+            'tracks': family_tracks(z, nodes),
+            'tracks_named_by_weather': tracks_for(z, nodes),
             'weather': [{'tag': w.tag, 'rgb': list(w.rgb), 'fog_near': w.fog_near,
                          'fog_far': w.fog_far, 'track': w.track} for w in z.weather],
         } for z in zones]
@@ -68,7 +69,7 @@ def list_cmd(dat_path, as_json, ffxi):
     for z in zones:
         click.echo(f'{z.index:3}  0x{z.offset:06x}  {z.zone_id:4}  '
                    f'{_name_of(names, z.zone_id)[:28]:<28} {len(z.weather):7}  '
-                   f'{" ".join(tracks_for(z, nodes)) or "-"}')
+                   f'{" ".join(family_tracks(z, nodes)) or "-"}')
 
 
 @click.command('set-zone')
@@ -143,11 +144,15 @@ def camera_export_cmd(output, dat_path, section, ffxi):
             continue
         entry = {'section': z.index, 'zone_id': z.zone_id,
                  'zone_name': _name_of(names, z.zone_id), 'tracks': []}
-        for tname in tracks_for(z, nodes):
+        named = set(tracks_for(z, nodes))
+        for tname in family_tracks(z, nodes):
             track = parse_track(data, tname, nodes[tname])
             entry['tracks'].append({
                 'name': track.name,
                 'offset': track.offset,
+                # True when a weather record names this track, i.e. the weather changes
+                # as this shot begins. The rest play under the weather already running.
+                'weather_change': track.name in named,
                 # Values are written unrounded. They are float32 widened to double, so
                 # printing them in full means an untouched export re-imports
                 # byte-identically; rounding even to 6dp drifts the small coordinates.
