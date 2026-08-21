@@ -104,12 +104,29 @@ at segment boundaries.
 
 ## Play order
 
-North Gustaberg is always first on a fresh client launch, and the zone changes each time
-the character-select screen is entered and left.
+**Section 12 is the opening screen.** The client always plays it first on a fresh launch,
+whatever zone id it holds — North Gustaberg was never special, the *slot* is.
 
-**Neither is stored in this file.** There is no permutation of the 22 sections anywhere in
-it as u8, u16 or u32, and every section header is zeros. Both are decided at runtime, so
-changing them means patching the client, not the DAT.
+Established by experiment: pointing section 12 at La Theine Plateau made La Theine the
+opening screen. The camera stayed on the `cgu*` routes, because tracks belong to the
+section rather than the zone, so it flew Gustaberg's coordinates through La Theine.
+
+So the opening zone is editable without touching the client:
+
+```bash
+uv run xi title set-zone 12 <zone id>     # then re-aim the cameras
+```
+
+Everything after the first screen is picked at runtime — the zone changes on each return
+from character select. That part is not in this file: there is no permutation of the 22
+sections anywhere in it as u8, u16 or u32, and every section header is zeros.
+
+Static analysis found no handle on the picker either. Across 950,088 instructions in
+`FFXiMain_unpacked.dll`, none of the scene's own constants appear as operands — not the
+`titl` magic, the `0x67b` section marker, the `0x486`/`0x606` node types, nor the file id
+of the title UI DAT. The scene parser reads type codes out of the data instead of
+comparing immediates, so there is nothing to anchor a search on, and the DLL's only
+`rand` caller is packet-loss simulation.
 
 ---
 

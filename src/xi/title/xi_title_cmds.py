@@ -9,8 +9,9 @@ import click
 import xi.xi_config as _cfg
 from xi.xi_config import ensure_base, output_path_for
 from xi.title.xi_title import (KEYFRAME_STRIDE, NODE_COUNT_OFF, NODE_KEYFRAME_OFF,
-                               family_tracks, fov_to_focal, parse_nodes, parse_stream,
-                               parse_track, parse_zones, resolve, shot_list, tracks_for)
+                               OPENING_SECTION, family_tracks, fov_to_focal, parse_nodes,
+                               parse_stream, parse_track, parse_zones, resolve, shot_list,
+                               tracks_for)
 
 
 def _zone_names() -> list:
@@ -67,9 +68,13 @@ def list_cmd(dat_path, as_json, ffxi):
     click.echo()
     click.echo(f'{"#":>3}  {"offset":>8}  {"zone":>4}  {"name":<28} {"weather":>7}  cameras')
     for z in zones:
-        click.echo(f'{z.index:3}  0x{z.offset:06x}  {z.zone_id:4}  '
+        mark = ' <' if z.index == OPENING_SECTION else '  '
+        click.echo(f'{z.index:3}{mark} 0x{z.offset:06x}  {z.zone_id:4}  '
                    f'{_name_of(names, z.zone_id)[:28]:<28} {len(z.weather):7}  '
                    f'{" ".join(family_tracks(z, nodes)) or "-"}')
+    click.echo()
+    click.echo(f'section {OPENING_SECTION} (<) is the opening screen on a fresh launch; '
+               f'the rest are picked at runtime.')
 
 
 @click.command('set-zone')
@@ -108,7 +113,9 @@ def set_zone_cmd(section, zone_id, dat_path, output, ffxi):
     click.echo(f'section {section} @0x{match.offset:06x}: '
                f'{match.zone_id} ({_name_of(names, match.zone_id)}) -> '
                f'{zone_id} ({_name_of(names, zone_id)})')
-    click.echo(f'  cameras to re-aim: {" ".join(tracks_for(match, nodes)) or "(none found)"}')
+    click.echo(f'  cameras to re-aim: {" ".join(family_tracks(match, nodes)) or "(none found)"}')
+    if section == OPENING_SECTION:
+        click.echo('  this is the opening screen on a fresh client launch')
     click.echo(f'wrote {out}')
 
 

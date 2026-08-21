@@ -73,6 +73,12 @@ NODE_KEYFRAME_OFF = 0x30
 KEYFRAME_STRIDE = 0x30
 ZONE_MARKER = struct.pack('<Q', 0x67b)
 
+# The client always plays this section first on a fresh launch, whatever zone id it holds.
+# Established by experiment: pointing section 12 at La Theine made La Theine the opening
+# screen, so the slot is fixed rather than the zone being chosen. Every later segment is
+# picked at runtime -- the zone changes on each return from character select.
+OPENING_SECTION = 12
+
 WEATHER_TAGS = (b'clod', b'mist', b'snow', b'suny', b'fine', b'rain', b'thdr',
                 b'dryw', b'aura', b'loop')
 REC_WEATHER = 0x037D
