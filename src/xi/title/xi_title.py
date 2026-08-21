@@ -113,6 +113,20 @@ class ZoneSection:
         return 0x64 + self.zone_id if self.zone_id < 0x100 else 0x147B3 + (self.zone_id - 0x100)
 
 
+def _track_name(raw: bytes) -> str:
+    """Decode a control-track name, or '' if the bytes are not one.
+
+    The field is a fixed 8 bytes and is often simply absent, leaving whatever the record
+    layout put there. Decoding those with errors='replace' produced names like the
+    control characters shown as box glyphs, so anything that is not printable ASCII is
+    treated as no track rather than passed on as a name.
+    """
+    text = raw.split(b'\x00')[0]
+    if not text or not all(0x20 <= c < 0x7F for c in text):
+        return ''
+    return text.decode('ascii').strip()
+
+
 def parse_nodes(data: bytes) -> dict:
     """Every tagged scene node, by tag name."""
     out = {}
@@ -174,9 +188,8 @@ def parse_zones(data: bytes) -> list:
             else:
                 k += 1
                 continue
-            name = raw.split(b'\x00')[0].decode('ascii', 'replace').strip()
             zone.weather.append(Weather(tag.decode(), k, blend_in, blend_out,
-                                        rgb, near, far, name))
+                                        rgb, near, far, _track_name(raw)))
             k += width
         zones.append(zone)
     return zones
@@ -241,13 +254,13 @@ def parse_stream(data: bytes, zone: ZoneSection) -> list:
                 near, far = struct.unpack_from('<2H', data, k + 20)
                 out.append(Record('weather', k, tag.decode(),
                                   (data[k + 12], data[k + 13], data[k + 14]), near, far,
-                                  data[k + 24:k + 32].split(b'\x00')[0].decode('ascii', 'replace')))
+                                  _track_name(data[k + 24:k + 32])))
                 k += 32
                 continue
             if shape == FOG_FLAGS:
                 near, far = struct.unpack_from('<2H', data, k + 8)
                 out.append(Record('weather', k, tag.decode(), None, near, far,
-                                  data[k + 12:k + 20].split(b'\x00')[0].decode('ascii', 'replace')))
+                                  _track_name(data[k + 12:k + 20])))
                 k += 28
                 continue
 
