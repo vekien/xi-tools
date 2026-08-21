@@ -14,12 +14,21 @@ constant `0x486` at +4, which is what makes them findable::
     +0x20  u32      keyframe count
     +0x30  keyframes, 48-byte stride
 
-Camera keyframe::
+Camera keyframe -- the same shape as a cutscene camera route's `SplineControlPoint`::
 
     +0x00  float3   eye XYZ
-    +0x0c  float    view distance (constant across a track)
+    +0x0c  float    focal length (FovCalculationParameter, default 350)
     +0x10  float3   look-at XYZ
     +0x20  float    t   (0.0 .. 1.0 across the track)
+
+`+0x0c` is a focal length, not a view distance: the client derives vertical FOV as
+`2 * atan2(192, focal)`, so a **larger** value is zoomed **in**. 350 -> 57 degrees,
+312 -> 63, 480 -> 43. It varies within a track, which is a zoom move.
+
+The point count decides the path shape, exactly as it does for cutscene routes: two
+keyframes is a straight line, three or more is a spline. That is why the title screen
+appears to fly curves -- the 3-point nodes are splines, and a zone's family plays end to
+end.
 
 Zone sections follow, each introduced by the 8-byte marker `0x67b`::
 
@@ -43,6 +52,7 @@ binding is why changing a zone id alone is not enough: the camera keeps flying t
 zone's coordinates, usually ending up underground.
 """
 
+import math
 import re
 import struct
 from dataclasses import dataclass, field
@@ -77,7 +87,12 @@ class Keyframe:
     t: float
     eye: tuple
     look: tuple
-    view_distance: float
+    focal: float
+
+    @property
+    def fov_deg(self) -> float:
+        """Vertical FOV in degrees, as the client computes it from the focal length."""
+        return focal_to_fov(self.focal)
 
 
 @dataclass
@@ -127,6 +142,16 @@ def _track_name(raw: bytes) -> str:
     return text.decode('ascii').strip()
 
 
+def focal_to_fov(focal: float) -> float:
+    """Focal length -> vertical FOV in degrees (`2 * atan2(192, focal)`)."""
+    return math.degrees(2 * math.atan2(192.0, focal or 350.0))
+
+
+def fov_to_focal(deg: float) -> float:
+    """Vertical FOV in degrees -> the focal length the DAT stores."""
+    return 192.0 / math.tan(math.radians(deg) / 2)
+
+
 def parse_nodes(data: bytes) -> dict:
     """Every tagged scene node, by tag name."""
     out = {}
@@ -147,10 +172,10 @@ def parse_track(data: bytes, name: str, off: int) -> Track:
             base = off + NODE_KEYFRAME_OFF + i * KEYFRAME_STRIDE
             if base + KEYFRAME_STRIDE > len(data):
                 break
-            ex, ey, ez, dist = struct.unpack_from('<4f', data, base)
+            ex, ey, ez, focal = struct.unpack_from('<4f', data, base)
             lx, ly, lz, _ = struct.unpack_from('<4f', data, base + 0x10)
             t = struct.unpack_from('<f', data, base + 0x20)[0]
-            frames.append(Keyframe(t, (ex, ey, ez), (lx, ly, lz), dist))
+            frames.append(Keyframe(t, (ex, ey, ez), (lx, ly, lz), focal))
     return Track(name, off, frames)
 
 

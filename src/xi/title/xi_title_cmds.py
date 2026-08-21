@@ -9,8 +9,8 @@ import click
 import xi.xi_config as _cfg
 from xi.xi_config import ensure_base, output_path_for
 from xi.title.xi_title import (KEYFRAME_STRIDE, NODE_COUNT_OFF, NODE_KEYFRAME_OFF,
-                               family_tracks, parse_nodes, parse_stream, parse_track,
-                               parse_zones, resolve, shot_list, tracks_for)
+                               family_tracks, fov_to_focal, parse_nodes, parse_stream,
+                               parse_track, parse_zones, resolve, shot_list, tracks_for)
 
 
 def _zone_names() -> list:
@@ -156,13 +156,15 @@ def camera_export_cmd(output, dat_path, section, ffxi):
                 # Values are written unrounded. They are float32 widened to double, so
                 # printing them in full means an untouched export re-imports
                 # byte-identically; rounding even to 6dp drifts the small coordinates.
+                # focal is what the DAT stores; fov_deg is the same value as the client
+                # uses it, so an editor can consume it without repeating the conversion.
+                'shape': 'spline' if len(track.keyframes) > 2 else 'line',
                 'keyframes': [{
                     't': k.t,
                     'eye': list(k.eye),
                     'look': list(k.look),
-                    # Per keyframe, not per track: it varies within a track (cga tracks
-                    # run 312 -> 350), so hoisting it flattens real camera movement.
-                    'distance': k.view_distance,
+                    'focal': k.focal,
+                    'fov_deg': round(k.fov_deg, 3),
                 } for k in track.keyframes],
             })
         doc['sections'].append(entry)
@@ -213,13 +215,19 @@ def camera_import_cmd(json_file, dat_path, output, ffxi):
                 raise click.ClickException(
                     f'{name}: JSON has {len(frames)} keyframes but the track holds {have}. '
                     f'Growing a track would overwrite the node after it.')
-            fallback = float(t.get('view_distance') or 0.0)
             for i, k in enumerate(frames):
                 base = off + NODE_KEYFRAME_OFF + i * KEYFRAME_STRIDE
                 ex, ey, ez = (float(v) for v in k['eye'])
                 lx, ly, lz = (float(v) for v in k['look'])
-                dist = float(k.get('distance', fallback))
-                struct.pack_into('<4f', data, base, ex, ey, ez, dist)
+                # Accept fov_deg as an alternative to focal, so a path authored in an
+                # editor that thinks in degrees can be imported without converting first.
+                if 'focal' in k:
+                    focal = float(k['focal'])
+                elif 'fov_deg' in k:
+                    focal = fov_to_focal(float(k['fov_deg']))
+                else:
+                    focal = float(k.get('distance', 350.0))
+                struct.pack_into('<4f', data, base, ex, ey, ez, focal)
                 struct.pack_into('<3f', data, base + 0x10, lx, ly, lz)
                 struct.pack_into('<f', data, base + 0x20, float(k.get('t', i)))
             click.echo(f'  {name}: {len(frames)} keyframe(s) written')
@@ -394,8 +402,10 @@ def export_cmd(output, dat_path, ffxi):
                 'name': track.name,
                 'offset': track.offset,
                 'weather_change': track.name in named,
+                'shape': 'spline' if len(track.keyframes) > 2 else 'line',
                 'keyframes': [{'t': k.t, 'eye': list(k.eye), 'look': list(k.look),
-                               'distance': k.view_distance} for k in track.keyframes],
+                               'focal': k.focal, 'fov_deg': round(k.fov_deg, 3)}
+                              for k in track.keyframes],
             })
         sections.append({
             'section': z.index,
