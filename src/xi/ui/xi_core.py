@@ -480,7 +480,12 @@ def _scale_extent(value: int, old_full: int, new_full: int) -> int:
 
 
 def _rects_by_owner(data: bytes) -> dict:
-    """Map texture name -> ordered list of (payload_offset, prefix, rect) for its sprites."""
+    """Map texture name -> ordered list of (payload_offset, prefix, src_rect, dest_quad).
+
+    The destination quad is carried along because it is what identifies a sprite when
+    pairing against a reference: it is in screen coordinates, so unlike the source rect
+    it does not move when the texture is resized.
+    """
     dims = {e.name: (e.width, e.height) for e in parse_textures(data)}
     records = parse_layout_records(data)
     out: dict[str, list] = {}
@@ -497,7 +502,8 @@ def _rects_by_owner(data: bytes) -> dict:
         if pre is None:
             continue
         rect = struct.unpack_from('<4H', data, off + pre + SRC_RECT_OFFSET)
-        out.setdefault(name, []).append((off, pre, rect))
+        quad = struct.unpack_from('<8H', data, off + pre)
+        out.setdefault(name, []).append((off, pre, rect, quad))
     return out
 
 
@@ -541,14 +547,16 @@ def sheet_reference(dat_file: Path) -> tuple[dict, dict] | None:
     if not entry:
         return None
     dims = {k: tuple(v) for k, v in entry.get('textures', {}).items()}
-    rects = {k: [tuple(r) for r in v] for k, v in entry.get('rects', {}).items()}
+    rects = {k: [(tuple(r[0]), tuple(r[1])) if r and isinstance(r[0], list) else (tuple(r), None)
+                 for r in v]
+             for k, v in entry.get('rects', {}).items()}
     return dims, rects
 
 
 def dat_reference(reference: bytes) -> tuple[dict, dict]:
     """(texture dims, rects by texture) read from a pristine copy of the DAT."""
     dims = {e.name: (e.width, e.height) for e in parse_textures(reference)}
-    rects = {name: [rect for _off, _pre, rect in sprites]
+    rects = {name: [(rect, quad) for _off, _pre, rect, quad in sprites]
              for name, sprites in _rects_by_owner(reference).items()}
     return dims, rects
 
@@ -591,13 +599,29 @@ def sync_layout_rects(data: bytearray,
 
     for name, sprites in cur.items():
         cur_w, cur_h = dims[name]
-        originals = ref_rects.get(name)
+        originals = ref_rects.get(name) or []
         ref_w, ref_h = ref_dims.get(name, (0, 0))
-        paired = originals is not None and len(originals) == len(sprites) and ref_w and ref_h
 
-        for idx, (off, pre, old) in enumerate(sprites):
-            if paired:
-                sw, sh, sx, sy = originals[idx]
+        # Pair each live sprite with its original by destination quad. Counting them off
+        # in order breaks as soon as a DAT adds or removes one -- CatsEyeXI's 119/50 has
+        # 37 titlwin sprites where retail has 35, which silently disabled the whole
+        # texture. A quad is screen geometry, so it survives a texture resize and
+        # identifies the sprite across both files. Duplicates are consumed in order.
+        by_quad: dict = {}
+        for entry in originals:
+            rect = tuple(entry[0]) if isinstance(entry[0], (list, tuple)) else tuple(entry[:4])
+            quad = tuple(entry[1]) if len(entry) == 2 else None
+            by_quad.setdefault(quad, []).append(rect)
+
+        for off, pre, old, quad in sprites:
+            src = None
+            if ref_w and ref_h:
+                bucket = by_quad.get(tuple(quad))
+                if bucket:
+                    src = bucket.pop(0)
+
+            if src is not None:
+                sw, sh, sx, sy = src
                 new = (_scale_extent(sw, ref_w, cur_w), _scale_extent(sh, ref_h, cur_h),
                        round(sx * cur_w / ref_w), round(sy * cur_h / ref_h))
             else:
@@ -639,3 +663,35 @@ def resolve_layout_reference(dat_file: Path,
         return dat_reference(base.read_bytes()), f'reference DAT {base}'
 
     return None, 'no reference (whole-texture rects only)'
+
+
+def scale_layout_rects(data: bytearray, resized: dict) -> list:
+    """Scale each resized texture's sprite source rects by that texture's own size delta.
+
+    `resized` maps texture name -> ((old_w, old_h), (new_w, new_h)), taken from the
+    import that just ran. Sprites address a texture in absolute pixels, so a texture
+    that doubles needs every rect pointing into it doubled too; otherwise the client
+    samples the old sub-region and the sprite renders cropped.
+
+    Using the delta from this import is what keeps it simple and safe. No pairing
+    against a reference is needed -- the factor is known exactly -- and it cannot
+    double-apply, because it only runs for a texture whose size actually changed here.
+
+    Returns (texture_name, payload_offset, old_rect, new_rect) per rect changed.
+    """
+    changed = []
+    for name, sprites in _rects_by_owner(data).items():
+        delta = resized.get(name)
+        if not delta:
+            continue
+        (old_w, old_h), (new_w, new_h) = delta
+        if not old_w or not old_h:
+            continue
+        for off, pre, rect, _quad in sprites:
+            sw, sh, sx, sy = rect
+            new = (_scale_extent(sw, old_w, new_w), _scale_extent(sh, old_h, new_h),
+                   round(sx * new_w / old_w), round(sy * new_h / old_h))
+            if new != rect:
+                struct.pack_into('<4H', data, off + pre + SRC_RECT_OFFSET, *new)
+                changed.append((name, off, rect, new))
+    return changed

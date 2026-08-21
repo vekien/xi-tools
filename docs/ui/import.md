@@ -30,7 +30,8 @@ Example:
 |---|---|
 | `--output-dat PATH` | Write to a new DAT instead of overwriting `DAT_FILE` |
 | `--no-resize` | Import the textures but leave sprite source rects alone (the reference sheet is not consulted) |
-| `--reference DAT` | Pristine DAT to read original sprite rects from. Defaults to the built-in sheet, then `<dat>.base` |
+| `--repair-rects` | Rebuild every sprite rect from a reference. For a DAT left inconsistent by an earlier edit |
+| `--reference DAT` | With `--repair-rects`, the pristine DAT to read from. Defaults to the built-in sheet, then `<dat>.base` |
 
 `--format` and `--all-themes` are **only** on `xi ui tex si`, not on `import`.
 
@@ -158,6 +159,28 @@ from `255x255` to `1023x1023` made the full texture render at the same on-screen
 the client downsamples the larger source into the unchanged destination quad, which is
 the supersampling that buys sharpness.
 
+### How rects are kept in sync
+
+The import already knows what changed: it resized `titlwin` from 1024 to 2048, so every
+rect pointing into `titlwin` is multiplied by 2. That is the whole mechanism.
+
+```
+imported titlwin.dds [DXT3 -> DXT3] 1024x1024 -> 2048x2048 -> titlwin
+layout: titlwin src 1024x562@(0,304) -> 2048x1124@(0,608)
+layout: titlwin src 139x27@(8,15)    -> 278x54@(16,30)
+```
+
+Using the delta from the import itself means no reference file is consulted, nothing has
+to be matched up sprite-by-sprite, and it cannot double-apply — it only runs for a
+texture whose size actually changed in that run. Re-importing at the same size reports
+nothing, and going 2048 back to 1024 restores the original values exactly.
+
+A whole-texture extent is remapped rather than multiplied: `1023` on a 1024px texture
+becomes `2047`, not `2046`, because that field is an inclusive extent. Atlas coordinates
+scale proportionally.
+
+`--no-resize` skips the pass, leaving a resized texture pointing at its old sub-region.
+
 ### Record header
 
 A record header is `01 00 <type> <subtype>`, followed by an 8-byte parent tag and an
@@ -167,105 +190,35 @@ integers -- `(1,1)`, `(2,1)`, `(2,0)` and `(2,2)` all occur in `ROM/119/50`.
 An earlier revision hardcoded the header as the literal `01 00 01 01`. That matched
 **666 of 1230** records and silently merged the rest into oversized payloads, which is
 how one expansion banner's rect ended up buried inside a 166-byte lump labelled
-`gauge`. The fixup then found a false-positive rect in that lump and scaled it,
-visibly corrupting the banner column. Match on the two-byte magic and validate the
-tags instead of assuming a fixed header.
+`gauge`. The fixup then found a false-positive rect in that lump and scaled it, visibly
+corrupting the banner column. Match on the two-byte magic and validate the tags instead
+of assuming a fixed header.
 
-Payloads carry a variable prefix: 41-byte records put the quad at +0, 42-byte ones at
-+1. Rather than trust the length, each candidate offset is validated by checking that
-the source rect it yields fits inside the texture.
+Payloads carry a variable prefix: 41-byte records put the quad at +0, 42-byte at +1,
+verified across all 1230 records. Length is checked before any fit test, because a fit
+test cannot locate a rect that is already wrong -- a `480x96` rect left on a texture
+shrunk back to 256 fits nothing, which would make the record invisible.
 
-### Dimension changes are accepted by default
+### Repairing a DAT that is already inconsistent — `--repair-rects`
 
-A `.dds`/`.png` whose pixel size differs from the DAT entry is imported as-is: the entry
-header, the chunk's section size and the sprite source rects all move with it. There is
-no flag to opt in, because with the geometry sheet in place a resize is an ordinary
-edit rather than a risky one.
+The delta mechanism handles every normal edit, but it cannot fix a DAT that arrived with
+rects already out of step (enlarged by another tool, or by an earlier version of this
+one). There is no delta to work from: the texture and its rects are both simply wrong.
 
-`--no-resize` imports the textures but skips the rect pass entirely. A texture whose size
-changed then keeps pointing at its old sub-region and renders cropped — useful only when
-you intend to hand-edit the mapping yourself.
+`--repair-rects` rebuilds every rect from a reference — the built-in sheet
+(`src/xi/ui/data/layout_reference.json`), a `--reference DAT`, or `<dat>.base`. Sprites
+pair with the reference by **destination quad**, which is screen geometry and so does not
+move when a texture is resized; pairing them in order breaks as soon as a DAT adds or
+removes records (CatsEyeXI's `119/50` carries 37 `titlwin` sprites where retail has 35).
 
-### Where the original geometry comes from
+This is a recovery tool, not part of the normal flow. Its reference is only as good as
+the DAT it was generated from — see `xi ui gen-sheet`, and point that at a genuinely
+pristine install.
 
-Rects are recomputed from a pristine record of the sprite's original geometry, scaled by
-each texture's current-vs-original size. That record is resolved in this order:
-
-1. `--reference DAT` — a pristine copy of the same DAT
-2. **the built-in sheet** — `src/xi/ui/data/layout_reference.json`
-3. `<dat>.base`
-
-The **built-in sheet** is the default and covers `ROM/119/50`, `ROM/119/51`, `ROM/0/1`,
-`ROM/0/2` and `ROM/280/15`. It stores each texture's original pixel size and every
-sprite's original source rect, generated from pristine retail DATs, plus hand-entered
-geometry for sprites no retail DAT ships (CatsEyeXI's `20logo`: a 256x256 texture drawn
-by two whole-texture rects).
-
-It is preferred over a reference DAT on disk because it needs no second file, cannot
-itself have been mangled by an earlier edit, and still works when the only copy of a DAT
-the user owns is already wrong. Sprite geometry is fixed by the client's screen layout,
-so these values do not drift between client versions.
-
-Regenerate it against a game install with `xi ui gen-sheet`:
-
-```bash
-uv run xi ui gen-sheet ROM/119/50.DAT ROM/119/51.DAT ROM/280/15.DAT
-```
-
-Point it at **pristine** DATs — a retail install, not an override that has already been
-edited, or the sheet records the mistake as truth. Entries merge by texture name, so
-hand-added geometry for a sprite no retail DAT ships survives a regeneration (`--replace`
-drops it). The sheet is keyed by ROM path (`ROM/119/50`), derived from the DAT's own path, so a DAT outside a
-`ROM/<n>/<m>` tree falls through to the next source.
-
-### Repairing a DAT that is already wrong
-
-Because the geometry comes from the sheet rather than from the live bytes, a DAT whose
-rects were overwritten by another tool is corrected, not compounded. Verified by
-corrupting all seven `ex1us` and `20logo` rects in a 512px DAT to `7x7@(0,0)` and
-re-importing with no reference file present:
-
-```
-layout: using built-in sheet [ROM/119/50]
-layout: 20logo src 7x7@(0,0) -> 511x511@(0,0)
-layout: ex1us  src 7x7@(0,0) -> 480x96@(0,0)
-layout: ex1us  src 7x7@(0,0) -> 480x96@(0,96)
-layout: ex1us  src 7x7@(0,0) -> 480x96@(0,192)
-layout: ex1us  src 7x7@(0,0) -> 480x96@(0,288)
-layout: ex1us  src 7x7@(0,0) -> 480x96@(0,384)
-```
-
-### The no-reference fallback, and its size floor
-
-With no reference at all, only whole-texture rects can be repaired -- they are the one
-kind recognisable on their own, being a square power-of-two-minus-one extent anchored at
-(0,0), matching a square power-of-two texture.
-
-That shape test carries a **64px floor**. Without it a `7x7` or `15x15` atlas cell at
-(0,0) satisfies the test, and the fallback rewrites it to the full texture size,
-destroying the sprite -- observed while testing the corruption case above. 64 sits below
-every whole-texture rect seen in these DATs and above every atlas cell.
-
-### Deriving from the reference makes it idempotent
-
-Because every rect is recomputed from the pristine value rather than scaled in place,
-running an import twice changes nothing. Scaling in place would double `ex1us` to
-960x192 on the second run.
-
-Whole-texture extents are remapped rather than multiplied: `255` on a 256px texture
-becomes `511` on a 512px one, not `255 x 2 = 510`. Atlas coordinates scale
-proportionally.
-
-### What a reference cannot do
-
-The client stores no table of expected sprite sizes -- it draws whatever rect the record
-holds. So once a rect has been overwritten there is nothing in the DAT, and nothing in
-`FFXiMain.dll`, that knows what it used to be. Recovery has to come from a pristine
-copy. This is why the reference is a real file rather than something inferred.
+### Atlases scale too
 
 ### Atlases are not rescaled
 
-A sheet like `titlwin` (40 sub-rects) or `ex1us` (3) carries sprite coordinates in
-texture pixels. Those are left alone — doubling such a sheet requires editing each
-sprite's coordinates, which this cannot infer. Only single whole-texture sprites like
-`20logo` are handled automatically.
+An atlas is no harder than a single sprite: `ex1us` stacks five 240x48 expansion banners
+in one texture, and doubling the texture doubles all five rects and their y offsets.
+`titlwin` carries 37 sprites and all 37 move together.

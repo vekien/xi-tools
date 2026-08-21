@@ -227,7 +227,8 @@ xi ui tex si ROM/119/50.DAT --ffxi "<FFXI_PIVOT_DIR>"
 
 # Resizing is automatic — sprite source rects are rescaled from the geometry sheet
 xi ui tex si ROM/119/50.DAT
-xi ui tex si ROM/119/50.DAT --no-resize     # import textures, leave rects alone
+xi ui tex si ROM/119/50.DAT --no-resize        # import textures, leave rects alone
+xi ui tex si ROM/119/50.DAT --repair-rects     # rebuild rects from the reference sheet
 
 # Rebuild the sprite-geometry sheet from PRISTINE (retail) DATs
 xi ui gen-sheet

@@ -65,7 +65,9 @@ def cmd(dat_paths: tuple, output: str | None, key: str | None, replace: bool, ff
         textures = {e.name: [e.width, e.height] for e in parse_textures(data)}
         if not textures:
             raise click.ClickException(f'No texture entries found in {dat_file}.')
-        rects = {name: [list(rect) for _off, _pre, rect in sprites]
+        # [source rect, destination quad] -- the quad identifies the sprite when pairing
+        # against a DAT that has added or removed records.
+        rects = {name: [[list(rect), list(quad)] for _off, _pre, rect, quad in sprites]
                  for name, sprites in _rects_by_owner(data).items()}
 
         entry = {'textures': {}, 'rects': {}} if replace else sheet.get(sheet_key) or {}

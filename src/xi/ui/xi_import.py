@@ -6,7 +6,8 @@ import click
 
 from xi.xi_config import FFXI_DIR, ensure_base, output_path_for
 from xi.ui.xi_core import (compression_name, output_file_names, parse_dds, parse_textures,
-                           replace_texture, resolve_layout_reference, sync_layout_rects)
+                           replace_texture, resolve_layout_reference, scale_layout_rects,
+                           sync_layout_rects)
 
 
 @click.command('import')
@@ -18,10 +19,11 @@ from xi.ui.xi_core import (compression_name, output_file_names, parse_dds, parse
               help='Unmodified DAT to read original sprite rects from. Defaults to the '
                    'built-in reference sheet, then <dat>.base.')
 @click.option('--no-resize', 'fix_layout', is_flag=True, default=True, flag_value=False,
-              help='Import the textures but leave sprite source rects alone (the reference '
-                   'sheet is not consulted).')
+              help='Import the textures but leave sprite source rects alone.')
+@click.option('--repair-rects', 'repair', is_flag=True,
+              help='Also rebuild every sprite rect from the reference sheet.')
 def cmd(dat_path: str, texture_dir: str, output_dat: str | None, reference: str | None,
-        fix_layout: bool):
+        fix_layout: bool, repair: bool):
     """Import edited .dds files from a folder back into a UI container DAT.
 
     DAT_FILE can be an absolute path or a path relative to the FFXI directory.
@@ -59,6 +61,7 @@ def cmd(dat_path: str, texture_dir: str, output_dat: str | None, reference: str 
     filenames = output_file_names(entries)
     replaced = 0
     missing = 0
+    resized: dict = {}
 
     for entry, filename in reversed(list(zip(entries, filenames))):
         dds_path = folder / filename
@@ -77,6 +80,9 @@ def cmd(dat_path: str, texture_dir: str, output_dat: str | None, reference: str 
         replaced += 1
         now_size = f'{entry.width}x{entry.height}'
         grew = '' if was_size == now_size else f' {was_size} -> {now_size}'
+        if grew:
+            resized[entry.name] = (tuple(int(v) for v in was_size.split('x')),
+                                   (entry.width, entry.height))
         click.echo(
             f'  imported {filename} [{was} -> {compression_name(entry)}]{grew} '
             f'-> {entry.name or "unnamed"}'
@@ -86,11 +92,15 @@ def cmd(dat_path: str, texture_dir: str, output_dat: str | None, reference: str 
         raise click.ClickException(f'No matching .dds files found in {folder}')
 
     if fix_layout:
+        for name, off, was, now in scale_layout_rects(data, resized):
+            click.echo(f'  layout: {name} @0x{off:06x} src {was[0]}x{was[1]}@({was[2]},{was[3]}) '
+                       f'-> {now[0]}x{now[1]}@({now[2]},{now[3]})')
+    if repair:
         ref, how = resolve_layout_reference(dat_file, reference)
-        click.echo(f'  layout: using {how}')
-        for name, off, old, new in sync_layout_rects(data, ref):
-            click.echo(f'  layout: {name} @0x{off:06x} src {old[0]}x{old[1]}@({old[2]},{old[3]}) '
-                       f'-> {new[0]}x{new[1]}@({new[2]},{new[3]})')
+        click.echo(f'  layout: rebuilding from {how}')
+        for name, off, was, now in sync_layout_rects(data, ref):
+            click.echo(f'  layout: {name} @0x{off:06x} src {was[0]}x{was[1]}@({was[2]},{was[3]}) '
+                       f'-> {now[0]}x{now[1]}@({now[2]},{now[3]})')
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
     if out_file.exists():

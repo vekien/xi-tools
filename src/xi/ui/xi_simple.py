@@ -6,7 +6,8 @@ import click
 import xi.xi_config as _cfg
 from xi.xi_config import ensure_base, output_path_for, read_path_for
 from xi.ui.xi_core import (compression_name, output_file_names, parse_dds, parse_textures,
-                           replace_texture, resolve_layout_reference, sync_layout_rects, write_dds)
+                           replace_texture, resolve_layout_reference, scale_layout_rects,
+                           sync_layout_rects, write_dds)
 from xi.utils.xi_core import convert_dds_to_png, convert_png_to_dds
 
 
@@ -159,7 +160,8 @@ def simple_extract_cmd(dat_path: str, raw_alpha: bool, ffxi: str | None):
 
 
 def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format: str,
-                fix_layout: bool = True, reference: str | None = None) -> None:
+                fix_layout: bool = True, reference: str | None = None,
+                repair: bool = False) -> None:
     """Rebuild DDS from the PNGs in work_dir and patch them into dat_file -> out_file."""
     if not work_dir.exists() or not work_dir.is_dir():
         raise click.ClickException(f'Working directory not found: {work_dir}')
@@ -214,6 +216,7 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
 
     replaced = 0
     missing = 0
+    resized: dict = {}
     for entry, filename in reversed(list(zip(entries, filenames))):
         dds_path = work_dir / filename
         if not dds_path.exists():
@@ -228,6 +231,9 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
             raise click.ClickException(str(e))
         now_size = f'{entry.width}x{entry.height}'
         grew = '' if was_size == now_size else f' {was_size} -> {now_size}'
+        if grew:
+            resized[entry.name] = (tuple(int(v) for v in was_size.split('x')),
+                                   (entry.width, entry.height))
         click.echo(
             f'  imported {filename} [{was} -> {compression_name(entry)}]{grew} '
             f'-> {entry.name or "unnamed"}'
@@ -235,6 +241,10 @@ def _import_one(dat_file: Path, out_file: Path, work_dir: Path, requested_format
         replaced += 1
 
     if fix_layout:
+        for name, off, was, now in scale_layout_rects(data, resized):
+            click.echo(f'  layout: {name} @0x{off:06x} src {was[0]}x{was[1]}@({was[2]},{was[3]}) '
+                       f'-> {now[0]}x{now[1]}@({now[2]},{now[3]})')
+    if repair:
         _fix_layout(data, dat_file, reference)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -294,15 +304,18 @@ def _seed_theme_from_source(source_dir: Path, theme_dat: Path) -> Path:
               help='Unmodified DAT to read original sprite rects from. Defaults to the '
                    'built-in reference sheet, then <dat>.base.')
 @click.option('--no-resize', 'fix_layout', is_flag=True, default=True, flag_value=False,
-              help='Import the textures but leave sprite source rects alone. The reference '
-                   'sheet is not consulted, so a texture whose size changed keeps pointing at '
-                   'the old sub-region and renders cropped.')
+              help='Import the textures but leave sprite source rects alone, so a texture '
+                   'whose size changed keeps pointing at the old sub-region.')
+@click.option('--repair-rects', 'repair', is_flag=True,
+              help='Also rebuild every sprite rect from the reference sheet. For a DAT left '
+                   'inconsistent by an earlier edit; not needed for a normal import.')
 @click.option('--all-themes', is_flag=True,
               help='Window skins only (ROM/0/14..21): apply this theme\'s edited PNGs to ALL skins and import each.')
 @click.option('--ffxi', default=None, metavar='DIR',
               help='Override FFXI_DIR for this command (e.g. a pivot/override root).')
 def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: str,
-                      reference: str | None, fix_layout: bool, all_themes: bool, ffxi: str | None):
+                      reference: str | None, fix_layout: bool, repair: bool,
+                      all_themes: bool, ffxi: str | None):
     """Convert edited PNG files back to DDS and import them into a UI DAT.
 
     The working folder is derived automatically from the DAT path:
@@ -341,7 +354,7 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
                 continue
             work = source_dir if theme_id == stem_id else _seed_theme_from_source(source_dir, theme_dat)
             _import_one(theme_dat, output_path_for(theme_dat), work, requested_format,
-                        fix_layout, reference)
+                        fix_layout, reference, repair)
             click.echo()
         click.echo('All themes updated.')
         return
@@ -354,4 +367,4 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
         # Default: write the DAT back in place.
         out_file = output_path_for(dat_file)
     _import_one(dat_file, out_file, _default_export_dir(dat_file), requested_format,
-                fix_layout, reference)
+                fix_layout, reference, repair)
