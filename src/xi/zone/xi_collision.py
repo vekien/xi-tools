@@ -805,7 +805,8 @@ def parse_collision_obj_text(text: str, default_wall: bool = True,
 
 
 def replace_zone_collision(dat_path: Path, tris: List[AuthoredTri],
-                            camera_transparent: bool = True) -> Tuple[Path, int, int]:
+                            camera_transparent: bool = True,
+                            compact_buckets: bool = False) -> Tuple[Path, int, int]:
     """Clear all existing collision then bake *tris* as the sole new geometry.
     Returns (out_path, n_removed, n_added)."""
     target = editable_dat(dat_path, fresh=False)
@@ -823,7 +824,8 @@ def replace_zone_collision(dat_path: Path, tris: List[AuthoredTri],
     n_removed = len(raw.meshes) if raw else 0
 
     cleared = clear_collision(sec)
-    replaced = add_collision(cleared, tris, camera_transparent=camera_transparent)
+    replaced = add_collision(cleared, tris, camera_transparent=camera_transparent,
+                             compact_buckets=compact_buckets)
     reencrypt_zone_objects(replaced, 0x10, 0, len(replaced), table1)
     out = bytes(data[:zonedef.start]) + bytes(replaced) + bytes(data[zonedef.start + zonedef.size:])
     Path(target).write_bytes(out)
@@ -841,7 +843,8 @@ def _cell_of(x: float, z: float, blocks) -> Tuple[int, int]:
 
 
 def add_collision(sec: bytearray, tris: Sequence[AuthoredTri],
-                  camera_transparent: bool = True) -> bytearray:
+                  camera_transparent: bool = True,
+                  compact_buckets: bool = False) -> bytearray:
     """Append authored collision triangles to a *decrypted* 0x1C section (data_start
     = 0x10), bucketed into the grid cells they overlap. Returns a new decrypted
     section bytearray (ready to re-encrypt). Mirrors add_placements' contract.
@@ -877,11 +880,28 @@ def add_collision(sec: bytearray, tris: Sequence[AuthoredTri],
     ident_old_rel = raw.transforms_old_off + len(raw.transforms)
     raw.transforms += bytearray(_identity_collision_object(cull_min, cull_max))
 
-    # bucket triangles into the cells their bbox overlaps
+    # Bucket triangles into grid cells.
+    #
+    # Default ("spread") puts a triangle in EVERY cell its bbox overlaps, which is
+    # safe but expensive: cost then tracks the AREA covered rather than the triangle
+    # count, because coarser meshes simply duplicate into more cells. Measured on
+    # rom/0/28: 69 bytes/tri for small tris, 403 bytes/tri for 6-yalm ones.
+    #
+    # "compact" buckets by centroid only. The client's collision query does not read
+    # a single cell -- it sweeps the neighbourhood around the query point (+/-1, or
+    # +/-2 when the flag at ctx+0x3413a is set; FFXiMain FUN_10167e70), so a triangle
+    # whose centroid sits one cell away is still visited. That holds while triangles
+    # are small relative to a cell; a triangle much larger than the sweep radius can
+    # be missed, so this is opt-in rather than the default.
     by_cell: Dict[Tuple[int, int], List[AuthoredTri]] = {}
     for t in tris:
         xs = (t.v0[0], t.v1[0], t.v2[0])
         zs = (t.v0[2], t.v1[2], t.v2[2])
+        if compact_buckets:
+            xi, zi = _cell_of(sum(xs) / 3.0, sum(zs) / 3.0, blocks)
+            if 0 <= xi < cols and 0 <= zi < rows:
+                by_cell.setdefault((xi, zi), []).append(t)
+            continue
         x0, z0 = _cell_of(min(xs), min(zs), blocks)
         x1, z1 = _cell_of(max(xs), max(zs), blocks)
         for zi in range(min(z0, z1), max(z0, z1) + 1):

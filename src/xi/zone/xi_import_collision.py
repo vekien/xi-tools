@@ -69,9 +69,14 @@ def _report_budget(dat: Path, n_tris: int) -> None:
               help="Restore the DAT from its .base first, discarding ALL prior edits "
                    "(placements, VFX, everything), then bake this collision. Without it "
                    "only the collision is replaced and other edits are kept.")
+@click.option("--compact-buckets", is_flag=True,
+              help="Bucket each triangle into its centroid cell only, instead of every "
+                   "cell it overlaps. Much smaller (cost stops tracking covered area), "
+                   "relying on the client sweeping neighbouring cells. Safe while "
+                   "triangles are small relative to a grid cell.")
 @click.option("--dry-run", is_flag=True, help="Parse and report without writing.")
 def cmd(dat_path: str, obj_path: str, replace: bool, default_wall: bool,
-        terrain: int, scale: float, camera_block: bool, do_reset: bool, dry_run: bool):
+        terrain: int, scale: float, camera_block: bool, do_reset: bool, dry_run: bool, compact_buckets):
     """Bake an authored OBJ as a zone's collision, replacing what is there.
 
     \b
@@ -121,7 +126,8 @@ def cmd(dat_path: str, obj_path: str, replace: bool, default_wall: bool,
 
     if replace:
         out, removed, added = replace_zone_collision(dat, tris,
-                                                     camera_transparent=not camera_block)
+                                                     camera_transparent=not camera_block,
+                                                     compact_buckets=compact_buckets)
         click.echo(f"\n  replaced collision in {Path(out).name}: "
                    f"{removed:,} source meshes removed, {added:,} triangles baked")
         _report_budget(out, added)
