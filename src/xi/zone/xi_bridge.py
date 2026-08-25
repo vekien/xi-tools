@@ -5858,10 +5858,42 @@ def _zone_delete(params: dict) -> dict:
     return {"ok": True, "zoneId": zone_id, "fileId": model_fid, "removed": removed}
 
 
-def _zone_list_custom() -> dict:
-    """Scan FTABLE10/VTABLE10 for custom zones (ID 400–511) that have a live DAT on disk.
+_ZONE_NAME_CACHE: dict | None = None
 
-    Returns ``{ zones: [{ zoneId, fileId, datUrl }] }`` sorted by zone ID."""
+
+def _zone_name_for(zone_id: int):
+    """Human name for a custom zone from zone_settings, or None if unavailable.
+
+    Cached for the process: the editor refreshes this list often and the DB may
+    not be reachable at all (packaged client, no server running)."""
+    global _ZONE_NAME_CACHE
+    if _ZONE_NAME_CACHE is None:
+        _ZONE_NAME_CACHE = {}
+        try:
+            import pymysql
+            from xi.xi_config import db_creds
+            conn = pymysql.connect(**db_creds(), charset="utf8mb4", connect_timeout=3)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT zoneid, name FROM zone_settings WHERE zoneid >= 400")
+                    _ZONE_NAME_CACHE = {r[0]: r[1] for r in cur.fetchall()}
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    nm = _ZONE_NAME_CACHE.get(zone_id)
+    return nm.replace("_", " ") if isinstance(nm, str) else None
+
+
+def _zone_list_custom() -> dict:
+    """Scan FTABLE10/VTABLE10 for custom zones that have a live DAT on disk.
+
+    Returns ``{ zones: [{ zoneId, fileId, datUrl, name }] }`` sorted by zone ID.
+    ``name`` comes from zone_settings when the DB is reachable, so the editor can
+    label the list with real names instead of "Zone 507"; it is None otherwise.
+
+    The upper bound follows the server's MAX_ZONEID (800), not the old 512 -- that
+    cut off every zone from 512 up, which simply never appeared in the editor."""
     import struct as _struct
     from xi.ftable.xi_core import load_tables
     from xi.xi_config import FFXI_DIR
@@ -5872,7 +5904,7 @@ def _zone_list_custom() -> dict:
 
     fdata, vdata = result
     zones = []
-    for zone_id in range(400, 512):
+    for zone_id in range(400, 800):
         fid = 0x147B3 + (zone_id - 0x100)
         if fid * 2 + 2 > len(fdata) or fid >= len(vdata):
             break
@@ -5888,6 +5920,7 @@ def _zone_list_custom() -> dict:
             "zoneId": zone_id,
             "fileId": fid,
             "datUrl": f"game/ROM10/{subdir}/{file_idx}.DAT",
+            "name": _zone_name_for(zone_id),
         })
     return {"zones": zones}
 
