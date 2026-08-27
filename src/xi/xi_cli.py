@@ -351,6 +351,9 @@ title.add_command(title_cmds.swap_sections_cmd, 'swap-sections')
 title.add_command(title_cmds.weather_cmd,   'weather')
 title.add_command(title_cmds.timeline_cmd,  'timeline')
 title.add_command(title_cmds.export_cmd,    'export')
+title.add_command(title_cmds.import_cmd,    'import')
+title.add_command(title_cmds.menu_cmd,      'menu')
+title.add_command(title_cmds.sprite_cmd,    'sprite')
 
 
 @ui.group('layout')

@@ -239,6 +239,9 @@ fog per segment. Commands live under `xi title …`.
 | Doc | Summary |
 |-----|---------|
 | [title/README.md](title/README.md) | `xi title` — list, timeline, weather, camera round trip, zone swap |
+| [title/ui_chrome.md](title/ui_chrome.md) | Title UI DAT `119/50`: textures, UiMenu, UiElementGroup / `lobbywin`, ownership |
+| [title/main_menu.md](title/main_menu.md) | Character-select strip (`loby2win`): move labels, text ids, hide buttons |
+| [title/wardrobe_numbers.md](title/wardrobe_numbers.md) | Hide title-screen wardrobe 3–8 badges (layout in `ROM/119/50`, not DLL/font) |
 | [dats/ROM_0_23.md](dats/ROM_0_23.md) | The `titl` format: scene nodes, camera keyframes, zone sections, weather records |
 
 ---

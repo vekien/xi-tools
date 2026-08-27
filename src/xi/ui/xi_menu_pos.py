@@ -42,8 +42,15 @@ class MenuElement:
     y:      int
     width:  int
     height: int
-    index:  int         # elementIndex field
+    index:  int         # legacy; prefer button_id
     selectable: bool
+    # xiclient ButtonDefinitionHeader (when size >= 27)
+    button_id: int = 0
+    nav_up: int = -1
+    nav_down: int = -1
+    nav_left: int = -1
+    nav_right: int = -1
+    title_id: int | None = None
 
 
 @dataclass
@@ -56,26 +63,50 @@ class MenuSection:
     elements:    list[MenuElement]
 
 
-# ── parsing ──────────���─────────────────────────��──────────────────────────────
+# Button / frame field offsets within an element record
+_OFF_X, _OFF_Y = 2, 4
+_OFF_W, _OFF_H = 10, 12
+_OFF_BTN_ID = 18
+_OFF_NAV_U, _OFF_NAV_D, _OFF_NAV_L, _OFF_NAV_R = 23, 24, 25, 26
+
+
+# ── parsing ───────────────────────────────────────────────────────────────────
 
 def _parse_element(data: bytes, off: int) -> MenuElement:
     size  = struct.unpack_from('<H', data, off)[0]
-    x     = struct.unpack_from('<h', data, off + 2)[0]
-    y     = struct.unpack_from('<h', data, off + 4)[0]
-    w     = struct.unpack_from('<h', data, off + 10)[0]
-    h     = struct.unpack_from('<h', data, off + 12)[0]
-    idx   = data[off + 16]
-    prev  = struct.unpack_from('b', data, off + 19)[0]
-    nxt   = struct.unpack_from('b', data, off + 20)[0]
+    if size < 14 or off + size > len(data):
+        raise struct.error('short element')
+    x     = struct.unpack_from('<h', data, off + _OFF_X)[0]
+    y     = struct.unpack_from('<h', data, off + _OFF_Y)[0]
+    w     = struct.unpack_from('<h', data, off + _OFF_W)[0]
+    h     = struct.unpack_from('<h', data, off + _OFF_H)[0]
+    btn_id = struct.unpack_from('<h', data, off + _OFF_BTN_ID)[0] if size >= 20 else 0
+    if size >= 27:
+        nu = struct.unpack_from('b', data, off + _OFF_NAV_U)[0]
+        nd = struct.unpack_from('b', data, off + _OFF_NAV_D)[0]
+        nl = struct.unpack_from('b', data, off + _OFF_NAV_L)[0]
+        nr = struct.unpack_from('b', data, off + _OFF_NAV_R)[0]
+    else:
+        # legacy fallback used by older menu-pos output
+        nu = struct.unpack_from('b', data, off + 19)[0] if size > 19 else -1
+        nd = struct.unpack_from('b', data, off + 20)[0] if size > 20 else -1
+        nl = nr = -1
+    title_id = None
+    if size >= 36:
+        chunk = data[off:off + size]
+        j = chunk.find(b'menu')
+        if j >= 2:
+            title_id = struct.unpack_from('<H', chunk, j - 2)[0]
+    nav_ok = any(v != -1 for v in (nu, nd, nl, nr))
     return MenuElement(
-        file_offset = off,
-        size        = size,
-        x           = x,
-        y           = y,
-        width       = w,
-        height      = h,
-        index       = idx,
-        selectable  = (prev != -1 and nxt != -1),
+        file_offset=off,
+        size=size,
+        x=x, y=y, width=w, height=h,
+        index=btn_id,
+        selectable=nav_ok,
+        button_id=btn_id,
+        nav_up=nu, nav_down=nd, nav_left=nl, nav_right=nr,
+        title_id=title_id,
     )
 
 
@@ -136,14 +167,55 @@ def find_section(sections: list[MenuSection], tag: str) -> MenuSection | None:
 def patch_element_xy(data: bytearray, elem: MenuElement, x: int | None, y: int | None) -> None:
     """Write new x and/or y into the element in-place."""
     if x is not None:
-        struct.pack_into('<h', data, elem.file_offset + 2, x)
+        struct.pack_into('<h', data, elem.file_offset + _OFF_X, x)
     if y is not None:
-        struct.pack_into('<h', data, elem.file_offset + 4, y)
+        struct.pack_into('<h', data, elem.file_offset + _OFF_Y, y)
 
 
-# ── display ──────────────────────────────────────���────────────────────────────
+def patch_element_size(data: bytearray, elem: MenuElement,
+                       width: int | None, height: int | None) -> None:
+    """Write width and/or height (signed i16 at +10 / +12)."""
+    if width is not None:
+        struct.pack_into('<h', data, elem.file_offset + _OFF_W, width)
+    if height is not None:
+        struct.pack_into('<h', data, elem.file_offset + _OFF_H, height)
 
-def _print_section(section: MenuSection) -> None:
+
+def patch_element_nav(data: bytearray, elem: MenuElement,
+                      up: int | None = None, down: int | None = None,
+                      left: int | None = None, right: int | None = None) -> None:
+    """Write nav ButtonID links (i8 at +23..+26). Requires element size >= 27."""
+    if elem.size < 27:
+        raise ValueError(f'element @0x{elem.file_offset:x} too small for nav fields '
+                         f'(size={elem.size})')
+    if up is not None:
+        if not -128 <= up <= 127:
+            raise ValueError(f'nav-up {up} out of i8 range')
+        struct.pack_into('b', data, elem.file_offset + _OFF_NAV_U, up)
+    if down is not None:
+        if not -128 <= down <= 127:
+            raise ValueError(f'nav-down {down} out of i8 range')
+        struct.pack_into('b', data, elem.file_offset + _OFF_NAV_D, down)
+    if left is not None:
+        if not -128 <= left <= 127:
+            raise ValueError(f'nav-left {left} out of i8 range')
+        struct.pack_into('b', data, elem.file_offset + _OFF_NAV_L, left)
+    if right is not None:
+        if not -128 <= right <= 127:
+            raise ValueError(f'nav-right {right} out of i8 range')
+        struct.pack_into('b', data, elem.file_offset + _OFF_NAV_R, right)
+
+
+def find_element_by_button_id(section: MenuSection, button_id: int) -> MenuElement | None:
+    for e in section.elements:
+        if e.button_id == button_id:
+            return e
+    return None
+
+
+# ── display ───────────────────────────────────────────────────────────────────
+
+def _print_section(section: MenuSection, *, with_nav: bool = False) -> None:
     f = section.frame
     click.echo(
         f"  [{section.tag}] {section.name!r}  "
@@ -151,13 +223,26 @@ def _print_section(section: MenuSection) -> None:
         f"({section.num_elements} elements)"
     )
     if section.elements:
-        click.echo(f"  {'idx':>4}  {'x':>6}  {'y':>6}  {'w':>6}  {'h':>6}  sel  offset")
-        for i, e in enumerate(section.elements):
+        if with_nav:
             click.echo(
-                f"  {i:>4}  {e.x:>6}  {e.y:>6}  {e.width:>6}  {e.height:>6}  "
-                f"{'yes' if e.selectable else 'no '}"
-                f"  0x{e.file_offset:06x}"
+                f"  {'idx':>3} {'btn':>4}  {'x':>6} {'y':>6} {'w':>5} {'h':>5}  "
+                f"{'↑':>3} {'↓':>3} {'←':>3} {'→':>3}  {'tid':>5}  offset"
             )
+            for i, e in enumerate(section.elements):
+                tid = e.title_id if e.title_id is not None else '-'
+                click.echo(
+                    f"  {i:>3} {e.button_id:>4}  {e.x:>6} {e.y:>6} {e.width:>5} {e.height:>5}  "
+                    f"{e.nav_up:>3} {e.nav_down:>3} {e.nav_left:>3} {e.nav_right:>3}  "
+                    f"{tid!s:>5}  0x{e.file_offset:06x}"
+                )
+        else:
+            click.echo(f"  {'idx':>4}  {'x':>6}  {'y':>6}  {'w':>6}  {'h':>6}  sel  offset")
+            for i, e in enumerate(section.elements):
+                click.echo(
+                    f"  {i:>4}  {e.x:>6}  {e.y:>6}  {e.width:>6}  {e.height:>6}  "
+                    f"{'yes' if e.selectable else 'no '}"
+                    f"  0x{e.file_offset:06x}"
+                )
 
 
 # ── CLI command ────────────────────────────���──────────────────────────────────

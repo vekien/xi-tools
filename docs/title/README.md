@@ -7,6 +7,15 @@ segment. The file holds no geometry or textures of its own.
 
 For the byte-level format see **[dats/ROM_0_23.md](../dats/ROM_0_23.md)**.
 
+Title **UI chrome** (logos, wardrobe badges, race hit-boxes) is a different file:
+`ROM/119/50.DAT` (`lobb`).
+
+| Doc | Topic |
+|-----|--------|
+| **[ui_chrome.md](ui_chrome.md)** | `0x20` / `0x30` UiMenu / `0x31` UiElementGroup, `lobbywin`, ownership rule |
+| **[main_menu.md](main_menu.md)** | Move `loby2win` rows (labels follow); text ids; font scope; hide Create |
+| **[wardrobe_numbers.md](wardrobe_numbers.md)** | Hide wardrobe 3–8 icons/digits (layout dest quads, not DLL/font) |
+
 ---
 
 ## Commands
@@ -16,9 +25,13 @@ uv run xi title list                 # zone segments, cameras, weather counts
 uv run xi title timeline             # each segment's shot list, in play order
 uv run xi title weather              # fog colour and range per segment
 uv run xi title export               # everything -> exports/title/data.json
-uv run xi title camera export        # camera paths -> exports/title/camera.json
-uv run xi title camera import        # write them back
+uv run xi title import               # write cameras (and optional timing) back
+uv run xi title camera export        # slim camera paths -> exports/title/camera.json
+uv run xi title camera import        # write camera.json back
 uv run xi title set-zone 12 115      # point segment 12 at another zone
+uv run xi title aim 12               # auto re-place cameras above the section's zone
+uv run xi title menu                 # title UiMenus (loby): move / size / nav
+uv run xi title sprite               # 0x31 sprites (dest/src): logo, ex*, …
 ```
 
 Every command reads `ROM/0/23.DAT` under `FFXI_DIR` unless given a path, and `--ffxi DIR`
@@ -53,33 +66,70 @@ uv run xi title set-zone 12 115
 
 **A zone swap alone is not enough.** Camera routes are absolute world positions authored
 for the old zone, so the shot will be underground or outside the map until those are
-re-aimed. The command prints which tracks need it.
+re-aimed. Use `xi title aim 12` for a quick auto pass, or export/import to set positions
+by hand.
 
 ---
 
-## Camera round trip
+## Camera round trip (set eye + look-at)
 
 ```bash
-uv run xi title camera export     # exports/title/camera.json
-# edit, or replay somewhere else
-uv run xi title camera import
+# Full dump (cameras + weather + timing + UI inventory)
+uv run xi title export --section 12
+# or slim cameras-only:
+uv run xi title camera export --section 12
+
+# edit eye / look on each keyframe in the JSON, then:
+uv run xi title import exports/title/data.json
+# or:
+uv run xi title camera import exports/title/camera.json
 ```
 
-Export → import on an untouched file is **byte-identical**. Each keyframe is an eye
-position, a look-at point, a normalised time and a focal length:
+Export → import on an untouched file is **byte-identical**. Each keyframe:
 
 ```json
 { "t": 0.0, "eye": [717.7, -6.6, 412.9], "look": [684.5, -6.7, 375.5],
   "focal": 350.0, "fov_deg": 57.496 }
 ```
 
-Import accepts `focal` **or** `fov_deg`, so a path authored somewhere that thinks in
-degrees needs no conversion first.
+| Field | What to set |
+|---|---|
+| `eye` | Camera world position `[x, y, z]`. **FFXI Y points DOWN** (smaller Y = higher). |
+| `look` | Look-at point `[x, y, z]`. Orientation is `look − eye` (aliases: `look_at`). |
+| `focal` **or** `fov_deg` | Zoom. Larger focal = tighter. FOV is vertical degrees. |
+| `t` | `0.0` .. `1.0` along the shot. |
 
-**A track's keyframe count cannot grow.** Nodes sit in a fixed layout with the next node
-immediately after, so extra frames would overwrite it; import refuses rather than
-truncating. To author a longer move, write across several consecutive nodes of the
-family — which is how the vanilla screen produces its long flights.
+Import also accepts a flat file: `{ "tracks": [ { "name": "cgu0", "keyframes": [...] } ] }`.
+
+**A track's keyframe count cannot grow** (`keyframe_slots` in the export is the cap).
+Nodes sit end-to-end; import refuses rather than truncating. Fewer frames than a track
+holds leaves the remainder untouched. For a longer flight, author across several
+consecutive tracks of the family — which is how vanilla produces long moves.
+
+---
+
+## Duration / timing
+
+There **is** a duration-like field: record type **`0x0210`** in each zone section's stream.
+It is an 8-byte record whose editable payload is a **u16 at +6**. Exports list them as:
+
+```json
+{ "offset": 65004, "value": 20,
+  "note": "0x0210 duration/hold; unit unproven (likely engine ticks, not seconds)" }
+```
+
+They show up on `xi title timeline` as `timing=[20]` next to weather shots. **The unit is
+not proven** against wall-clock playback (the editor still uses a flat 5 s placeholder).
+To write edited values back:
+
+```bash
+uv run xi title import exports/title/data.json --timing
+# or
+uv run xi title camera import --timing
+```
+
+Only entries that carry both `offset` and `value` are written; the writer checks that the
+bytes at `offset` are still a `0x0210` record before patching.
 
 ---
 
