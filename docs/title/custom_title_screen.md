@@ -1,24 +1,24 @@
 --dest-tl	LEFT , TOP
 --dest-br	RIGHT , BOTTOM
 
-set DAT=D:\cexi\catseyexi-client\Ashita\polplugins\DATs\catseyexi\ROM\119\50.dat
+set DAT=path\to\pivot\ROM\119\50.dat
 
 ========== textures (HD panels) ==========
 xi ui tex si %DAT% --hd-only 20logo,ex1us
 
 ========== terms and conditions logo ==========
-xi title sprite %DAT% --owner titlwin --index 11 --dest-tl 250,80 --dest-br 393,170
-xi title sprite %DAT% --owner titlwin --index 22 --dest-tl 250,80 --dest-br 393,170
+xi title sprite %DAT% --owner titlwin --index 11 --dest-tl 250,80 --dest-br 393,190
+xi title sprite %DAT% --owner titlwin --index 22 --dest-tl 250,80 --dest-br 393,190
 
 ========== main logo titlwin (75%) — both dual copies ==========
-xi title sprite %DAT% --owner titlwin --index 0 --dest-tl 259,100 --dest-br 757,360
-xi title sprite %DAT% --owner titlwin --index 5 --dest-tl 259,100 --dest-br 757,360
+xi title sprite %DAT% --owner titlwin --index 0 --dest-tl 259,100 --dest-br 757,370
+xi title sprite %DAT% --owner titlwin --index 5 --dest-tl 259,100 --dest-br 757,370
 
-========== left panel - 20logo ==========
-xi title sprite %DAT% --owner 20logo --index 0 --src-xy 0,0 --src-wh 512,1024 --dest-tl 0,0 --dest-br 256,512
+========== left panel ==========
+xi title sprite %DAT% --owner 20logo --index 0 --src-xy 0,0 --src-wh 512,1024 --dest-tl 0,0 --dest-br 256,576
 
-========== right panel - ex1us[0] (hijacked expansion art) ==========
-xi title sprite %DAT% --owner ex1us --index 0 --src-xy 0,0 --src-wh 512,1024 --dest-tl 768,0 --dest-br 1024,512
+========== right panel ==========
+xi title sprite %DAT% --owner ex1us --index 0 --src-xy 0,0 --src-wh 512,1024 --dest-tl 768,50 --dest-br 1024,562
 
 ========== hide other expansion rows ==========
 xi title sprite %DAT% --owner ex1us --index 1 --dest-tl 2000,2000 --dest-br 2001,2001
