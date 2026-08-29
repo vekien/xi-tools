@@ -574,5 +574,19 @@ server.add_command(server_cmds.status_cmd, 'status')
 server.add_command(server_cmds.npc_snapshot_cmd, 'npc-snapshot')   # bake the offline npc_list fallback
 
 
+# ── mv (xi-model-viewer list refresh) ─────────────────────────────────────────
+
+from xi.mv import xi_update as mv_update
+
+
+@cli.group()
+def mv():
+    """xi-model-viewer list bake / refresh helpers."""
+    pass
+
+
+mv.add_command(mv_update.cmd, "update")
+
+
 if __name__ == "__main__":
     cli(prog_name="xi")
