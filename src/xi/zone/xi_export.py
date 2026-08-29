@@ -10,6 +10,7 @@ glTF mesh with the zone's ``0x20`` textures embedded.
 
 import argparse
 import math
+import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +38,13 @@ from xi.zone.xi_decrypt import decrypt_zone_mesh, decrypt_zone_objects, load_key
 
 SECTION_TYPE_ZONE_MESH = 0x2E
 SECTION_TYPE_ZONE_DEF = 0x1C
+
+# Placement record fields we read here. Same layout as xi.zone.xi_objects
+# (OFF_LOD_LOW / OFF_FILE / REC_SIZE); duplicated rather than imported because
+# xi_objects imports from this module.
+OBJ_RECORD_SIZE = 0x64          # retail record (0x54 proto has none of these)
+OFF_LOD_LOW = 0x40              # float draw distance — engine stops drawing past this
+OFF_FILE = 0x50                 # u32 sub-area id (0 = none)
 
 # FFXI is left-handed; glTF is right-handed. We correct with a 180deg-X rotation
 # (ROOT_CORRECTION_ROTATION) composed with a [-1, 1, -1] scale. Net effect:
@@ -71,6 +79,16 @@ class Placement:
     position: Tuple[float, float, float]
     rotation: Tuple[float, float, float]
     scale: Tuple[float, float, float]
+    index: int = -1
+    # +0x40 draw distance (xi_objects.OFF_LOD_LOW). Exactly 1.0 is the authoring
+    # sentinel for collision-only geometry the client never renders; 0.0 = no
+    # limit; anything else is a real range. Proto (0x54) records have no such
+    # field and come through as 0.0.
+    draw_dist: float = 0.0
+    # +0x50, the id of the sub-area this placement belongs to (shop and inn
+    # interiors; in Ru'Aun Gardens a whole low-detail copy of the sky). Same id
+    # space as the 0x36 'm' trigger volumes.
+    sub_area_id: Optional[int] = None
 
 
 def trs_matrix(pos, rot, scale) -> List[float]:
@@ -348,7 +366,13 @@ def parse_zone_def(data: bytearray, section, table1: bytes) -> List[Placement]:
         pos = struct.unpack_from("<3f", data, b + 0x10)
         rot = struct.unpack_from("<3f", data, b + 0x1C)
         scale = struct.unpack_from("<3f", data, b + 0x28)
-        placements.append(Placement(mesh_id, pos, rot, scale))
+        if record_size >= OBJ_RECORD_SIZE:
+            draw_dist = struct.unpack_from("<f", data, b + OFF_LOD_LOW)[0]
+            sub_area = struct.unpack_from("<I", data, b + OFF_FILE)[0] or None
+        else:
+            draw_dist, sub_area = 0.0, None
+        placements.append(Placement(mesh_id, pos, rot, scale, index=i,
+                                    draw_dist=draw_dist, sub_area_id=sub_area))
     return placements
 
 
@@ -394,6 +418,98 @@ def resolve_mesh_name(mesh_id: str, meshes: Dict[str, List[ZonePrimitive]]) -> O
         if base + suffix in meshes:
             return base + suffix
     return None
+
+
+# --- placement classes the client does not draw in the base zone view -------
+# The 0x1C record carries enough to tell three kinds of placement apart, and a
+# straight "draw everything" export stacks all three on top of the real zone.
+# Ru'Aun Gardens is the worst case in retail: 45% of its 3283 placements are
+# collision proxies, another 592 belong to sub-areas, and 139 are far copies.
+
+COLLISION_DRAW_DISTANCE = 1.0   # +0x40 sentinel: collision only, never rendered
+
+# `m_`/`lnd_` name a cheap stand-in for geometry the zone also places at full
+# detail. The prefix alone is not evidence — `m_` equally names ordinary props
+# (Mog House furniture `m_bed_02`/`m_dsk_06`, Bastok's `m_pot`, Ro'Maeve's
+# `m_pol01_h` pillars) — so a placement only counts as a far copy when the zone
+# actually places a richer non-prefixed mesh under the same stem.
+_FAR_PREFIX = re.compile(r"^(m_|lnd_)")
+_DETAIL_SUFFIX = re.compile(r"_(h|m|n|l)$")
+
+
+def is_collision_proxy(plc: Placement) -> bool:
+    """True when a placement is collision-only geometry the client never draws.
+
+    Retail carries 15,835 of these. Their names say what they are: `hitwall_*`,
+    `kabe-atariyou` (wall-collision-use), `hit_*`, `id_board*` / `id_box*`.
+    """
+    return plc.draw_dist == COLLISION_DRAW_DISTANCE
+
+
+def far_copy_meshes(meshes_by_name: Dict[str, List[ZonePrimitive]],
+                    placements: List[Placement]) -> set:
+    """Mesh names that are a cheaper stand-in for richer geometry in this zone.
+
+    In retail this finds Ru'Aun Gardens and its Escha copy (25 meshes, 139
+    placements each: `m_osid_*` islands, the `m_bri_*` bridge) plus a single
+    `m_wall01` in an unlisted DAT, and nothing else.
+    """
+    vert_cache: Dict[str, int] = {}
+
+    def nverts(name: str) -> int:
+        if name not in vert_cache:
+            vert_cache[name] = sum(len(p.positions) for p in meshes_by_name.get(name) or [])
+        return vert_cache[name]
+
+    plain: Dict[str, set] = {}
+    for plc in placements:
+        if is_collision_proxy(plc):
+            continue
+        name = resolve_mesh_name(plc.mesh_id, meshes_by_name)
+        if not name or _FAR_PREFIX.match(name):
+            continue
+        plain.setdefault(_DETAIL_SUFFIX.sub("", name), set()).add(name)
+
+    far: set = set()
+    checked: set = set()
+    for plc in placements:
+        name = resolve_mesh_name(plc.mesh_id, meshes_by_name)
+        if not name or name in checked or not _FAR_PREFIX.match(name):
+            continue
+        checked.add(name)
+        stem = _DETAIL_SUFFIX.sub("", _FAR_PREFIX.sub("", name))
+        own = nverts(name)
+        for plain_stem, names in plain.items():
+            # Exact stem, or the full-detail version split into parts beneath it:
+            # `m_osid_cen_a` stands in for `osid_cen_a_lf_h` + `osid_cen_a_rt_h`.
+            # The `_` boundary keeps `m_pot` off anything starting with `pot`.
+            if plain_stem != stem and not plain_stem.startswith(stem + "_"):
+                continue
+            if any(nverts(t) > own for t in names):
+                far.add(name)
+                break
+    return far
+
+
+def filter_placements(meshes_by_name: Dict[str, List[ZonePrimitive]],
+                      placements: List[Placement],
+                      collision_proxies: bool = False,
+                      far_lod: bool = False,
+                      sub_areas: bool = True) -> List[Placement]:
+    """Drop the placement classes the client does not draw in the base zone."""
+    far = set() if far_lod else far_copy_meshes(meshes_by_name, placements)
+    out: List[Placement] = []
+    for plc in placements:
+        if not collision_proxies and is_collision_proxy(plc):
+            continue
+        if not sub_areas and plc.sub_area_id is not None:
+            continue
+        if far:
+            name = resolve_mesh_name(plc.mesh_id, meshes_by_name)
+            if name in far:
+                continue
+        out.append(plc)
+    return out
 
 
 def resolve_texture(name: Optional[str], textures: Dict[str, TextureImage]) -> Optional[str]:
@@ -1066,14 +1182,29 @@ def export_objects(dat_path: Path, output_dir: Path,
 def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bool = False,
                 raw: bool = False, right_handed: bool = False, source: Optional[Path] = None,
                 collision: bool = False, alpha_scale: float = DEFAULT_ALPHA_SCALE,
-                as_json: bool = False, no_vfx: bool = False, objects: bool = False) -> List[Path]:
+                as_json: bool = False, no_vfx: bool = False, objects: bool = False,
+                collision_proxies: bool = False, far_lod: bool = False,
+                sub_areas: bool = True) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
     src = source or dat_path
     meshes_by_name, placements, textures = parse_zone(src)
     if not meshes_by_name:
         raise ValueError("No zone mesh (0x2E) geometry found in this DAT")
+    # Default to what the client actually draws — see filter_placements.
+    kept = filter_placements(meshes_by_name, placements,
+                             collision_proxies=collision_proxies,
+                             far_lod=far_lod, sub_areas=sub_areas)
+    def _names(plcs):
+        return {n for n in (resolve_mesh_name(p.mesh_id, meshes_by_name) for p in plcs) if n}
+    dropped_meshes = _names(placements) - _names(kept)
+    placements = kept
     drop_names = unplaced_vfx_meshes(meshes_by_name, placements) if no_vfx else None
+    if dropped_meshes:
+        # build_glb emits every mesh with no surviving placement at the origin as
+        # an "unplaced" node. Without this, filtering a mesh's last placement
+        # resurrects it at 0,0,0 instead of removing it.
+        drop_names = (drop_names or set()) | dropped_meshes
     if objects:
         # Per-object mode: one <meshname>.glb/.fbx per mesh straight into output_dir
         # (alongside any --collision/--json), no combined zone glb. They share one set
@@ -1121,6 +1252,12 @@ def main() -> int:
     parser.add_argument("--collision", action="store_true", help="Also dump the player-collision mesh (0x1C MZB) to <stem>.collision.obj")
     parser.add_argument("--json", action="store_true", dest="as_json",
                         help="Also export a <stem>.zone.json with zone metadata (placements, weather audio, companion DATs, sub-areas)")
+    parser.add_argument("--with-collision-proxies", dest="collision_proxies", action="store_true",
+                        help="Include collision-only placements (draw distance 1.0) the client never renders — hitwall_*, kabe-atariyou, id_board*")
+    parser.add_argument("--with-far-lod", dest="far_lod", action="store_true",
+                        help="Include far-copy placements (m_/lnd_ stand-ins for richer geometry the zone also places, e.g. Ru'Aun's m_osid_*/m_bri_*)")
+    parser.add_argument("--no-subareas", dest="sub_areas", action="store_false", default=True,
+                        help="Omit placements tagged with a sub-area id (shop/inn interiors; in Ru'Aun a second low-detail copy of the sky)")
     parser.add_argument("--alpha-scale", type=float, default=DEFAULT_ALPHA_SCALE,
                         help="Multiply texture alpha by this factor before export, clamped to 255 "
                              "(default 2.0 = opaque texels become fully opaque, matching the game; "
@@ -1138,7 +1275,9 @@ def main() -> int:
     for path in export_zone(dat_path, output_dir, fbx=args.fbx, skip_sky=args.skip_sky, raw=args.raw,
                             right_handed=args.right_handed, source=source,
                             collision=args.collision, alpha_scale=args.alpha_scale,
-                            as_json=args.as_json, no_vfx=args.no_vfx, objects=args.objects):
+                            as_json=args.as_json, no_vfx=args.no_vfx, objects=args.objects,
+                            collision_proxies=args.collision_proxies, far_lod=args.far_lod,
+                            sub_areas=args.sub_areas):
         print(f"Exported: {path}")
     return 0
 
@@ -1183,13 +1322,28 @@ import click as _click  # noqa: E402
                help="Also export a <stem>.zone.json with zone metadata: all placements (full TRS + LOD + links), "
                     "mesh list, textures, weather ambient sounds (per-weather per-time-of-day SPW refs), "
                     "companion DAT paths (event/dialog/npc), and sub-area interior DATs.")
+@_click.option("--with-collision-proxies", "collision_proxies", is_flag=True,
+               help="Include collision-only placements — those with a draw distance of exactly 1.0, "
+                    "the sentinel the client treats as never-render. Retail has 15,835 of them "
+                    "(hitwall_*, kabe-atariyou, hit_*, id_board*/id_box*); Ru'Aun Gardens is 45% "
+                    "collision proxies. Off by default: they stack invisible geometry on the zone.")
+@_click.option("--with-far-lod", "far_lod", is_flag=True,
+               help="Include far copies — m_/lnd_ meshes that stand in for richer geometry the zone "
+                    "also places (Ru'Aun's m_osid_* islands and m_bri_* bridge). The client shows one "
+                    "or the other by region, so exporting both puts the cheap copy inside the "
+                    "detailed one. Only fires where a richer same-stem twin is actually placed, so "
+                    "ordinary m_ props (m_bed_02, m_pot, m_pol01_h) are never affected.")
+@_click.option("--no-subareas", "sub_areas", is_flag=True, flag_value=False, default=True,
+               help="Omit placements tagged with a sub-area id (+0x50): shop and inn interiors in the "
+                    "towns, and in Ru'Aun Gardens a whole second low-detail copy of the sky. Included "
+                    "by default — they are real geometry, drawn inside their own volume.")
 @_click.option("--alpha-scale", type=float, default=DEFAULT_ALPHA_SCALE, show_default=True,
                help="Multiply texture alpha by this factor before export, clamped to 255. FFXI stores "
                     "alpha at half scale (0x80 = opaque), so the default 2.0 makes opaque texels fully "
                     "opaque (matching the game) while preserving real cutouts/gradients. Pass 1.0 for "
                     "the raw, faint FFXI alpha, or a higher value to force more opacity.")
 def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool, use_base: bool,
-        collision: bool, as_json: bool, alpha_scale: float):
+        collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool, alpha_scale: float):
     """Export a zone's static mesh + textures to a self-contained .glb.
 
     DAT_PATH may be a ROM-relative spec like ROM/1/41. Zone meshes are decrypted
@@ -1219,7 +1373,9 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
         paths = export_zone(resolved, output_dir, fbx=fbx, skip_sky=skip_sky, raw=raw,
                             right_handed=right_handed, source=source,
                             collision=collision, alpha_scale=alpha_scale, as_json=as_json,
-                            no_vfx=no_vfx, objects=objects)
+                            no_vfx=no_vfx, objects=objects,
+                            collision_proxies=collision_proxies, far_lod=far_lod,
+                            sub_areas=sub_areas)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:
