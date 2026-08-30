@@ -208,6 +208,24 @@
    "includeUngrouped": true
   }
  },
+ "_rangedDisplayComment": [
+  "Copied into characters.json as `rangedDisplay`. Ranged weapons are the one",
+  "slot the attach machinery does not cover: their info section reports",
+  "standardJointIndex 255 (null), so unlike main/sub there is no grip joint to",
+  "re-parent onto a hand. Their mesh binds straight to the back-mount bone",
+  "instead (Bone0089 and its children 91-93 on Hume Male), and nothing in the",
+  "base, movement or battle motion DATs animates those joints at all - checked",
+  "across 243 clips. So the client, not the data, decides when a bow is visible:",
+  "it is scaled to 0 until the weapon is actually in use.",
+  "",
+  "`showForActionGroups` are the action groups that count as in use. Both ranged",
+  "skill groups are weapon skills; the plain ranged attack is not exposed as an",
+  "action in the current list, so it has nothing to trigger on yet."
+ ],
+ "rangedDisplay": {
+  "slot": "range",
+  "showForActionGroups": ["Archery", "Marksmanship"]
+ },
  "retiredSets": [
   "Limbus"
  ],

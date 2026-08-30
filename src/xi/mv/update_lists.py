@@ -999,10 +999,18 @@ def update_gear_sets(
 
     # Section order and the weapon catch-all rule travel with the data, so the
     # viewer never hard-codes a list of set names.
-    sections = _gear_sets_doc().get("sections")
+    doc = _gear_sets_doc()
+    sections = doc.get("sections")
     sections_written = bool(sections) and data.get("gearSections") != sections
     if sections_written:
         data["gearSections"] = sections
+
+    # Same idea for the ranged-weapon visibility rule: the viewer reads it from
+    # the list rather than carrying its own copy.
+    ranged = doc.get("rangedDisplay")
+    if ranged and data.get("rangedDisplay") != ranged:
+        data["rangedDisplay"] = ranged
+        sections_written = True
 
     # Sets that were tagged once and have since been withdrawn: strip them so a
     # list written by an older run converges instead of keeping a dead bucket.
