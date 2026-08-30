@@ -10,10 +10,11 @@
   "wiki-scrape of 100+ nonexistent 'Limbus' items was caught and discarded.",
   "",
   "Sources: bg-wiki Category:Prime_Weapons, Category:Aeonic_Weapons,",
-  "Category:Mythic_Weapons, Category:Abjurations. Limbus was enumerated from",
-  "item_basic by family prefix (Homam/Nashira) after the category page turned",
-  "out to list only mobs and zones; its Enif/Adhara/Murzim/Shedir upgrades",
-  "reuse the same models and so add no rows.",
+  "Category:Mythic_Weapons, Category:Abjurations.",
+  "",
+  "Limbus was tried (Homam/Nashira, enumerated from item_basic by family) and",
+  "withdrawn - see retiredSets. Only two of its families have models on this",
+  "install, so the bucket read as an arbitrary ten pieces rather than a set.",
   "",
   "Omen is deliberately absent: its scales upgrade Artifact/Relic/Empyrean +2",
   "to +3, so its armour IS those models, and all 29 of its unique rewards are",
@@ -64,11 +65,6 @@
   "hecatomb_subligar": "Abjuration",
   "heishi_shorinken": "Aeonic Weapons",
   "helheim": "Prime Weapons",
-  "homam_corazza": "Limbus",
-  "homam_cosciales": "Limbus",
-  "homam_gambieras": "Limbus",
-  "homam_manopolas": "Limbus",
-  "homam_zucchetto": "Limbus",
   "hrafn_coronet": "Abjuration",
   "hrafn_gambieras": "Abjuration",
   "hrafn_gauntlets": "Abjuration",
@@ -97,11 +93,6 @@
   "mpu_gandring": "Prime Weapons",
   "murgleis": "Mythic Weapons",
   "nagi": "Mythic Weapons",
-  "nashira_crackows": "Limbus",
-  "nashira_gages": "Limbus",
-  "nashira_manteel": "Limbus",
-  "nashira_seraweels": "Limbus",
-  "nashira_turban": "Limbus",
   "nirvana": "Mythic Weapons",
   "opashoro": "Prime Weapons",
   "paean_bliaut": "Abjuration",
@@ -167,9 +158,18 @@
   "old label no longer matches the key."
  ],
  "labelFixes": {
-  "futhark coat (run af@)": { "label": "RUN - Futhark Coat", "set": "Relic" },
-  "geo - futhark mitons": { "label": "RUN - Futhark Mitons", "set": "Relic" },
-  "futhark mitons (geo relic)": { "label": "RUN - Futhark Mitons", "set": "Relic" }
+  "futhark coat (run af@)": {
+   "label": "RUN - Futhark Coat",
+   "set": "Relic"
+  },
+  "geo - futhark mitons": {
+   "label": "RUN - Futhark Mitons",
+   "set": "Relic"
+  },
+  "futhark mitons (geo relic)": {
+   "label": "RUN - Futhark Mitons",
+   "set": "Relic"
+  }
  },
  "_sectionsComment": [
   "Copied verbatim into characters.json as `gearSections` so the viewer reads",
@@ -189,7 +189,6 @@
    "Empyrean",
    "Ebur / Furia / Ebon",
    "Abjuration",
-   "Limbus",
    "Mythic Weapons",
    "Aeonic Weapons",
    "Prime Weapons"
@@ -197,9 +196,25 @@
   "standardLabel": "Standard",
   "other": {
    "label": "Other",
-   "slots": ["main", "sub", "range"],
-   "groups": ["Unidentified", "xi (added – missing DATs)"],
+   "slots": [
+    "main",
+    "sub",
+    "range"
+   ],
+   "groups": [
+    "Unidentified",
+    "xi (added – missing DATs)"
+   ],
    "includeUngrouped": true
   }
- }
+ },
+ "retiredSets": [
+  "Limbus"
+ ],
+ "_retiredSetsComment": [
+  "Sets that were tagged once and have since been withdrawn. The gear-sets",
+  "target clears them from any row that still carries one, so those pieces",
+  "fall back into the plain 'Standard' run. Kept here rather than deleted so",
+  "a stale list still converges on the next run."
+ ]
 }

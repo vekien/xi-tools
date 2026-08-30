@@ -1004,8 +1004,13 @@ def update_gear_sets(
     if sections_written:
         data["gearSections"] = sections
 
+    # Sets that were tagged once and have since been withdrawn: strip them so a
+    # list written by an older run converges instead of keeping a dead bucket.
+    retired = set(_gear_sets_doc().get("retiredSets") or [])
+
     added = 0
     changed = 0
+    dropped = 0
     by_cat: dict[str, int] = {}
     samples: list[str] = []
     unknown: set[str] = set()
@@ -1014,6 +1019,9 @@ def update_gear_sets(
         for slot, items in (race.get("slots") or {}).items():
             for it in items:
                 label = it.get("label") or ""
+                if it.get("set") in retired:
+                    del it["set"]
+                    dropped += 1
                 found = classify_gear_set(label)
                 if found is None:
                     # A job code with a set keyword we don't know is a typo in
@@ -1033,9 +1041,11 @@ def update_gear_sets(
                 if len(samples) < 12:
                     samples.append(f"{race.get('id')}/{slot} {it.get('label')} → {found}")
 
-    if (added or changed or sections_written) and not dry_run:
+    if (added or changed or dropped or sections_written) and not dry_run:
         _write_json(path, data, dry_run=False)
 
+    if dropped:
+        samples.append(f"cleared {dropped} rows of retired set(s): {sorted(retired)}")
     if sections_written:
         samples.append(f"gearSections written ({len(sections.get('order') or [])} sections)")
     if unknown:
@@ -1046,10 +1056,11 @@ def update_gear_sets(
         "file": str(path),
         "added": added,
         "retagged": changed,
+        "dropped": dropped,
         "unknown_suffix": len(unknown),
         "by_cat": by_cat,
         "samples": samples,
-        "wrote": bool(added or changed or sections_written) and not dry_run,
+        "wrote": bool(added or changed or dropped or sections_written) and not dry_run,
     }
 
 
