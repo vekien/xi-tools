@@ -159,6 +159,7 @@ decode, and how the game links sounds to effects, zones, and mobs.
 |-----|---------|
 | [audio/README.md](audio/README.md) | Command overview, music/sfx search, batch decode |
 | [audio/format.md](audio/format.md) | `.bgw`/`.spw` binary format, ADPCM codec, byte-exact gotchas |
+| [audio/pmv.md](audio/pmv.md) | Opening movie: `mov\*.pmv` (`PMUS` + XOR → MPEG-2 ES) + companion WAV-as-`.bgw` |
 | [audio/refs.md](audio/refs.md) | `0x3D` SoundEffectPointer: how the game links sounds to effects/zones |
 | [sounds/footsteps.md](sounds/footsteps.md) | Terrain type → footstep sound + decal |
 

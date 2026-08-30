@@ -70,10 +70,13 @@ def cmd(
 
     Gear uses FFXiMain race tables + FTABLE (append NEW - mid N). Music/SFX
     scan the game sound* trees. zone-music rebuilds from zone_settings.sql.
-    Effects: spell anim → file_id (0xAF0+anim) → FTABLE DAT; early JAs
-    (4412+anim); optional spell-band orphan scan. Links fileId on new rows.
+    Effects: spell anim → file_id (0xAF0+anim) → FTABLE DAT; job abilities
+    (4412+anim); weapon skills (4912+anim); spell-band orphan scan. Images and
+    npcs classify DATs by their section types (textures-only vs skinned mesh)
+    and, for npcs, name them from mob_pools / npc_list. file-ids stamps the
+    reverse-FTABLE file_id onto every list row.
 
-    floors / zones / npcs / images are not touched (manual).
+    floors / zones are not touched (manual).
 
     Copy curated base lists into mv/lists once; later runs append in place.
     """
@@ -81,7 +84,8 @@ def cmd(
 
     if only:
         targets = [t.strip().lower() for t in only.split(",") if t.strip()]
-        bad = [t for t in targets if t not in ALL_TARGETS and t != "zone_music"]
+        aliases = {"zone_music", "file_ids", "fileids", "gear_sets", "gear_labels"}
+        bad = [t for t in targets if t not in ALL_TARGETS and t not in aliases]
         if bad:
             raise click.ClickException(
                 f"Unknown target(s): {', '.join(bad)}. "
@@ -98,6 +102,21 @@ def cmd(
     click.echo(f"targets: {', '.join(targets)}")
     click.echo()
 
+    # A full run reads ~53k DAT headers and rebuilds five lists, so it streams:
+    # each target announces what it is doing, then prints its own result before
+    # the next one starts.
+    started: set[str] = set()
+
+    def on_step(target: str, message: str) -> None:
+        if target not in started:
+            started.add(target)
+            click.echo(click.style(f"  {target}…", bold=True))
+        click.echo(click.style(f"      {message}", fg="bright_black"))
+
+    def on_report(r: dict) -> None:
+        started.add(r.get("target", "?"))
+        echo_report(r, dry_run=dry_run)
+
     reports = run_updates(
         targets,
         lists_dir,
@@ -105,46 +124,51 @@ def cmd(
         sql_path=sql_path,
         base_dir=base_dir.resolve() if base_dir else None,
         mid_cap=mid_cap,
+        on_step=on_step,
+        on_report=on_report,
     )
-    any_err = False
-    for r in reports:
-        t = r.get("target", "?")
-        if r.get("error"):
-            any_err = True
-            click.echo(click.style(f"  {t}: ERROR — {r['error']}", fg="red"))
-            continue
-        parts = [f"  {t}:"]
-        if "added" in r:
-            parts.append(f"+{r['added']}")
-        if "folders_added" in r:
-            parts.append(f"folders +{r['folders_added']}")
-        if "names_added" in r:
-            parts.append(f"names +{r['names_added']}")
-        if "zones" in r:
-            parts.append(f"{r['zones']} zones")
-        if "by_race" in r and r["by_race"]:
-            detail = ", ".join(f"{k}:{v}" for k, v in r["by_race"].items())
-            parts.append(f"({detail})")
-        if "by_cat" in r and r["by_cat"]:
-            detail = ", ".join(f"{k}:{v}" for k, v in r["by_cat"].items())
-            parts.append(f"({detail})")
-        if r.get("skipped_missing_file"):
-            parts.append(f"skip-missing-file {r['skipped_missing_file']}")
-        if r.get("skipped_path_already_listed"):
-            parts.append(f"skip-path-dup-mid {r['skipped_path_already_listed']}")
-        if r.get("wrote"):
-            parts.append(click.style("wrote", fg="green"))
-        elif dry_run:
-            parts.append("dry-run")
-        else:
-            parts.append("no change")
-        click.echo(" ".join(str(p) for p in parts))
-        if r.get("file"):
-            click.echo(f"         → {r['file']}")
-        for s in r.get("samples") or []:
-            click.echo(f"           · {s}")
 
     click.echo()
-    if any_err:
+    if any(r.get("error") for r in reports):
         raise SystemExit(1)
     click.echo(click.style("done.", fg="green"))
+
+
+def echo_report(r: dict, *, dry_run: bool) -> None:
+    """One target's result: counts, the file it wrote, and a few sample rows."""
+    t = r.get("target", "?")
+    if r.get("error"):
+        click.echo(click.style(f"  {t}: ERROR — {r['error']}", fg="red"))
+        return
+    parts = [f"  {t}:"]
+    if "added" in r:
+        parts.append(f"+{r['added']}")
+    if r.get("corrected"):
+        parts.append(f"fixed {r['corrected']}")
+    if "folders_added" in r:
+        parts.append(f"folders +{r['folders_added']}")
+    if "names_added" in r:
+        parts.append(f"names +{r['names_added']}")
+    if "zones" in r:
+        parts.append(f"{r['zones']} zones")
+    if "by_race" in r and r["by_race"]:
+        detail = ", ".join(f"{k}:{v}" for k, v in r["by_race"].items())
+        parts.append(f"({detail})")
+    if "by_cat" in r and r["by_cat"]:
+        detail = ", ".join(f"{k}:{v}" for k, v in r["by_cat"].items())
+        parts.append(f"({detail})")
+    if r.get("skipped_missing_file"):
+        parts.append(f"skip-missing-file {r['skipped_missing_file']}")
+    if r.get("skipped_path_already_listed"):
+        parts.append(f"skip-path-dup-mid {r['skipped_path_already_listed']}")
+    if r.get("wrote"):
+        parts.append(click.style("wrote", fg="green"))
+    elif dry_run:
+        parts.append("dry-run")
+    else:
+        parts.append("no change")
+    click.echo(" ".join(str(p) for p in parts))
+    if r.get("file"):
+        click.echo(f"         → {r['file']}")
+    for s in r.get("samples") or []:
+        click.echo(f"           · {s}")

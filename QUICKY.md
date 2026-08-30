@@ -351,6 +351,49 @@ xi ftable delete
 xi ftable set
 ```
 
+## Model Viewer Lists
+
+Refreshes the JSON catalogues in `mv/lists` that the model viewer loads. Every
+target is append-only — curated names, labels and groupings are never rewritten.
+
+```text
+xi mv update
+xi mv update --only gear,music
+xi mv update --only images,npcs --dry-run
+xi mv update --only file-ids
+```
+
+| Target | Source | What it adds |
+|---|---|---|
+| `gear` | FFXiMain race tables → FTABLE | missing gear model ids per race/slot |
+| `gear-sets` | `gear_sets.json` + existing labels | `set` on each gear row (content set) |
+| `gear-labels` | `(JOB Set)` label suffix | rewrites to `JOB - Name` |
+| `music` | `sound*/win/music/data` | unnamed `music*.bgw` |
+| `sfx` | `sound*/win/se` | unnamed `se*` folders and `.spw` |
+| `zone-music` | `zone_settings.sql` | full rebuild of the zone → BGM map |
+| `effects` | spell / ability / weapon-skill animation → file_id | missing VFX DATs |
+| `images` | DAT section scan (textures only) | missing map, UI and cutscene art |
+| `npcs` | modelid → file_id → DAT, named from `mob_pools` / `npc_list` | missing entity models |
+| `file-ids` | reverse FTABLE/VTABLE | `fileId` on every row in every list |
+
+VFX file_id bands (`offset + animation`): spells `2800`, job abilities `4412`,
+weapon skills `4912`. `mob_skills` and `item_usable` animations are *not* file
+ids — they index the caster's own motion set.
+
+`gear-sets` writes a single `set` field holding every bucket: Artifact, Relic
+and Empyrean (read off the existing `(JOB Set)` label suffix), `Ebur / Furia /
+Ebon` (one merged bucket, matched by name prefix), and the content sets Prime
+Weapons, Aeonic Weapons, Mythic Weapons, Abjuration and Limbus (matched by name
+against `src/xi/mv/gear_sets.json`). Omen has no bucket on purpose — see the
+`_comment` in that file.
+
+`gear-labels` then rewrites `Wizard's Coat (BLM Artifact)` to
+`BLM - Wizard's Coat`; the set is preserved in `set` first, so nothing is lost.
+Only brackets starting with a real job code are touched — `(119 AG)`,
+`(Stage 5)`, `(SU5)` and friends are left alone — and a job code paired with an
+unknown set keyword is reported rather than renamed, since that is a typo in the
+label rather than a set we lack.
+
 ## Batch
 
 ```text

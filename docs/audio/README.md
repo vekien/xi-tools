@@ -8,6 +8,7 @@ ADPCM and PCM decode in **pure Python, byte-for-byte identical to vgmstream** (n
 external tools). ATRAC3 (~36% of music) is routed to `vgmstream-cli` when present.
 
 - Binary format + codec internals: [format.md](format.md)
+- Opening movie (`.pmv` / `PMUS` → MPEG-2, companion WAV): [pmv.md](pmv.md)
 - Finding which sounds a DAT uses (`0x3D`): [refs.md](refs.md)
 
 ## Commands
