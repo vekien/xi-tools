@@ -910,6 +910,7 @@ def update_effects(
 # ── gear sets (characters.json `set`) ────────────────────────────────────────
 
 _GEAR_SETS_PATH = Path(__file__).with_name("gear_sets.json")
+_NPC_ANIMS_PATH = Path(__file__).with_name("npc_anims.json")
 
 # Rows whose label is a placeholder rather than an item name.
 _NOT_AN_ITEM = re.compile(r"^(none|unknown|new -|\d+/\d+$)", re.I)
@@ -966,6 +967,11 @@ def classify_gear_set(label: str) -> str | None:
     return by_prefix.get(head)
 
 
+def _norm_group(value: object) -> str:
+    """Key a ``group`` value for the label table: lowercased, spaces collapsed."""
+    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
 def update_gear_sets(
     lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
     notify: Notify = _noop,
@@ -1016,6 +1022,14 @@ def update_gear_sets(
     # list written by an older run converges instead of keeping a dead bucket.
     retired = set(_gear_sets_doc().get("retiredSets") or [])
 
+    # Weapon-type display names. The raw value is the item DB's skill column,
+    # which abbreviates some past readability ('Hand'), so the pretty form
+    # lives in the set table rather than in the viewer.
+    group_labels = {
+        _norm_group(k): v for k, v in (doc.get("groupLabels") or {}).items()
+    }
+    regrouped = 0
+
     added = 0
     changed = 0
     dropped = 0
@@ -1024,9 +1038,20 @@ def update_gear_sets(
     unknown: set[str] = set()
 
     for race in data.get("races") or []:
+        # Weapon skills carry the same weapon-type grouping as the gear rows, so
+        # the two dropdowns should read identically.
+        for act in race.get("actions") or []:
+            pretty = group_labels.get(_norm_group(act.get("group")))
+            if pretty and act.get("group") != pretty:
+                act["group"] = pretty
+                regrouped += 1
         for slot, items in (race.get("slots") or {}).items():
             for it in items:
                 label = it.get("label") or ""
+                pretty = group_labels.get(_norm_group(it.get("group")))
+                if pretty and it.get("group") != pretty:
+                    it["group"] = pretty
+                    regrouped += 1
                 if it.get("set") in retired:
                     del it["set"]
                     dropped += 1
@@ -1049,11 +1074,13 @@ def update_gear_sets(
                 if len(samples) < 12:
                     samples.append(f"{race.get('id')}/{slot} {it.get('label')} → {found}")
 
-    if (added or changed or dropped or sections_written) and not dry_run:
+    if (added or changed or dropped or regrouped or sections_written) and not dry_run:
         _write_json(path, data, dry_run=False)
 
     if dropped:
         samples.append(f"cleared {dropped} rows of retired set(s): {sorted(retired)}")
+    if regrouped:
+        samples.append(f"renamed the weapon group on {regrouped} rows")
     if sections_written:
         samples.append(f"gearSections written ({len(sections.get('order') or [])} sections)")
     if unknown:
@@ -1453,6 +1480,104 @@ def update_npcs(
 
 # ── fileId stamping (all lists) ──────────────────────────────────────────────
 
+def update_npc_anims(
+    lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
+    notify: Notify = _noop,
+) -> Report:
+    """Stamp ``anims`` on every npcs.json entry that borrows animation packs.
+
+    Trusts and other party NPCs carry a player-style move set that does not live
+    in their own model DAT. The link is structural rather than named anywhere:
+    the model declares the content families it pulls in as Directory (0x01)
+    sections, and the packs are the DATs rooted at those FourCCs. See
+    :func:`xi.mv.dat_index.extra_anim_packs` for the rule and the measurements
+    behind it, and ``npc_anims.json`` for the one number it needs.
+
+    Each entry gets ``anims: [{path, clips}]``. The packs are kept apart rather
+    than flattened into one list because a set reuses clip ids — Iroha's six use
+    only four between them — so merging would shadow the duplicates.
+
+    Only entries that actually borrow something get the key, which is a small
+    minority — a monster's clips are all in its own file.
+    """
+    from xi.mv.dat_index import anim_clip_ids, back, extra_anim_packs
+
+    path = lists_dir / "npcs.json"
+    src = path if path.is_file() else None
+    if src is None and base_dir is not None and (base_dir / "npcs.json").is_file():
+        src = base_dir / "npcs.json"
+    if src is None:
+        return {
+            "target": "npc-anims",
+            "file": str(path),
+            "error": f"npcs.json not found in {lists_dir}",
+            "added": 0,
+            "wrote": False,
+        }
+
+    doc = json.loads(_NPC_ANIMS_PATH.read_text(encoding="utf-8"))
+    cap = int(doc.get("maxFamilySize") or 64)
+    ignore = frozenset(doc.get("ignoreDirIds") or ())
+
+    notify("checking every NPC model for borrowed animation packs")
+    data = _load_json(src)
+
+    added = 0
+    changed = 0
+    dropped = 0
+    samples: list[str] = []
+
+    for cat in data.get("categories") or []:
+        for entry in cat.get("entries") or []:
+            found: list[dict] = []
+            seen: set[str] = set()
+            for variant in entry.get("variants") or []:
+                for d in extra_anim_packs(variant, cap=cap, ignore=ignore):
+                    if d in seen:
+                        continue
+                    seen.add(d)
+                    # Each pack is one skill: a single clip plus the particle
+                    # generators, meshes and sounds that go with it, under a
+                    # `main` routine. The clip id is recorded because it is not
+                    # unique across a set — Iroha's six packs use only four ids
+                    # (wz00, wz10, wz20, wz30, then wz00 and wz20 again), so
+                    # they cannot all be merged into one model.
+                    # npcs.json addresses DATs with backslashes, like `variants`.
+                    found.append({"path": back(d), "clips": anim_clip_ids(d)})
+            if not found:
+                if "anims" in entry:
+                    del entry["anims"]
+                    dropped += 1
+                continue
+            if entry.get("anims") == found:
+                continue
+            if "anims" in entry:
+                changed += 1
+            else:
+                added += 1
+            entry["anims"] = found
+            if len(samples) < 12:
+                samples.append(
+                    f"{entry.get('name')} → {len(found)} pack(s): "
+                    f"{found[0]['path']} {found[0]['clips']}…"
+                )
+
+    if (added or changed or dropped) and not dry_run:
+        _write_json(path, data, dry_run=False)
+
+    if dropped:
+        samples.append(f"cleared {dropped} entries that no longer resolve")
+
+    return {
+        "target": "npc-anims",
+        "file": str(path),
+        "added": added,
+        "changed": changed,
+        "wrote": bool((added or changed or dropped) and not dry_run),
+        "samples": samples,
+    }
+
+
 def update_file_ids(
     lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
     notify: Notify = _noop,
@@ -1591,7 +1716,7 @@ def update_file_ids(
 # so running them the other way round is safe too).
 ALL_TARGETS = (
     "gear", "gear-sets", "gear-labels", "music", "sfx", "zone-music", "effects",
-    "images", "npcs", "file-ids",
+    "images", "npcs", "npc-anims", "file-ids",
 )
 
 Updater = Callable[..., Report]
@@ -1649,6 +1774,9 @@ def run_updates(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t == "npcs":
             report = update_npcs(
+                lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
+        elif t in ("npc-anims", "npc_anims"):
+            report = update_npc_anims(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t in ("file-ids", "file_ids", "fileids"):
             report = update_file_ids(

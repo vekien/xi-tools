@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Rules for the npc-anims target, which stamps `anims` on an npcs.json entry",
+    "whose model borrows animation packs from elsewhere in the archive.",
+    "",
+    "A trust — a party NPC with a full player-style move set — does not carry",
+    "its combat clips in its own DAT. It declares them by reference: alongside",
+    "its own root FourCC the model DAT holds Directory (0x01) sections naming",
+    "other content families, and the packs are the DATs whose *root* FourCC is",
+    "one of those names. Both Iroha models (ROM/310/3, ROM/310/4) name 'iro_';",
+    "17 DATs have that root and the 6 carrying a SkeletonAnimation are",
+    "ROM/338/15 through ROM/338/20 — exactly the set found by hand.",
+    "",
+    "The section *type* is what makes this clean. Gear ids in the same DAT",
+    "(hf_1, hf_e, …) appear as SkeletonMesh/Texture and cait/corp as",
+    "EffectRoutines, so only real content families are typed Directory."
+  ],
+
+  "_maxFamilySizeComment": [
+    "A Directory id that names more DATs than this is a *shared* vocabulary",
+    "rather than one entity's own pack, and is skipped. Measured: 'iro_' (the",
+    "Iroha family) reaches 17 DATs; 'mot_', the race-wide motion set a goblin",
+    "declares, reaches 3658. Anything in between would want a look before the",
+    "number is moved."
+  ],
+  "maxFamilySize": 64,
+
+  "_ignoreDirIdsComment": [
+    "Directory ids that are never an entity's own pack, named outright. The",
+    "size cap already rejects 'mot_'; listing it as well keeps the intent",
+    "readable and gives somewhere to put a future exception that happens to",
+    "sit under the cap."
+  ],
+  "ignoreDirIds": ["mot_"]
+}

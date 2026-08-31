@@ -220,11 +220,37 @@
   "",
   "`showForActionGroups` are the action groups that count as in use. Both ranged",
   "skill groups are weapon skills; the plain ranged attack is not exposed as an",
-  "action in the current list, so it has nothing to trigger on yet."
+  "action in the current list, so it has nothing to trigger on yet.",
+  "",
+  "`handRef` is the skeleton joint-reference the mount bone is re-parented onto",
+  "while the weapon is drawn - 126 is the left hand, 127 the right (the same two",
+  "the main/sub grips use). A bow is held in the off hand, hence 126; flip it",
+  "here if a weapon class turns out to be held the other way round."
  ],
  "rangedDisplay": {
   "slot": "range",
-  "showForActionGroups": ["Archery", "Marksmanship"]
+  "showForActionGroups": ["Archery", "Marksmanship"],
+  "handRef": 126
+ },
+ "_groupLabelsComment": [
+  "Display names for the weapon-type `group` on a gear row. The raw value is",
+  "the item DB's skill name, which abbreviates some past readability ('Hand'",
+  "for hand-to-hand). Keys are that raw value lowercased with runs of",
+  "whitespace collapsed; a group with no entry here is shown as it is."
+ ],
+ "groupLabels": {
+  "hand": "Hand-to-hand",
+  "hand-to-hand": "Hand-to-hand"
+ },
+ "_groupLabelsComment": [
+  "Display names for the weapon-type `group` on a gear row. The raw value is",
+  "the item DB's skill name, which abbreviates some past readability ('Hand'",
+  "for hand-to-hand). Keys are that raw value lowercased with runs of",
+  "whitespace collapsed; a group with no entry here is shown as it is."
+ ],
+ "groupLabels": {
+  "hand": "Hand-to-hand",
+  "hand-to-hand": "Hand-to-hand"
  },
  "retiredSets": [
   "Limbus"

@@ -52,20 +52,28 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _SECTION_CAP = 4000
 
 
-def _walk_types(path: Path) -> tuple[str | None, frozenset[int]]:
-    """Seek-walk a DAT's section headers. Returns (first section FourCC, type codes).
+def _fourcc(raw: bytes) -> str:
+    """FourCC of a section header: its first four bytes, non-ASCII dotted."""
+    return "".join(chr(b) if 32 <= b < 127 else "." for b in raw[:4])
+
+
+def _walk_types(path: Path) -> tuple[str | None, frozenset[int], frozenset[str]]:
+    """Seek-walk a DAT's section headers.
+
+    Returns ``(first section FourCC, type codes, Directory-section FourCCs)``.
 
     Returns ``("\\x89PNG", frozenset())`` shaped output for raw PNG files (a few
     hundred icon DATs are plain PNGs with a .DAT extension, not section containers).
     """
     types: set[int] = set()
+    dirs: set[str] = set()
     first: str | None = None
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as f:
             head = f.read(16)
             if head.startswith(_PNG_MAGIC):
-                return "PNG", frozenset()
+                return "PNG", frozenset(), frozenset()
             pos = 0
             n = 0
             while pos + 16 <= size and n < _SECTION_CAP:
@@ -78,24 +86,33 @@ def _walk_types(path: Path) -> tuple[str | None, frozenset[int]]:
                 if sec_size <= 0:
                     break
                 if first is None:
-                    first = "".join(chr(b) if 32 <= b < 127 else "." for b in hdr[:4])
-                types.add(meta & 0x7F)
+                    first = _fourcc(hdr)
+                kind = meta & 0x7F
+                if kind == T_DIRECTORY:
+                    dirs.add(_fourcc(hdr))
+                types.add(kind)
                 n += 1
                 pos = (pos + sec_size + 15) & ~15
     except OSError:
-        return None, frozenset()
-    return first, frozenset(types)
+        return None, frozenset(), frozenset()
+    return first, frozenset(types), frozenset(dirs)
 
 
 class DatEntry:
     """One DAT on disk: its ROM-relative path, first FourCC and section types."""
 
-    __slots__ = ("dat", "fourcc", "types", "size")
+    __slots__ = ("dat", "fourcc", "types", "dirs", "size")
 
-    def __init__(self, dat: str, fourcc: str | None, types: frozenset[int], size: int):
+    def __init__(
+        self, dat: str, fourcc: str | None, types: frozenset[int],
+        size: int, dirs: frozenset[str] = frozenset(),
+    ):
         self.dat = dat          # 'ROM/17/72.DAT' — forward slashes, upper case
         self.fourcc = fourcc
         self.types = types
+        # FourCCs named by this DAT's Directory (0x01) sections — the other
+        # content families it pulls in. See :func:`extra_anim_packs`.
+        self.dirs = dirs
         self.size = size
 
     # ── kind predicates ────────────────────────────────────────────────────
@@ -152,12 +169,12 @@ def scan_dats() -> dict[str, DatEntry]:
                 continue
             for f in sub.glob("*.DAT"):
                 dat = f"{romdir.name}/{sub.name}/{f.stem}.DAT".upper()
-                fourcc, types = _walk_types(f)
+                fourcc, types, dirs = _walk_types(f)
                 try:
                     size = f.stat().st_size
                 except OSError:
                     size = 0
-                out[dat] = DatEntry(dat, fourcc, types, size)
+                out[dat] = DatEntry(dat, fourcc, types, size, dirs)
     return out
 
 
@@ -235,3 +252,103 @@ def fwd(p: str) -> str:
 def pretty(p: str) -> str:
     """'ROM/17/72.DAT' → 'ROM/17/72' (label-friendly)."""
     return re.sub(r"\.DAT$", "", norm(p), flags=re.I)
+
+
+# A Directory id naming more DATs than this is a *shared* vocabulary (the race
+# motion set 'mot_' reaches 3658 files), not one entity's own pack. Callers pass
+# their own limit; this is the default the npc-anims target ships with.
+_FAMILY_CAP = 64
+
+
+@lru_cache(maxsize=1)
+def _dats_by_root() -> dict[str, list[str]]:
+    """Every DAT grouped by its own root FourCC (the first section's name)."""
+    out: dict[str, list[str]] = {}
+    for dat, e in scan_dats().items():
+        if e.fourcc:
+            out.setdefault(e.fourcc, []).append(dat)
+    return out
+
+
+def extra_anim_packs(
+    dat: str, *, cap: int = _FAMILY_CAP, ignore: frozenset[str] = frozenset(),
+) -> list[str]:
+    """DATs holding extra animations for the entity model at ``dat``.
+
+    A trust — a party NPC with a full player-style move set — does not carry its
+    own combat clips. Its model DAT declares them by reference: alongside its
+    own root FourCC it holds **Directory (0x01)** sections naming other content
+    families, and the animation packs are the DATs whose *root* FourCC is one of
+    those names.
+
+    Both Iroha models (``ROM/310/3``, ``ROM/310/4``) name ``iro_``; 17 DATs have
+    that root and the 6 carrying a ``SkeletonAnimation`` are ``ROM/338/15``
+    through ``ROM/338/20`` — exactly the set found by hand. The type field is
+    what keeps this clean: gear ids in the same DAT (``hf_1``, ``hf_e``, …) are
+    SkeletonMesh/Texture sections and ``cait``/``corp`` are EffectRoutines, so
+    only real content families are typed Directory.
+
+    ``cap`` rejects shared vocabularies: a goblin names ``mot_``, the race-wide
+    motion set, which reaches thousands of DATs and belongs to no one entity.
+    """
+    key = norm(dat)
+    scan = scan_dats()
+    entry = scan.get(key)
+    if entry is None:
+        return []
+    by_root = _dats_by_root()
+
+    packs: list[str] = []
+    for did in sorted(entry.dirs):
+        if did == entry.fourcc or did in ignore:
+            continue
+        family = by_root.get(did) or []
+        if not family or len(family) > cap:
+            continue
+        for d in family:
+            if d == key:
+                continue
+            t = scan[d].types
+            # A pack that brings its own skeleton or mesh is a model in its own
+            # right, not a motion pack for this one.
+            if T_SKELETON in t or T_SKELETON_MESH in t:
+                continue
+            if T_SKELETON_ANIM in t:
+                packs.append(d)
+
+    fids = file_id_by_dat()
+    # File-id order is the order the client registers them, which is also the
+    # order the packs are meant to be layered.
+    return sorted(set(packs), key=lambda d: (fids.get(d, 1 << 30), d))
+
+
+def anim_clip_ids(dat: str) -> list[str]:
+    """Clip ids (SkeletonAnimation section names) in one DAT, in file order.
+
+    Reads the file rather than the cached header scan, which keeps only type
+    codes. Callers use it on the handful of packs :func:`extra_anim_packs`
+    returns, not across the archive.
+    """
+    path = Path(FFXI_DIR) / norm(dat)
+    out: list[str] = []
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            pos = 0
+            n = 0
+            while pos + 16 <= size and n < _SECTION_CAP:
+                f.seek(pos)
+                hdr = f.read(16)
+                if len(hdr) < 16:
+                    break
+                meta = struct.unpack_from("<I", hdr, 4)[0]
+                sec_size = ((meta >> 7) & 0xFFFFF) * 0x10
+                if sec_size <= 0:
+                    break
+                if (meta & 0x7F) == T_SKELETON_ANIM:
+                    out.append(_fourcc(hdr))
+                n += 1
+                pos = (pos + sec_size + 15) & ~15
+    except OSError:
+        return []
+    return out
