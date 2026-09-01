@@ -258,6 +258,7 @@ def update_gear(
     notify(f"comparing {len(races)} races against characters.json")
 
     added = 0
+    rods_added = 0
     skipped_missing = 0
     skipped_path_present = 0
     by_race: dict[str, int] = {}
@@ -326,6 +327,15 @@ def update_gear(
                 if len(samples) < 12:
                     samples.append(f"{rid}/{view_slot} mid {mid} → {path_out}")
 
+        # Fishing rods: rigged props the client keeps in its own per-race table
+        # (see gear.xi_core.FISHING_ROD_BASES), listed under Ranged so the look
+        # string and the Fishing action can pick them up. Path-deduped, so a
+        # rerun is a no-op.
+        rods = _append_fishing_rods(rid, gmap.get("lookRace"), slots, notify=notify)
+        added += rods
+        race_added += rods
+        rods_added += rods
+
         if race_added:
             by_race[rid] = race_added
 
@@ -338,11 +348,55 @@ def update_gear(
         "added": added,
         "skipped_missing_file": skipped_missing,
         "skipped_path_already_listed": skipped_path_present,
+        "fishing_rods": rods_added,
         "by_race": by_race,
         "samples": samples,
         "mid_cap": mid_cap,
         "wrote": bool(added) and not dry_run,
     }
+
+
+def _append_fishing_rods(
+    rid: str, look_race: int | None, slots: dict, *, notify: Notify = _noop,
+) -> int:
+    """Add one `rod: true` Ranged row per fishing rod the client can draw for
+    this race. Names come from gear_sets.json `fishingRods` (keyed by item
+    model id); the DAT from the client's rod table. Returns rows added."""
+    from xi.gear.xi_core import FISHING_ROD_MAX_MID, fishing_rod_file_id
+
+    names = _gear_sets_doc().get("fishingRods") or {}
+    if look_race is None or not names:
+        return 0
+    items = slots.setdefault("range", [])
+    existing_paths = {_norm_dat(p) for it in items for p in (it.get("paths") or [])}
+    by_fid = _dats_by_file_id(notify)
+    added = 0
+    for mid in range(1, FISHING_ROD_MAX_MID + 1):
+        name = names.get(str(mid))
+        if not name:
+            continue
+        fid = fishing_rod_file_id(look_race, mid)
+        dat = by_fid.get(fid) if fid is not None else None
+        if not dat:
+            continue
+        ndat = _norm_dat(dat)
+        if ndat in existing_paths:
+            continue
+        path_out = _path_out(ndat)
+        if not _file_exists(path_out):
+            continue
+        items.append({
+            "id": f"{len(items)}:{_dat_id_suffix(path_out)}",
+            "label": name,
+            "group": "Fishing",
+            "paths": [path_out],
+            "mid": mid,
+            "fileId": fid,
+            "rod": True,
+        })
+        existing_paths.add(ndat)
+        added += 1
+    return added
 
 
 # ── music.json ───────────────────────────────────────────────────────────────

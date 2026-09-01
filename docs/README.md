@@ -82,6 +82,7 @@ the `0x07` scheduler that cutscenes use to drive character motion.
 | [anim/schedule.md](anim/schedule.md) | `0x07` scheduler routines — what they are and how to author them |
 | [anim/emotes.md](anim/emotes.md) | Emote & skeleton-less DATs: base skeleton, overlay slots, routine duration |
 | [anim/quickref.md](anim/quickref.md) | One-page cheatsheet of common export/import/layer commands |
+| [anim/fishing.md](anim/fishing.md) | Fishing rods & hand props: the client's per-race rod table, rod DATs, dependent-actor playback, the logging hatchet, and how `xi mv update` / the viewer reproduce them |
 
 ---
 

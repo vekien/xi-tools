@@ -230,7 +230,37 @@
  "rangedDisplay": {
   "slot": "range",
   "showForActionGroups": ["Archery", "Marksmanship"],
+  "showForActions": ["Fishing"],
   "handRef": 126
+ },
+ "_fishingRodsComment": [
+  "Fishing rods, by item model id (item_equipment.MId; the +1 rods carry a",
+  "0x8000 flag that is masked off, giving 14 and 15). The gear target appends",
+  "one Ranged row per rod and race, resolved through FISHING_ROD_BASES (the",
+  "client's per-race rod table) rather than the race ranged table, which only",
+  "holds a stub for these ids. Rows carry `rod: true`: the viewer grafts the",
+  "rod's own rig onto the actor origin - the client spawns it as a second",
+  "actor at the character's position, and its clips carry it into the grip -",
+  "and shows it for the Fishing action via showForActions. Several rods share a",
+  "model; the label names the common one and lists the rest.",
+  "Mid 0 is the bait entry, left out."
+ ],
+ "fishingRods": {
+  "1": "Halcyon Rod (Composite / MMM Fishing Rod)",
+  "2": "Single-Hook Fishing Rod",
+  "3": "Clothespole",
+  "4": "Carbon Fishing Rod",
+  "5": "Glass Fiber Fishing Rod",
+  "6": "Tarutaru Fishing Rod",
+  "7": "Bamboo Fishing Rod",
+  "8": "Hume Fishing Rod (Fastwater Fishing Rod)",
+  "9": "Yew Fishing Rod",
+  "10": "Willow Fishing Rod",
+  "11": "Lu Shang's Fishing Rod (Judge's Rod)",
+  "12": "Goldfish Basket",
+  "13": "Ebisu Fishing Rod",
+  "14": "Lu Shang's Fishing Rod +1",
+  "15": "Ebisu Fishing Rod +1"
  },
  "_groupLabelsComment": [
   "Display names for the weapon-type `group` on a gear row. The raw value is",

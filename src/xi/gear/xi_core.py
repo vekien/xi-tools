@@ -25,6 +25,39 @@ LOOK_MODELTYPE = {0: 'standard', 1: 'equipped', 2: 'door', 3: 'elevator',
                   4: 'ship', 6: 'automaton', 7: 'chocobo'}
 
 
+# Fishing rods are not ranged-slot meshes. The race ranged tables map rod
+# model ids 1-15 to an empty 3-vertex stub, and the client instead spawns a
+# rigged rod entity (own 9-joint skeleton, fh00..fhd0 bend clips, the same
+# fsh0..fsh9 schedules the character plays) while fishing. FFXiMain holds one
+# base file id per look-race byte (u16 table at 0x369a8 in the retail DLL);
+# the rod's item model id (item_equipment.MId, 1-13, with the +1 rods at 14/15
+# once the 0x8000 flag is masked off) indexes it. Mid 0 is the bait entry and
+# points at a real rod too — the default the client shows with no rod.
+#
+#   0 -            39307 -> ROM/90/58    (Hume M block, reused)
+#   1 Hume M       39307 -> ROM/90/58
+#   2 Hume F       39339 -> ROM/90/70
+#   3 Elvaan M     39371 -> ROM/90/82
+#   4 Elvaan F     39403 -> ROM/90/94
+#   5 Tarutaru M   39435 -> ROM/90/106
+#   6 Tarutaru F   39435 -> (shared with 5)
+#   7 Mithra       39467 -> ROM/90/118
+#   8 Galka        39499 -> ROM/91/2
+FISHING_ROD_BASES = {
+    0: 39307, 1: 39307, 2: 39339, 3: 39371, 4: 39403,
+    5: 39435, 6: 39435, 7: 39467, 8: 39499,
+}
+FISHING_ROD_MAX_MID = 15
+
+
+def fishing_rod_file_id(look_race: int, mid: int) -> int | None:
+    """FTABLE file id of the rod model `mid` for a look-race byte, or None."""
+    base = FISHING_ROD_BASES.get(int(look_race))
+    if base is None or not (0 <= int(mid) <= FISHING_ROD_MAX_MID):
+        return None
+    return base + int(mid)
+
+
 def parse_look(blob) -> dict:
     """Decode a 20-byte FFXI ``look`` appearance blob (CatsEyeXI ``npc_list.look``).
 
