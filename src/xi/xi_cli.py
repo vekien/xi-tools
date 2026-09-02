@@ -577,6 +577,7 @@ server.add_command(server_cmds.npc_snapshot_cmd, 'npc-snapshot')   # bake the of
 # ── mv (xi-model-viewer list refresh) ─────────────────────────────────────────
 
 from xi.mv import xi_update as mv_update
+from xi.mv import xi_database as mv_database
 
 
 @cli.group()
@@ -586,6 +587,7 @@ def mv():
 
 
 mv.add_command(mv_update.cmd, "update")
+mv.add_command(mv_database.cmd, "database")
 
 
 if __name__ == "__main__":

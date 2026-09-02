@@ -38,3 +38,6 @@ zone-custom
 zone-data/
 !web/leveleditor/assets/**
 ghidra
+
+# `xi mv database` output (regenerable, ~50 MB)
+mv/db/
