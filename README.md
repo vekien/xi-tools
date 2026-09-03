@@ -90,6 +90,7 @@ See [`.env.sample`](.env.sample) for the full list.
 - Export / import for any graphics, UI, etc.
 - DDS ↔ PNG via `xi utils` / `xi tex`
 - UI texture extract/import (`sx`/`si`), layout position tweaks
+- `xi ui tex si` resizes edited PNGs to the size the game expects and keeps sprite rects in sync; `--hd` keeps textures above vanilla resolution; `gen-sheet` rebuilds the sprite-geometry sheet from pristine DATs
 
 ### FFXIMain / FTABLE patching
 
@@ -119,7 +120,16 @@ See [`.env.sample`](.env.sample) for the full list.
 - Collision mesh modifications
 - Object export/import/replace/clone/delete/set-placement/swap-placement
 - `xi zone new`, `make-template`, `scaffold-server`, `delete`, `footsteps`
+- `xi zone package` — bundle a custom zone with everything it needs into one deployable package
+- Template zones built from prototype geometry
+- Collision: export to OBJ, append authored blockers, strip or fully replace the mesh
 - FX inspect/set/copy/delete/export (zone particle & light generators)
+
+### Title / login screen
+
+- `xi title` — the login screen's zones, cameras and weather (`ROM/0/23.DAT`)
+- `list`, `timeline` (shot list per segment), `set-zone`, `weather`
+- `export` everything to one JSON; `camera export` / `import` round-trip the camera keyframes
 
 ### Navmesh
 
@@ -140,6 +150,11 @@ See [`.env.sample`](.env.sample) for the full list.
 - Event manipulation for cutscenes, dialog, custom NPCs
 - Cutscene export/import; dialogue actors, search, edit, reset
 - Event authoring / compile helpers under `xi event`
+
+### Model viewer lists
+
+- `xi mv update` — refresh [xi-model-viewer](https://github.com/vekien/xi-model-viewer)'s baked asset lists (gear, gear sets, music, images, NPCs, file ids), with `--only` and `--dry-run`
+- `xi mv database` — bake the viewer's Database tables to JSON
 
 ### Bulk actions & data
 
@@ -225,6 +240,7 @@ Full details: [docs/zone/navmesh.md](docs/zone/navmesh.md) · native lib notes:
 | [docs/README.md](docs/README.md) | Format docs + command deep-dives |
 | [docs/common_crashes.md](docs/common_crashes.md) | Client crash diagnosis after publishes |
 | [docs/zone/navmesh.md](docs/zone/navmesh.md) | Navmesh bake & server install |
+| [docs/zone/collision.md](docs/zone/collision.md) | Collision mesh format, authoring, and the client's winding rule |
 
 Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — WebGL2/Tauri asset browser (zones, NPCs, gear, VFX, audio, DAT inspector).
 
