@@ -73,10 +73,13 @@ def cmd(
     Effects: spell anim → file_id (0xAF0+anim) → FTABLE DAT; job abilities
     (4412+anim); weapon skills (4912+anim); spell-band orphan scan. Images and
     npcs classify DATs by their section types (textures-only vs skinned mesh)
-    and, for npcs, name them from mob_pools / npc_list. file-ids stamps the
-    reverse-FTABLE file_id onto every list row.
+    and, for npcs, name them from mob_pools / npc_list. zone-names pushes
+    curated overrides (xi.zone.xi_list.MOG_HOUSE_NAMES) onto matching zones.json
+    rows by path, e.g. mog houses the raw FTABLE scan can only name "dn00" or
+    similar. file-ids stamps the reverse-FTABLE file_id onto every list row.
 
-    floors / zones are not touched (manual).
+    floors, and a full zones.json regen (new/renamed named zones), are not
+    touched (manual — see `xi zone json --rooms --dev`).
 
     Copy curated base lists into mv/lists once; later runs append in place.
     """
@@ -84,7 +87,7 @@ def cmd(
 
     if only:
         targets = [t.strip().lower() for t in only.split(",") if t.strip()]
-        aliases = {"zone_music", "file_ids", "fileids", "gear_sets", "gear_labels"}
+        aliases = {"zone_music", "file_ids", "fileids", "gear_sets", "gear_labels", "zone_names"}
         bad = [t for t in targets if t not in ALL_TARGETS and t not in aliases]
         if bad:
             raise click.ClickException(

@@ -275,7 +275,10 @@ The table lives in `DEV_ZONES` (`src/xi/zone/xi_list.py`) — edit the names the
 | ROM/0/49 | Ship / airship room prototype? | `0x64` |
 
 `ROM/0/45` parses to zero meshes and zero placements — genuinely empty, so it is not
-listed. `ROM/0/50` is a Bastok mog-house room, not a dev map.
+listed. `ROM/0/50` was believed to be a Bastok mog-house room but doesn't load
+anything in-editor (2026-09) — it isn't one; the real Bastok mog houses are
+`ROM/1/22.DAT` (rental) and `ROM/1/46.DAT` (home nation), see `MOG_HOUSE_NAMES` in
+`src/xi/zone/xi_list.py`.
 
 The two layout traits are independent: ROM/0/46 uses retail-size placement records but
 chained mesh groups, while ROM/0/29 uses `0x54` records with a single mesh group. Detect

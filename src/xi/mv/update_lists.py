@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from xi.mv import dat_index
 from xi.xi_config import FFXI_DIR
+from xi.zone.xi_list import MOG_HOUSE_NAMES
 
 # Viewer race id → (xi gear table key, look race byte)
 RACE_MAP = {
@@ -1632,6 +1633,50 @@ def update_npc_anims(
     }
 
 
+def update_zone_names(
+    lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
+    notify: Notify = _noop,
+) -> Report:
+    """Push curated zone-name overrides (currently just the mog houses) onto zones.json.
+
+    Mog houses are private "Rooms" with no entry in the client's zone-name table (see
+    xi.zone.xi_list.get_room_entries), so a fresh zone scan names them from an internal
+    mesh name — often a shell shared across several rooms ("dn00") or the raw DAT path.
+    MOG_HOUSE_NAMES is the hand-verified source of truth; this only overwrites a row's
+    name when its path matches one of those entries, by path only, everything else
+    (ids, fileIds, custom zones) untouched.
+    """
+    p = lists_dir / "zones.json"
+    if not p.is_file():
+        if base_dir is None or not (base_dir / "zones.json").is_file():
+            return {"target": "zone-names", "error": "zones.json not found", "wrote": False}
+        p = base_dir / "zones.json"
+    notify("applying curated zone names")
+
+    data = _load_json(p)
+    changed = 0
+    samples: list[str] = []
+    for z in data:
+        raw = (z.get("path") or "").replace("game/", "", 1)
+        name = MOG_HOUSE_NAMES.get(raw)
+        if name and z.get("name") != name:
+            samples.append(f"{z.get('name')!r} -> {name!r} ({raw})")
+            z["name"] = name
+            changed += 1
+
+    if changed and not dry_run:
+        _write_json(lists_dir / "zones.json", data, dry_run=False)
+
+    return {
+        "target": "zone-names",
+        "file": str(lists_dir / "zones.json"),
+        "added": 0,
+        "corrected": changed,
+        "samples": samples[:8],
+        "wrote": bool(changed and not dry_run),
+    }
+
+
 def update_file_ids(
     lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
     notify: Notify = _noop,
@@ -1770,7 +1815,7 @@ def update_file_ids(
 # so running them the other way round is safe too).
 ALL_TARGETS = (
     "gear", "gear-sets", "gear-labels", "music", "sfx", "zone-music", "effects",
-    "images", "npcs", "npc-anims", "file-ids",
+    "images", "npcs", "npc-anims", "zone-names", "file-ids",
 )
 
 Updater = Callable[..., Report]
@@ -1831,6 +1876,9 @@ def run_updates(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t in ("npc-anims", "npc_anims"):
             report = update_npc_anims(
+                lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
+        elif t in ("zone-names", "zone_names"):
+            report = update_zone_names(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t in ("file-ids", "file_ids", "fileids"):
             report = update_file_ids(

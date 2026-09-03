@@ -141,6 +141,23 @@ DEV_ZONES: list[tuple[str, str]] = [
     ('ROM/0/49.DAT', 'Ship / airship room prototype?'),     # sroom_*, ship_roo
 ]
 
+# Hand-identified mog houses. These are private "Rooms" (see get_room_entries) with
+# no entry in the zone-name table, so they'd otherwise surface unnamed — their raw
+# path or an internal shell mesh name shared across several rooms (e.g. "dn00").
+#
+# ROM/1/20-23 (rental) and 45-47 (home nation): DATura lore/DAT crossref for Jeuno
+# (research/external/DATura, visually verified) plus community DAT lists (the
+# "Ultimate Moghouse Expansion" thread), user-confirmed in-editor 2026-09.
+MOG_HOUSE_NAMES: dict[str, str] = {
+    'ROM/1/20.DAT': 'Jeuno Mog House',
+    'ROM/1/21.DAT': "San d'Oria Mog House (rental)",
+    'ROM/1/22.DAT': 'Bastok Mog House (rental)',
+    'ROM/1/23.DAT': 'Windurst Mog House (rental)',
+    'ROM/1/45.DAT': "San d'Oria Mog House",
+    'ROM/1/46.DAT': 'Bastok Mog House',
+    'ROM/1/47.DAT': 'Windurst Mog House',
+}
+
 
 def get_dev_entries(path_prefix: str = 'game/') -> list[dict]:
     """Curated dev/prototype DATs (see DEV_ZONES), skipping any not on disk.
@@ -236,9 +253,17 @@ def get_room_entries(path_prefix: str = 'game/', _known_tables=None) -> list[dic
             if mesh_name is None:
                 continue  # not a zone DAT
 
-            # Fall back to "ROM/x/y" when the name is encrypted
-            display = mesh_name if mesh_name else dat.removesuffix('.DAT')
+            # Fall back to "ROM/x/y" when the name is encrypted; MOG_HOUSE_NAMES wins either way.
+            display = MOG_HOUSE_NAMES.get(dat) or (mesh_name if mesh_name else dat.removesuffix('.DAT'))
             rooms.append({'name': display, 'path': path_prefix + dat, 'group': 'Rooms'})
+
+    # Curated mog houses the strict probe above doesn't recognize as zone DATs.
+    for dat, name in MOG_HOUSE_NAMES.items():
+        if dat in seen_dats:
+            continue
+        if (Path(FFXI_DIR) / dat).is_file():
+            rooms.append({'name': name, 'path': path_prefix + dat, 'group': 'Rooms'})
+            seen_dats.add(dat)
 
     rooms.sort(key=lambda r: r['name'].lower())
     return rooms
