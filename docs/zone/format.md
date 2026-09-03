@@ -122,7 +122,19 @@ Each object record = **0x64 bytes** (full layout per xim `ZoneDefParser.parseZon
 | 0x48 | culling-table link (ds-relative offset to a culling table, or 0) |
 | 0x4C | environment link (4-byte DatId) |
 | 0x50 | **file-id link** (u32) — for a "closed building" placeholder, the **sub-area id** whose interior replaces it (0 = none); see [subareas.md](subareas.md) |
-| 0x54 | point-light indices (4×u32, 1-based; 0 = none) |
+| 0x54 | point-light indices (4×u32, 1-based into the light table below; 0 = none) — the ONLY lights that shine on this object |
+
+### Light table (`pointLightOff@0x18`)
+
+A fixed **256 × 0x4C** array (the client's `LightPool[256]`); each entry holds a point-light
+generator's FourCC @+0 (the rest is runtime pointer/params, zero in the file). On zone load the
+client pre-allocates one pool slot per listed id (`ZoneRenderer::SetupLightBindings`); a point-light
+0x05 generator (`StandardSetup` linked type `0x47` + `PointLightParams 0x58`) then finds its slot by
+its **own FourCC** (`CMoPointLightProgElem::InitLight`) — an id missing from the table returns -1 and
+the light is silently never created. Zone geometry is lit per placement through the four
+`LightReferences` @0x54 (max four lights per object, a D3D fixed-function limit). Copying a point
+light therefore needs (a) the new id in this table and (b) references from the placements it should
+light — `xi_apply_changes._register_point_lights` does both on VFX add.
 
 World transform = `translate(position) · rotateZYX(rotation) · scale(scale)`.
 LOD: an id ending `_l`/`_m`/`_h` selects a detail variant. Skybox/celestial

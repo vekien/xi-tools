@@ -95,6 +95,7 @@ run with `--debug` to confirm `all imported sections precede terminator: PASS`.
 | `modify` | Patch position and/or scale in the `0x05` section body |
 | `remove` | Splice the `0x05` section out entirely |
 | `add` | Duplicate an existing `0x05` section with a new FourCC and position |
+| `add` *(point light)* | A donor whose `StandardSetup` linked type is `0x47` / carries `PointLightParams 0x58` is a point light. The generator alone never lights anything in the client: the copy's FourCC is also written into the `0x1C` **light table** (header `+0x18`, 256 × 0x4C) and referenced from every placement whose transformed mesh bbox lies within the light's range (record `+0x54`, max four lights per object — objects already using all four are reported). See [format.md → Light table](format.md#light-table-pointlightoff0x18). |
 
 ---
 

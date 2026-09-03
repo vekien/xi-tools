@@ -61,7 +61,8 @@ from xi.zone.xi_import import _zero_placement
 from xi.zone.xi_zonedef import (add_placements, add_collision_transforms, add_to_culling_tables,
                                   assign_placements_to_nearest_leaf, expand_placement_bounds_points, parse_zonedef,
                                   hide_placement, remove_index_from_its_leaf, TRANSFORM_SIZE, TRANSFORM_CULLGROUP,
-                                  zonedef_record_size, record_block_id, clear_block_id)
+                                  zonedef_record_size, record_block_id, clear_block_id,
+                                  register_point_light, bind_light_to_object)
 from xi.fx.xi_core import (
     parse_sections as fx_parse_sections,
     EFFECT_TYPE,
@@ -975,9 +976,11 @@ def _apply_vfx_add_xzone(data: bytearray, src_id: str, new_id: str, pos, source_
     body[0:4] = new_id.encode("ascii", "replace")[:4].ljust(4)
     if pos is not None:
         dest_ccs = _mesh_fourccs(data, sections) | _texture_fourccs(data, sections) | dep_ccs
-        off = _pos_offset(bytes(body), dest_ccs)
+        off = _effect_pos_offset(bytes(body), dest_ccs)
         if off is not None:
             struct.pack_into("<3f", body, off, float(pos[0]), float(pos[1]), float(pos[2]))
+        else:
+            click.echo(f"[vfx] '{new_id}': no position field found — copy keeps the donor's position", err=True)
 
     anchor = next((s for s in sections if s.type_code == EFFECT_TYPE), None)
     at = (anchor.start + anchor.size) if anchor else len(data)
@@ -985,10 +988,149 @@ def _apply_vfx_add_xzone(data: bytearray, src_id: str, new_id: str, pos, source_
     return new_id
 
 
-def _apply_vfx_in_memory(data: bytearray, changes: list) -> dict:
-    """Apply VFX ops directly on a bytearray. Returns stats."""
+# StandardSetup (sec2 op 0x01) payload, after the op's 4-byte config dword:
+#   +0 billboardFlags u16, +2 renderStateFlags u16, +4 u32 0, +8 linkedDataId (4 chars),
+#   +12 f32 ~0, +16 basePosition (3×f32), +28 alloc u8, +29 linkedType u8 (0x47 = PointLight),
+#   +30 maxLifeSpan u16, +32 lifeSpanVariance u16.
+_SETUP_POS = 16
+_SETUP_LINKED_TYPE = 29
+_LINKED_TYPE_POINT_LIGHT = 0x47
+
+
+def _setup_pos_offset(body: bytes) -> Optional[int]:
+    """Body offset of the generator's base position: the StandardSetup payload +16. Works for
+    every generator kind, including point lights, which reference no mesh/texture FourCC
+    (the `_pos_offset` heuristic finds nothing there and used to leave them at the donor's
+    position on add and unmovable on modify)."""
+    if len(body) < 0x90:
+        return None
+    sec2 = struct.unpack_from("<I", body, 0x84)[0]
+    pos = sec2
+    while 0 < pos and pos + 4 <= len(body):
+        cfg = struct.unpack_from("<I", body, pos)[0]
+        opc, size = cfg & 0xFF, (cfg >> 8) & 0x1F
+        if opc == 0 or size == 0:
+            break
+        if opc == 0x01:
+            at = pos + 4 + _SETUP_POS
+            return at if at + 12 <= len(body) else None
+        pos += size * 4
+    return None
+
+
+def _effect_pos_offset(body: bytes, ccs: set) -> Optional[int]:
+    """Position offset for a generator: the resource-reference heuristic first, else the
+    StandardSetup base position (needed for point lights and other resource-less generators)."""
+    off = _pos_offset(body, ccs)
+    return off if off is not None else _setup_pos_offset(body)
+
+
+def _point_light_info(body: bytes) -> Optional[Tuple[Optional[Tuple[float, float, float]], float]]:
+    """``(position, range)`` when the 0x05 generator ``body`` is a point light — a
+    StandardSetup (sec2 op 0x01) whose linked type is 0x47 and/or a PointLightParams op
+    (0x58) — else None. Range falls back to 20 when the params op is absent."""
+    from xi.fx.xi_opcodes import decode_subsections
+    try:
+        subs = decode_subsections(bytes(body))
+    except Exception:
+        return None
+    if not subs:
+        return None
+    sec2 = subs.get("section2") or []
+    setup = next((o for o in sec2 if o.get("op") == "0x01"), None)
+    params = next((o for o in sec2 if o.get("op") == "0x58"), None)
+    pay = bytes.fromhex(setup["hex"]) if setup else b""
+    linked_point_light = len(pay) > _SETUP_LINKED_TYPE and pay[_SETUP_LINKED_TYPE] == _LINKED_TYPE_POINT_LIGHT
+    if params is None and not linked_point_light:
+        return None
+    pos = struct.unpack_from("<3f", pay, _SETUP_POS) if len(pay) >= _SETUP_POS + 12 else None
+    rng = 20.0
+    if params and params.get("floats"):
+        rng = float(params["floats"][0]) or 20.0
+    return pos, rng
+
+
+def _register_point_lights(data: bytearray, lights: list, table1: bytes, table2: bytes) -> dict:
+    """Make freshly added point-light generators actually light the zone: put each id in the
+    0x1C light table and reference it from every placement whose (transformed) mesh bbox
+    lies within the light's range. ``lights`` = [(fourcc, position, range)]. See
+    xi_zonedef.register_point_light for why the generator alone does nothing in-game."""
+    out = {"registered": 0, "bindings": 0, "table_full": [], "slots_full": {}}
+    sections = parse_sections(data)
+    zonedef = next((s for s in sections if s.type_code == SECTION_TYPE_ZONE_DEF), None)
+    if zonedef is None or not lights:
+        return out
+    bboxes = _mesh_bboxes(data, table1, table2)
+    node_count = decrypt_zone_objects(data, zonedef.data_start, zonedef.start, zonedef.size, table1)
+    sec = bytearray(data[zonedef.start:zonedef.start + zonedef.size])
+    zd = parse_zonedef(sec, 0x10, 0, len(sec))
+    rs = zd.record_size
+
+    # World-space AABB of every placement (mesh bbox through its TRS; origin when unknown).
+    aabbs = []
+    for i in range(node_count):
+        rec = 0x10 + 0x20 + i * rs
+        nm = sec[rec:rec + 0x10].split(b"\x00", 1)[0].decode("ascii", "replace").strip()
+        pos = struct.unpack_from("<3f", sec, rec + 0x10)
+        rot = struct.unpack_from("<3f", sec, rec + 0x1C)
+        scl = struct.unpack_from("<3f", sec, rec + 0x28)
+        if nm in bboxes:
+            pts = _bbox_points(bboxes[nm], pos, rot, scl)
+            lo = tuple(min(p[k] for p in pts) for k in range(3))
+            hi = tuple(max(p[k] for p in pts) for k in range(3))
+        else:
+            lo = hi = tuple(pos)
+        aabbs.append((nm, lo, hi))
+
+    for fourcc, lpos, rng in lights:
+        cc = fourcc.encode("ascii", "replace") if isinstance(fourcc, str) else bytes(fourcc)
+        ref = register_point_light(sec, cc, 0x10)
+        label = cc.decode("latin1").strip()
+        if ref is None:
+            click.echo(f"[vfx] point light '{label}': zone light table missing or full — the client will not create this light", err=True)
+            out["table_full"].append(label)
+            continue
+        out["registered"] += 1
+        if lpos is None:
+            _dbg(f"[vfx] point light '{label}' -> light table #{ref} (no position: bound to no object)")
+            continue
+        reach = max(float(rng) * 1.25 + 1.0, 4.0)
+        bound, full = [], []
+        for i, (nm, lo, hi) in enumerate(aabbs):
+            d2 = 0.0
+            for k in range(3):
+                gap = max(lo[k] - lpos[k], 0.0, lpos[k] - hi[k])
+                d2 += gap * gap
+            if d2 > reach * reach:
+                continue
+            if bind_light_to_object(sec, i, ref, 0x10, rs):
+                bound.append(nm)
+            else:
+                full.append(nm)
+        out["bindings"] += len(bound)
+        if full:
+            out["slots_full"][label] = full
+            click.echo(f"[vfx] point light '{label}': {len(full)} object(s) already use all 4 light slots, "
+                       f"not lit by it: {', '.join(sorted(set(full)))}", err=True)
+        _dbg(f"[vfx] point light '{label}' -> light table #{ref}, lights {len(bound)} object(s) within {reach:.1f}")
+
+    reencrypt_zone_objects(sec, 0x10, 0, len(sec), table1)
+    data[zonedef.start:zonedef.start + zonedef.size] = sec
+    return out
+
+
+def _apply_vfx_in_memory(data: bytearray, changes: list, table1: Optional[bytes] = None,
+                         table2: Optional[bytes] = None) -> dict:
+    """Apply VFX ops directly on a bytearray. Returns stats. With the key tables given,
+    newly added point lights are also registered in the 0x1C light table and bound to the
+    placements in range (without that the client never creates them)."""
     _dbg(f"[vfx] applying {len(changes)} op(s)")
     modified = removed = added = skipped = 0
+    added_ids: list[str] = []   # final fourccs of this run's adds (point lights get registered below)
+
+    def _note_added_light(final_id: str, _pos=None) -> None:
+        if final_id and final_id.strip() not in added_ids:
+            added_ids.append(final_id.strip())
     removed_fx_ids: set[str] = set()  # fourccs already fully removed this run
     reserved_remove_ids: set[str] = {str(ch.get("id", "")).strip() for ch in changes if ch.get("op") == "remove" and ch.get("id")}
 
@@ -1004,7 +1146,7 @@ def _apply_vfx_in_memory(data: bytearray, changes: list) -> dict:
                     continue
                 if ch.get("pos") is not None:
                     body = bytes(data[s.start: s.start + s.size])
-                    off = _pos_offset(body, mesh_ccs)
+                    off = _effect_pos_offset(body, mesh_ccs)
                     if off is not None:
                         struct.pack_into("<3f", data, s.start + off, *ch["pos"])
                         patched = True
@@ -1055,6 +1197,7 @@ def _apply_vfx_in_memory(data: bytearray, changes: list) -> dict:
                     final = _apply_vfx_add_xzone(data, src_id, new_id or "", pos, source_dat_rel, source_offset, reserved_remove_ids)
                     _dbg(f"[vfx] cross-zone add '{src_id}' from {source_dat_rel} → '{final}'")
                     added += 1
+                    _note_added_light(final, pos)
                 except (ValueError, FileNotFoundError) as e:
                     click.echo(f"[vfx] cross-zone add '{src_id}': {e}", err=True)
                     skipped += 1
@@ -1073,7 +1216,7 @@ def _apply_vfx_in_memory(data: bytearray, changes: list) -> dict:
             body = bytearray(data[src.start: src.start + src.size])
             body[0:4] = new_id.encode("ascii", "replace")[:4].ljust(4)
             if pos is not None:
-                off = _pos_offset(bytes(body), mesh_ccs)
+                off = _effect_pos_offset(bytes(body), mesh_ccs)
                 if off is not None:
                     struct.pack_into("<3f", body, off, *pos)
             # Insert after the first existing effect section
@@ -1081,6 +1224,7 @@ def _apply_vfx_in_memory(data: bytearray, changes: list) -> dict:
             at = (anchor.start + anchor.size) if anchor else len(data)
             data[at:at] = body
             added += 1
+            _note_added_light(new_id, pos)
 
         else:
             click.echo(f"[vfx] unknown op '{op}' — skipped", err=True)
@@ -1088,7 +1232,27 @@ def _apply_vfx_in_memory(data: bytearray, changes: list) -> dict:
 
     unique_removed = len(removed_fx_ids)
     _dbg(f"[vfx] {len(changes)} op(s) -> {unique_removed} unique fourcc(s) removed, {skipped} skipped")
-    return {"modified": modified, "removed": unique_removed, "added": added, "skipped": skipped}
+    stats = {"modified": modified, "removed": unique_removed, "added": added, "skipped": skipped}
+
+    # Point lights among this run's adds: register in the 0x1C light table and bind to the
+    # placements in range, using each generator's FINAL position (after any modify above).
+    new_lights: list = []
+    if added_ids:
+        sections_now = fx_parse_sections(data)
+        for fid in added_ids:
+            s = next((s for s in sections_now
+                      if s.type_code == EFFECT_TYPE and _fourcc(data, s.start).strip() == fid), None)
+            if s is None:
+                continue
+            info = _point_light_info(bytes(data[s.start:s.start + s.size]))
+            if info is not None:
+                new_lights.append((fid, info[0], info[1]))
+    if new_lights:
+        if table1 is None or table2 is None:
+            click.echo(f"[vfx] {len(new_lights)} point light(s) added without key tables — not registered in the light table", err=True)
+        else:
+            stats["lights"] = _register_point_lights(data, new_lights, table1, table2)
+    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -1365,7 +1529,7 @@ def apply_changes_data(dat_path: Path, changes: dict, debug: bool = False, use_h
         r["added"] += glb_added
         r["skipped"] += glb_skipped
     if vfx_changes:
-        results["vfx"] = _apply_vfx_in_memory(data, vfx_changes)
+        results["vfx"] = _apply_vfx_in_memory(data, vfx_changes, table1, table2)
     snd_changes = changes.get("sounds", [])
     if snd_changes:
         results["sounds"] = _apply_sounds_in_memory(data, snd_changes)

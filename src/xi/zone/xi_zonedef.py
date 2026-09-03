@@ -41,6 +41,9 @@ OBJ_ARRAY_START = 0x20          # objects begin at data_start + 0x20
 OBJ_BLOCK_ID = 0x34             # u32 FourCC: groups the parts of an animated multi-part object (doors)
 OBJ_DRAW_DISTANCE = 0x40        # float: engine stops drawing the object past this range
 OBJ_CULLING_LINK = 0x48         # u32 offset to a culling table (or 0)
+OBJ_LIGHT_REFS = 0x54           # 4×u32: 1-based indices into the light table @header+0x18 (0 = none)
+LIGHT_TABLE_ENTRIES = 256       # the light table is fixed-size (the client's LightPool[256])
+LIGHT_ENTRY_SIZE = 0x4C         # LightID FourCC @+0; the rest is runtime pointer/params, zero in the file
 NODE_SIZE = 0x80                # space-tree node: 8*vec3 + idxRef + count + 4 children + 2 zero
 NODE_IDXREF = 0x60
 NODE_IDXCOUNT = 0x64
@@ -98,6 +101,92 @@ def clear_block_id(sec: bytearray, index: int, ds: int = 0x10, record_size: int 
     editor, which ignores the field, shows them all. Every appended copy that is not
     deliberately a new part of that animated object must have this zeroed."""
     _pack32(sec, ds + OBJ_ARRAY_START + index * record_size + OBJ_BLOCK_ID, 0)
+
+
+# ---------------------------------------------------------------------------
+# Light table (header +0x18) and per-placement light references (+0x54)
+# ---------------------------------------------------------------------------
+# A zone point light is a 0x05 generator with a PointLight element (StandardSetup
+# linked type 0x47 / PointLightParams 0x58). The generator alone lights NOTHING:
+#   1. On zone load the client walks the 0x1C light table (256 × 0x4C entries, LightID
+#      FourCC @+0) and pre-allocates one LightPool slot per listed ID
+#      (ZoneRenderer::SetupLightBindings → GetOrAllocateLight).
+#   2. When the generator runs, CMoPointLightProgElem::InitLight searches the pool for a
+#      slot whose LightID == the GENERATOR's own FourCC. No slot → returns -1 → the light
+#      is silently never created.
+#   3. Zone geometry is lit per placement: each record's four LightReferences (+0x54,
+#      1-based table indices) select which pool lights are enabled while it draws
+#      (UpdateBlockLightSettings). At most FOUR lights per object — a D3D fixed-function limit.
+# So a copied/renamed point light must be added to the table AND referenced by the
+# placements it should light, or it is invisible in-game (the editor shows it regardless).
+
+def _light_table(sec, ds: int = 0x10) -> Optional[Tuple[int, int]]:
+    """(absolute offset of the light table, usable entry count) or None when the zone has
+    no table. The table sits at header+0x18 and runs to the collision block (or section end)."""
+    pl_rel = _u32(sec, ds + 0x18)
+    if not pl_rel:
+        return None
+    coll_rel = _u32(sec, ds + 0x08)
+    end_rel = coll_rel if coll_rel > pl_rel else (len(sec) - ds)
+    count = max(0, min(LIGHT_TABLE_ENTRIES, (end_rel - pl_rel) // LIGHT_ENTRY_SIZE))
+    return ds + pl_rel, count
+
+
+def light_table_ids(sec, ds: int = 0x10) -> List[bytes]:
+    """The light table's LightID FourCCs in table order (four zero bytes = empty slot)."""
+    lt = _light_table(sec, ds)
+    if lt is None:
+        return []
+    base, count = lt
+    return [bytes(sec[base + i * LIGHT_ENTRY_SIZE: base + i * LIGHT_ENTRY_SIZE + 4]) for i in range(count)]
+
+
+def register_point_light(sec: bytearray, fourcc: bytes, ds: int = 0x10) -> Optional[int]:
+    """Make sure ``fourcc`` (a point-light generator's id) is in the light table. Returns its
+    1-based index — the value a placement's LightReferences hold — or None when the zone has
+    no light table or every entry is taken. Reuses an existing entry with the same id."""
+    lt = _light_table(sec, ds)
+    if lt is None:
+        return None
+    base, count = lt
+    cc = bytes(fourcc)[:4].ljust(4, b" ")
+    free = None
+    for i in range(count):
+        at = base + i * LIGHT_ENTRY_SIZE
+        cur = bytes(sec[at:at + 4])
+        if cur == cc:
+            return i + 1
+        if free is None and cur == b"\0\0\0\0":
+            free = i
+    if free is None:
+        return None
+    at = base + free * LIGHT_ENTRY_SIZE
+    sec[at:at + LIGHT_ENTRY_SIZE] = bytes(LIGHT_ENTRY_SIZE)
+    sec[at:at + 4] = cc
+    return free + 1
+
+
+def object_light_refs(sec, index: int, ds: int = 0x10, record_size: int = OBJ_RECORD_SIZE) -> Tuple[int, int, int, int]:
+    """The placement's four 1-based light-table indices (0 = unused slot)."""
+    return struct.unpack_from("<4I", sec, ds + OBJ_ARRAY_START + index * record_size + OBJ_LIGHT_REFS)
+
+
+def bind_light_to_object(sec: bytearray, index: int, light_ref: int, ds: int = 0x10,
+                         record_size: int = OBJ_RECORD_SIZE) -> bool:
+    """Reference light-table entry ``light_ref`` (1-based) from placement ``index`` using its
+    first free LightReferences slot. True when bound (or already referenced); False when all
+    four slots are taken — the client cannot light one object with more than four lights."""
+    if record_size < OBJ_LIGHT_REFS + 16:
+        return False           # 0x54 proto records have no light references
+    at = ds + OBJ_ARRAY_START + index * record_size + OBJ_LIGHT_REFS
+    refs = list(struct.unpack_from("<4I", sec, at))
+    if light_ref in refs:
+        return True
+    for slot, v in enumerate(refs):
+        if v == 0:
+            _pack32(sec, at + slot * 4, light_ref)
+            return True
+    return False
 
 
 
