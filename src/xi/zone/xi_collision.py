@@ -915,8 +915,9 @@ def add_collision(sec: bytearray, tris: Sequence[AuthoredTri],
 
     def _build_cell_mesh(subset, flags, old_rel):
         """Build one RawMesh from a HOMOGENEOUS (all-wall or all-floor) tri subset, with
-        verts deduped within the mesh. ALWAYS emits back-to-back normal pairs (double-sided)
-        — single-sided tris crash this client. Floors orient the primary normal "up" first.
+        verts deduped within the mesh. ALWAYS emits each face as a pair of MIRROR twins
+        (opposite winding AND opposite normal, both retail-consistent) — single-sided tris
+        crash this client. Floors put the "up" facing first.
         Returns the RawMesh, or None if every tri was degenerate."""
         vidx: Dict[Tuple[float, float, float], int] = {}
         verts: List[Tuple[float, float, float]] = []
@@ -938,22 +939,30 @@ def add_collision(sec: bytearray, tris: Sequence[AuthoredTri],
                 # the collision normal during the swept-sphere test, so a zero normal ->
                 # NaN -> instant crash on zone load. Drop it (it blocks nothing anyway).
                 continue
-            nrm = _normalize(cx)
+            w = _normalize(cx)                      # winding cross product (v1-v0) x (v2-v1)
             a, b, c = vi(t.v0), vi(t.v1), vi(t.v2)
             f0, f1, f2, f3 = encode_tri_flags(t.hit_wall, t.terrain)
-            # ALWAYS emit BOTH facings (a back-to-back pair). A SINGLE-SIDED collision
-            # triangle crashes this client — verified in-game: every single-sided FLOOR
-            # config crashed (mesh flags 0/1, hit_wall 0/1) while the double-sided WALL
-            # always worked; flags/hit_wall were ruled out, leaving sidedness. Walls need
-            # both facings anyway (block from any approach); floors get the up facing FIRST
-            # (FFXI -Y) so the standable side is unambiguous, plus its back face.
-            if not t.hit_wall and nrm[1] > 0:
-                nrm = (-nrm[0], -nrm[1], -nrm[2])   # floor: orient primary normal "up" so you stand on top
-            normals = (nrm, (-nrm[0], -nrm[1], -nrm[2]))
-            for n in normals:
+            # Retail convention — EVERY triangle in every retail zone sampled (Lower Jeuno,
+            # rom/0/28, the mog-house template): the stored normal is ANTI-parallel to the
+            # winding's cross product (Direct3D clockwise-front), one facing per face. The
+            # client keys the solid side off the WINDING; the stored normal only has to agree.
+            # So emit each face as two MIRROR twins, (a,b,c) with -w and (a,c,b) with +w — each
+            # is retail-consistent, so a wall blocks from either approach and a floor is
+            # standable from above. (Flipping only the normal while keeping the winding, as
+            # earlier builds did, leaves the pair effectively single-sided on the winding's
+            # side: three.js boxes wind OUTWARD, so their only real facing pointed INTO the
+            # box and the player walked straight through it.) Pairs are still required — a
+            # SINGLE-SIDED collision triangle crashes this client (verified in-game: every
+            # single-sided FLOOR config crashed, mesh flags 0/1 x hit_wall 0/1). Floors put
+            # the "up" facing (negative FFXI-Y normal) first so the standable side is
+            # unambiguous.
+            facings = [((a, b, c), (-w[0], -w[1], -w[2])), ((a, c, b), w)]
+            if not t.hit_wall and facings[0][1][1] > 0:
+                facings.reverse()                   # floor: "up" facing first
+            for (i0, i1, i2), n in facings:
                 ni = len(norms)
                 norms.append(n)
-                mtris.append((a | (f0 << 12), b | (f1 << 12), c | (f2 << 12), ni | (f3 << 12)))
+                mtris.append((i0 | (f0 << 12), i1 | (f1 << 12), i2 | (f2 << 12), ni | (f3 << 12)))
 
         if not mtris:
             return None
@@ -963,9 +972,9 @@ def add_collision(sec: bytearray, tris: Sequence[AuthoredTri],
         # Segregate by surface, ONE mesh per kind (CollisionMeshHeader.Flags is per-mesh):
         # WALLS take the camera_transparent flag (visible walls = camera-transparent,
         # flags=1); FLOORS are flags=0 (camera-BLOCKING, like the ground). BOTH are emitted
-        # double-sided by _build_cell_mesh — a single-sided collision tri crashes this client
-        # (every single-sided floor config crashed in-game; the double-sided wall always
-        # worked), so floors get a back face too even though flags/hit_wall mark them floors.
+        # as mirror-twin pairs by _build_cell_mesh — a single-sided collision tri crashes this
+        # client (every single-sided floor config crashed in-game), so floors get a back face
+        # too even though flags/hit_wall mark them floors.
         walls = [t for t in cell_tris if t.hit_wall]
         floors = [t for t in cell_tris if not t.hit_wall]
         cell_meshes = []

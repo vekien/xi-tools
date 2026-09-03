@@ -224,16 +224,23 @@ confirmed in-game.
   meshes get `flags=1` (camera-transparent) by default or `flags=0` with
   `--camera-block`; **floor** meshes are always `flags=0` (camera-blocking, like
   the ground).
-- **Collision is one-sided at the plane test, but xi always emits double-sided
-  pairs.** The client's sphere-vs-plane test only blocks when the player is on the
-  side the triangle's stored **normal** points toward (verified in xim
-  `Collider.kt` — one-sided `RayPlaneCollider`; the winding is normalized to the
-  normal, so the normal alone decides). Real game walls store their normal toward
-  the *walkable* side, and solid walls are backed by a second face a few yalms
-  behind. `--add-collision` emits **every** face (walls **and** floors) as a
-  back-to-back normal pair — a single-sided collision tri crashes this client
-  (verified in-game on floors). Floors orient the primary normal up first
-  (negative FFXI-Y) so the standable side is unambiguous, then add the back face.
+- **Collision is one-sided, and the solid side is decided by the WINDING.** Every
+  triangle in every retail zone sampled (Lower Jeuno, rom/0/28, the mog-house
+  template — thousands of walls and floors) obeys one rule: the stored normal is
+  **anti-parallel** to the winding's cross product `(v1-v0)x(v2-v1)` (Direct3D
+  clockwise-front), one facing per face. The client blocks on the side opposite
+  the winding cross; the stored normal must agree with it (it drives the hit
+  response). Real game walls therefore wind so their normal faces the *walkable*
+  side, and solid walls are backed by a second, oppositely-wound face behind.
+  `--add-collision` emits **every** face (walls **and** floors) as a pair of
+  **mirror twins** — `(a,b,c)` with `-w` and `(a,c,b)` with `+w` — so each twin is
+  retail-consistent and the face blocks from either approach. Flipping only the
+  normal (what earlier builds did) leaves the pair single-sided on the winding's
+  side: three.js boxes wind outward, so their only real facing pointed *into* the
+  box and the player walked through. A single-sided collision tri crashes this
+  client (verified in-game on floors), so the pair is mandatory either way. Floors
+  put the up facing first (negative FFXI-Y normal) so the standable side is
+  unambiguous.
 - Codec: `src/xi/zone/xi_collision.py` — `parse_collision_raw` /
   `serialize_collision_raw` / `roundtrip_check` (byte-exact verified on 95
   real zone models).
