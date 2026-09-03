@@ -38,6 +38,7 @@ OBJ_RECORD_SIZE_PROTO = 0x54    # pre-production zones (ROM/0/29,31..42...): sam
                                 # name/pos/rot/scale fields packed tighter, and no
                                 # fileIdLink at +0x50. See docs/zone/prototype-zones.md.
 OBJ_ARRAY_START = 0x20          # objects begin at data_start + 0x20
+OBJ_BLOCK_ID = 0x34             # u32 FourCC: groups the parts of an animated multi-part object (doors)
 OBJ_DRAW_DISTANCE = 0x40        # float: engine stops drawing the object past this range
 OBJ_CULLING_LINK = 0x48         # u32 offset to a culling table (or 0)
 NODE_SIZE = 0x80                # space-tree node: 8*vec3 + idxRef + count + 4 children + 2 zero
@@ -75,6 +76,28 @@ class ZoneDef:
 
 def _u32(buf, pos) -> int:
     return struct.unpack_from("<I", buf, pos)[0]
+
+
+def record_block_id(sec, index: int, ds: int = 0x10, record_size: int = OBJ_RECORD_SIZE) -> int:
+    """The placement's BlockID FourCC @+0x34 (0 for an ordinary static object)."""
+    return _u32(sec, ds + OBJ_ARRAY_START + index * record_size + OBJ_BLOCK_ID)
+
+
+def clear_block_id(sec: bytearray, index: int, ds: int = 0x10, record_size: int = OBJ_RECORD_SIZE) -> None:
+    """Zero a placement's BlockID FourCC @+0x34 so the client renders it as an ordinary
+    static object.
+
+    A non-zero BlockID whose first byte is ``_`` or ``@`` marks one PART of an animated
+    multi-part object (a double door's two halves share e.g. ``_720``). The client
+    (``ZoneRenderer::SetRenderTypes`` / ``ZoneLayoutData::InitUnderscoreAtStructs``) pulls
+    every record with that FourCC OUT of the normal quad-tree render pass (RenderType 0)
+    and draws them through an ``UnderscoreAtStruct`` that holds at most FOUR parts — any
+    further record with the same FourCC is silently never drawn. A record cloned from such
+    a part (record 0 of the mog houses is a door half) therefore inherits the door's group:
+    the first two clones render (as door parts), the rest are invisible in-game while the
+    editor, which ignores the field, shows them all. Every appended copy that is not
+    deliberately a new part of that animated object must have this zeroed."""
+    _pack32(sec, ds + OBJ_ARRAY_START + index * record_size + OBJ_BLOCK_ID, 0)
 
 
 

@@ -114,7 +114,7 @@ Each object record = **0x64 bytes** (full layout per xim `ZoneDefParser.parseZon
 | 0x10 | position (3×f32) |
 | 0x1C | rotation (3×f32, radians) |
 | 0x28 | scale (3×f32) |
-| 0x34 | effect link (4-byte DatId; 0 = none) |
+| 0x34 | **BlockID** (FourCC; 0 = ordinary static object). Non-zero + first byte `_`/`@` = one part of an animated multi-part object (a mog-house double door's halves both carry `_720`). The client takes such records OUT of the normal quad-tree pass (`RenderType 0`) and draws the group via an `UnderscoreAtStruct` of at most **four** parts — a fifth record with the same FourCC is never drawn. Cloned records must zero it (`xi_zonedef.clear_block_id`). |
 | 0x38 | high-def LOD threshold (f32) |
 | 0x3C | mid-def LOD threshold (f32) |
 | 0x40 | **draw distance** (f32) — engine stops drawing past this range (~1=interior, 1000=buildings) |

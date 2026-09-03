@@ -829,7 +829,7 @@ def import_object(dat_path: Path, glb_path: Path, mesh_name: str,
 
         from xi.zone.xi_zonedef import (parse_zonedef, expand_placement_bounds_points,
                                           add_collision_transforms, add_to_culling_tables,
-                                          OBJ_ARRAY_START, OBJ_RECORD_SIZE, OBJ_DRAW_DISTANCE)
+                                          OBJ_ARRAY_START, OBJ_RECORD_SIZE, OBJ_DRAW_DISTANCE, OBJ_BLOCK_ID)
         from xi.zone.xi_apply_changes import _bbox_points
         from xi.zone.xi_mesh import _bbox as _mesh_bbox
         from xi.zone.xi_export import trs_matrix
@@ -890,6 +890,11 @@ def import_object(dat_path: Path, glb_path: Path, mesh_name: str,
         #     it high so a placed object stays visible at range. Tunable via --draw-distance.
         new_rec = 0x10 + OBJ_ARRAY_START + new_index * OBJ_RECORD_SIZE
         struct.pack_into("<f", new_sec, new_rec + OBJ_DRAW_DISTANCE, float(draw_distance))
+        #     A brand-new static object must not inherit the template's BlockID@0x34: when the
+        #     anchor falls back to the nearest record and that is a door half (mog houses),
+        #     the copy would join the door's animated group, which the client caps at four
+        #     drawn parts (see xi_zonedef.clear_block_id).
+        struct.pack_into("<I", new_sec, new_rec + OBJ_BLOCK_ID, 0)
 
         # (4a) Grow the per-object collision-transform array to match the bumped object
         #      count (it's indexed 1:1 by object index). Without this the new index reads

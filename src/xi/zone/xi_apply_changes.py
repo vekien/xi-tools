@@ -61,7 +61,7 @@ from xi.zone.xi_import import _zero_placement
 from xi.zone.xi_zonedef import (add_placements, add_collision_transforms, add_to_culling_tables,
                                   assign_placements_to_nearest_leaf, expand_placement_bounds_points, parse_zonedef,
                                   hide_placement, remove_index_from_its_leaf, TRANSFORM_SIZE, TRANSFORM_CULLGROUP,
-                                  zonedef_record_size)
+                                  zonedef_record_size, record_block_id, clear_block_id)
 from xi.fx.xi_core import (
     parse_sections as fx_parse_sections,
     EFFECT_TYPE,
@@ -624,10 +624,9 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
     # copied meshes/textures come from the HD source zone (see _import_zone_mesh_sections).
     xzone = [ch for ch in changes if ch.get("op") == "add" and ch.get("sourceZone")
              and _norm_zone_rel(ch.get("sourceZone")) != _norm_zone_rel(dest_zone_rel)]
-    source_cull: dict = {}
     name_map: dict = {}
     if xzone:
-        source_cull, name_map = _import_zone_mesh_sections(data, xzone, table1, table2, use_hd=use_hd)
+        _, name_map = _import_zone_mesh_sections(data, xzone, table1, table2, use_hd=use_hd)
 
     sections = parse_sections(data)
     zonedef = next((s for s in sections if s.type_code == SECTION_TYPE_ZONE_DEF), None)
@@ -674,6 +673,14 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
     modified_positions = []
     modified_bounds = []
     adds = []  # (src_index, pos, rot, scale, name) for add_placements
+    xzone_adds: list[int] = []  # positions in `adds` that are cross-zone copies (BlockID must be cleared)
+    # Template record for a cross-zone copy whose mesh has no placement yet: the first
+    # ORDINARY static object, never a part of an animated group (BlockID@0x34 != 0). Record 0
+    # of the mog houses is a door half carrying '_720' — cloning it made every copy a door
+    # part, and the client draws at most four parts per group (see clear_block_id).
+    static_template = next((i for i in range(node_count)
+                            if _read_name(data, zonedef.data_start, i)
+                            and record_block_id(data, i, zonedef.data_start, zd.record_size) == 0), 0)
     for ch in changes:
         op = ch.get("op")
         name = ch.get("name", "")
@@ -686,14 +693,15 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
                 click.echo(f"[placement] '{name}' mesh import failed — skipped", err=True)
                 skipped += 1
             else:
-                adds.append((name_to_index.get(target_name, 0),
+                xzone_adds.append(len(adds))
+                adds.append((name_to_index.get(target_name, static_template),
                              tuple(ch["pos"]),
                              tuple(ch["rot"]) if ch.get("rot") else (0.0, 0.0, 0.0),
                              tuple(ch["scale"]) if ch.get("scale") else (1.0, 1.0, 1.0),
                              target_name))
                 added += 1
                 _dbg(f"cross-zone add '{source_name}' -> '{target_name}'"
-                     f"  template={'self' if name_to_index.get(target_name) is not None else 'idx0'}"
+                     f"  template=idx{name_to_index.get(target_name, static_template)}"
                      f"  bbox={'found' if target_name in bboxes else 'MISSING'}")
             continue
         idx = name_to_index.get(name)
@@ -797,32 +805,22 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
             base_index = node_count  # new records are appended after the existing array
             sec = add_placements(sec, adds, register_in_tree=True)
             zd3 = parse_zonedef(sec, 0x10, 0, len(sec))
+            # A cross-zone copy is a plain static object: it must not inherit its template's
+            # BlockID (animated-group FourCC), or the client hides every copy past the
+            # group's fourth part — the "barrel shows, fence doesn't" bug.
+            for k in xzone_adds:
+                clear_block_id(sec, base_index + k, 0x10, zd3.record_size)
             xform_entries = []
             for k, (src, pos, rot, scale, nm) in enumerate(adds):
                 # Widen the space-tree leaf to the full transformed mesh bbox (broad-phase).
                 if nm in bboxes:
                     points = _bbox_points(bboxes[nm], pos, rot, scale)
                     expand_placement_bounds_points(sec, zd3, base_index + k, points)
-                xform_entries.append((src, trs_matrix(pos, rot, scale)))
+                xform_entries.append((src, trs_matrix(pos, rot, scale), bboxes.get(nm)))
             # Full visibility registration (same four structures as import-object): the
             # per-object collision transform + culling-table (PVS) membership. Without these
             # a duplicated object vanishes depending on camera position. See docs/zone/object/import.md.
             sec = add_collision_transforms(sec, xform_entries)
-            # Patch collision transform tails with source-zone mesh geometry data.
-            # Bytes 0x80-0xBF encode mesh-local culling bounds (Y extent, etc.) that
-            # differ per mesh type.  Using the wrong template (e.g. block03 for a boat)
-            # places the object in the wrong spatial bucket → invisible in-game.
-            if source_cull:
-                zd_patched = parse_zonedef(sec, 0x10, 0, len(sec))
-                coll_rel_p = zd_patched.header_offsets.get("collision", 0)
-                if coll_rel_p:
-                    cb_p = 0x10 + coll_rel_p
-                    t_rel_p = struct.unpack_from("<I", sec, cb_p + 0x14)[0]
-                    tbase_p = 0x10 + t_rel_p
-                    for k, (_, _, _, _, nm) in enumerate(adds):
-                        if nm in source_cull:
-                            t_off = tbase_p + (base_index + k) * TRANSFORM_SIZE
-                            sec[t_off + 0x80: t_off + TRANSFORM_SIZE] = source_cull[nm]
             for k in range(len(adds)):
                 sec = add_to_culling_tables(sec, base_index + k)
 
