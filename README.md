@@ -244,6 +244,7 @@ This project is **heavily AI-assisted**. If you are an LLM helping with xi-tools
 
 | Path | What it is |
 |------|------------|
+| `.claude/skills/xitool/SKILL.md` | **Start here** — agent skill: FFXI quirks (Y-down, correction node, scale, FTABLE), common commands, and where each doc/module lives |
 | `src/xi/` | Python package — all CLI tools live here |
 | `src/xi/xi_cli.py` | Top-level Click CLI entry (`xi` command groups) |
 | `docs/` | Format specs + command deep-dives (read these before guessing binary layouts) |

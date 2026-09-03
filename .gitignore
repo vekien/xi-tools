@@ -5,7 +5,8 @@
 *.glb
 *.gltf
 *.py[cod]
-.claude
+.claude/*
+!.claude/skills/
 .DS_Store
 .env
 .idea
