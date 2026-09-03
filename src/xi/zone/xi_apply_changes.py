@@ -923,12 +923,24 @@ def _apply_vfx_add_xzone(data: bytearray, src_id: str, new_id: str, pos, source_
         if reserved_names:
             used |= {nm.ljust(4)[:4] for nm in reserved_names if nm}
         src_name = src_id.strip()
-        if src_name and src_name not in used:
+        if src_name.startswith("~"):
+            # A '~' FourCC marks a WEATHER particle generator (Xarcabard snow '~101', rain, …).
+            # The client (CYyGenerator ctor) derives weather-gating bits from that prefix: the
+            # generator only draws while the weather-effects config scalar is non-zero and its
+            # burst count is cut to 30%. Pasted as an ambient effect it must not carry the
+            # prefix, so name the copy from the rest of the id ('~101' → 'w101').
+            src_name = ("w" + src_name[1:])[:4]
+            if src_name in used:
+                src_name = _auto_name(src_name, used) or ""
+                src_name = src_name.strip()
             new_id = src_name
-        else:
-            new_id = _auto_name(src_id, used)
-            if not new_id:
-                raise ValueError(f"could not pick a free effect id for '{src_id}'")
+        if not new_id:
+            if src_name and src_name not in used:
+                new_id = src_name
+            else:
+                new_id = _auto_name(src_id, used)
+        if not new_id:
+            raise ValueError(f"could not pick a free effect id for '{src_id}'")
 
     # Dependency sections: reuse exact byte-identical matches already in the destination,
     # but when a source dep reuses an EXISTING FourCC for DIFFERENT content (common with
