@@ -4379,6 +4379,25 @@ def _export(params: dict) -> dict:
     results = apply_changes_data(dat, apply_changes, debug=bool(params.get("debug")), use_hd=use_hd,
                                  cancel=cancel)
 
+    # Pasted effects (vfx op:add with source_dat) are auto-named at apply time ('l_01' → 'l_00').
+    # Pin that id into the persisted change-set so every later publish re-creates the copy under
+    # the SAME id, and hand the ids back so the editor can tie each baked copy to its add op
+    # (changes-tracker adopts by id instead of guessing by position — that guess failed for
+    # point lights and left duplicate entries + orphaned `modify` ops on the auto-named id).
+    add_ids = []
+    for ch_save, ch_apply in zip(changes.get("vfx") or [], apply_changes.get("vfx") or []):
+        if ch_apply.get("op") != "add" or not ch_apply.get("new_id"):
+            continue
+        if ch_save.get("new_id") != ch_apply["new_id"]:
+            ch_save["new_id"] = ch_apply["new_id"]
+        add_ids.append({"ts": ch_save.get("ts"), "name": ch_save.get("name"), "new_id": ch_apply["new_id"]})
+    if add_ids:
+        (d / "zone-changes.json").write_text(json.dumps(changes, indent=2), encoding="utf-8")
+        if isinstance(results.get("vfx"), dict):
+            results["vfx"]["addIds"] = add_ids
+        else:
+            results["vfx"] = {"addIds": add_ids}
+
     # Apply each touched interior DAT in its own pass (modify-only this iteration; adds/deletes to
     # interiors are guarded editor-side). Counts roll into the top-line placement totals + a
     # per-interior breakdown for the publish console.

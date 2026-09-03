@@ -94,7 +94,7 @@ run with `--debug` to confirm `all imported sections precede terminator: PASS`.
 |---|---|
 | `modify` | Patch position and/or scale in the `0x05` section body |
 | `remove` | Splice the `0x05` section out entirely |
-| `add` | Duplicate an existing `0x05` section with a new FourCC and position |
+| `add` | Duplicate an existing `0x05` section with a new FourCC and position. With `source_dat` (+ `source_offset`) the donor comes from another zone DAT together with its dependency sections (textures, meshes, SeSep). `new_id` is optional: when absent the copy is auto-named (`l_01` → `l_00`) and the bridge **pins that id back into the change-set's op** (`_export`), so every later reset-from-pristine publish re-creates the copy under the same id and the editor can adopt the baked copy by id on reload (a pinned id that already exists in a non-reset target falls back to a fresh one). |
 | `add` *(point light)* | A donor whose `StandardSetup` linked type is `0x47` / carries `PointLightParams 0x58` is a point light. The generator alone never lights anything in the client: the copy's FourCC is also written into the `0x1C` **light table** (header `+0x18`, 256 × 0x4C) and referenced from every placement whose transformed mesh bbox lies within the light's range (record `+0x54`, max four lights per object — objects already using all four are reported). See [format.md → Light table](format.md#light-table-pointlightoff0x18). |
 
 ---

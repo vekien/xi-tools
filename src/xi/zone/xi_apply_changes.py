@@ -912,6 +912,12 @@ def _apply_vfx_add_xzone(data: bytearray, src_id: str, new_id: str, pos, source_
         raise ValueError(f"effect '{src_id}' not found in {source_dat_rel}")
 
     sections = fx_parse_sections(data)
+    if new_id and new_id.strip() in {_fourcc(data, s.start).strip() for s in sections if s.type_code == EFFECT_TYPE}:
+        # A pinned id (see _export: new_id) is only free on a reset-from-pristine publish. Applying
+        # onto a DAT that already holds the copy would give two generators the same FourCC — for a
+        # point light both would drive one pool light — so fall back to a fresh id.
+        click.echo(f"[vfx] '{new_id}' already exists in the destination — picking a fresh id for this copy", err=True)
+        new_id = ""
     if not new_id:
         used = {_fourcc(data, s.start) for s in sections}
         if reserved_names:
@@ -1134,7 +1140,14 @@ def _apply_vfx_in_memory(data: bytearray, changes: list, table1: Optional[bytes]
     removed_fx_ids: set[str] = set()  # fourccs already fully removed this run
     reserved_remove_ids: set[str] = {str(ch.get("id", "")).strip() for ch in changes if ch.get("op") == "remove" and ch.get("id")}
 
-    for ch in changes:
+    # Removes, then adds, then modifies (stable within each phase). The editor records a move
+    # of a generator it copied in an EARLIER publish as a `modify` of the id that copy was
+    # auto-named at publish time (e.g. 'l_02') — that id only exists once this run's `add`
+    # has re-created it, so modifies must run last or the move is silently dropped.
+    _PHASE = {"remove": 0, "add": 1, "modify": 2}
+    ordered = sorted(changes, key=lambda ch: _PHASE.get(ch.get("op"), 3))
+
+    for ch in ordered:
         op = ch.get("op")
         if op == "modify":
             fx_id = ch.get("id", "")
@@ -1197,6 +1210,7 @@ def _apply_vfx_in_memory(data: bytearray, changes: list, table1: Optional[bytes]
                     final = _apply_vfx_add_xzone(data, src_id, new_id or "", pos, source_dat_rel, source_offset, reserved_remove_ids)
                     _dbg(f"[vfx] cross-zone add '{src_id}' from {source_dat_rel} → '{final}'")
                     added += 1
+                    ch["new_id"] = final   # read back by _export to pin the id in the change-set
                     _note_added_light(final, pos)
                 except (ValueError, FileNotFoundError) as e:
                     click.echo(f"[vfx] cross-zone add '{src_id}': {e}", err=True)
