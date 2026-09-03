@@ -549,12 +549,12 @@ class BridgeServer:
                 self._buf += s
                 while "\n" in self._buf:
                     line, self._buf = self._buf.split("\n", 1)
-                    log_line(line + "\n")
+                    log_line(line.rstrip("\r"))
                 return len(s)
             def flush(self):
                 self._real.flush()
                 if self._buf:
-                    log_line(self._buf)
+                    log_line(self._buf.rstrip("\r"))
                     self._buf = ""
 
         old_out, old_err = sys.stdout, sys.stderr
