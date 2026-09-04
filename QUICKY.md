@@ -189,6 +189,7 @@ xi audio export
 xi audio decode
 xi audio info
 xi audio refs
+xi audio scan
 xi audio import
 xi audio install
 

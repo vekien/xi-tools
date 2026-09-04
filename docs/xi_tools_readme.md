@@ -179,12 +179,14 @@ decode in pure Python, **byte-for-byte identical to vgmstream**; ATRAC3 routes t
 - `uv run xi audio decode FILE…` ([docs](audio/README.md)) — Decode explicit `.bgw`/`.spw` paths to `.wav`
 - `uv run xi audio info FILE` ([docs](audio/README.md)) — Dump a file's parsed header
 - `uv run xi audio refs <dat>` ([docs](audio/refs.md)) — List the sounds a DAT references (spell VFX, zone ambient, mob) → JSON
+- `uv run xi audio scan` ([docs](audio/scan.md)) — Walk **every** DAT: where each sound is used, and whether that DAT is a zone / NPC / spell / gear … → JSON
 - `uv run xi batch audio_music` / `audio_sfx` ([docs](audio/README.md)) — Decode **all** music / sfx + write a categorised `catalog.json`
 
 #### References
 
 - [audio/format.md](audio/format.md) — `.bgw`/`.spw` binary format, ADPCM codec, and the byte-exact gotchas
 - [audio/refs.md](audio/refs.md) — the `0x3D` SoundEffectPointer system: how the game links sounds to effects/zones
+- [audio/scan.md](audio/scan.md) — the whole-install sound usage map and how each DAT is identified
 - [sounds/footsteps.md](sounds/footsteps.md) — terrain type → footstep sound + decal
 
 ## EVENT DIALOGUE

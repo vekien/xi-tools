@@ -10,6 +10,7 @@ external tools). ATRAC3 (~36% of music) is routed to `vgmstream-cli` when presen
 - Binary format + codec internals: [format.md](format.md)
 - Opening movie (`.pmv` / `PMUS` → MPEG-2, companion WAV): [pmv.md](pmv.md)
 - Finding which sounds a DAT uses (`0x3D`): [refs.md](refs.md)
+- Where every sound is used, across every DAT: [scan.md](scan.md)
 
 ## Commands
 
@@ -22,6 +23,7 @@ external tools). ATRAC3 (~36% of music) is routed to `vgmstream-cli` when presen
 | `uv run xi audio decode FILE…` | Decode explicit `.bgw`/`.spw` paths to `.wav` |
 | `uv run xi audio info FILE` | Dump a file's parsed header |
 | `uv run xi audio refs <dat>` | List the sounds a DAT references → JSON ([refs.md](refs.md)) |
+| `uv run xi audio scan` | Walk every DAT: where each sound is used + what that DAT is (zone / NPC / spell / gear …) → JSON ([scan.md](scan.md)) |
 | `uv run xi audio import FILE` | Encode audio → custom **`.spw` only** (sfx; music encode is library-only, not CLI) |
 | `uv run xi audio install FILE` | Convert and install a sound as **`.spw`** under `win/se/seNNN/seNNNNNN.spw` |
 | `uv run xi batch audio_music` | Decode **all** music + write `catalog.json` |

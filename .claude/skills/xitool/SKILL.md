@@ -224,6 +224,7 @@ xi object json ROM/1/41               # every placement
 xi anim list ROM/5/3                  # tracks: name, frames, joints
 xi tex json ROM/1/41 / xi ui tex list
 xi audio refs ROM/1/41                # which sounds a DAT references
+xi audio scan [--sound 5048]          # every DAT: where each sound is used + what that DAT is
 ```
 
 ### Entity mesh round trip

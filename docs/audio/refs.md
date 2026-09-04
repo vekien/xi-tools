@@ -111,6 +111,7 @@ every sound that effect plays.
 
 ## See also
 
+- [scan.md](scan.md) — the inverse question across every DAT: where is each sound used?
 - [format.md](format.md) — the `.bgw`/`.spw` binary format and codec
 - [README.md](README.md) — the full `xi audio` command set
 - [../fx/spells.md](../fx/spells.md) — spell → animation DAT resolution

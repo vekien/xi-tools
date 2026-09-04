@@ -14,6 +14,7 @@ from xi.audio    import xi_music          as audio_music
 from xi.audio    import xi_sfx            as audio_sfx
 from xi.audio    import xi_decode         as audio_decode
 from xi.audio    import xi_refs           as audio_refs
+from xi.audio    import xi_scan           as audio_scan
 from xi.audio    import xi_encode         as audio_encode
 from xi.batch    import xi_batch         as batch_cmds
 from xi.ftable   import xi_expand as expand, xi_lookup as lookup, xi_range_scan as range_scan
@@ -159,6 +160,7 @@ audio.add_command(xi_simplified.audio_export_cmd, 'export')
 audio.add_command(audio_decode.decode_cmd, 'decode')
 audio.add_command(audio_decode.info_cmd,   'info')
 audio.add_command(audio_refs.refs_cmd,     'refs')
+audio.add_command(audio_scan.scan_cmd,     'scan')
 audio.add_command(audio_encode.import_cmd, 'import')
 audio.add_command(audio_encode.install_cmd, 'install')
 

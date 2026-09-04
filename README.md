@@ -143,7 +143,7 @@ See [`.env.sample`](.env.sample) for the full list.
 
 - Music + SFX export
 - Search/catalog, decode/encode BGW/SPW, install into the game tree
-- DAT sound-reference inspection (`xi audio refs`)
+- DAT sound-reference inspection (`xi audio refs`), whole-install usage map (`xi audio scan`)
 
 ### Events & dialogue
 
