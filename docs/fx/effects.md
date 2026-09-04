@@ -302,6 +302,31 @@ From the fan decompile `thirdparty/xiclient` (a reverse-engineering effort — a
   linked from the `funsui` `0x1C` placement record — that record's effect-link
   field (`+0x34`) is `0` (the floats there are LOD distances 10/100/80).
 
+## Zone object animation (generator-bound placements)
+
+Moving zone props — windmill blades, scrolling lava sheets, pulsing lights — are ordinary
+`0x2E` meshes with a `0x1C` placement whose **BlockID (`+0x34`) names a `0x05` generator**.
+The client skips such records in its normal pass and lets the generator draw the mesh:
+`StandardSetup` (sec2 `0x01`) links the mesh (`StaticMesh` `0x0B`) and holds the base
+position, sec2 `0x09` the rotation, and the motion opcodes do the rest. The minimal
+spinning-object generator (Rabao `f001`, 320 bytes) is:
+
+```
+header    autoRun (genFlags 0x10), framesPerEmission 1, particlesPerEmission 0
+sec2      0x01 StandardSetup  link "de_7", basePos (−38.0, −4.45, 51.8), lifespan 0 (= forever)
+          0x09 Rotation       (0, 0.244, 0)         ← the placement's yaw
+          0x0B RotationVelocity (0, 0, 0.0122)      ← radians per 60 Hz frame, local Z
+          0x0F Scale (1,1,1)  0x1E BlendFunc 0x44   0x16 Color 80 80 80 80
+sec3      0x05 RotationUpdater                      ← rotation += velocity every frame
+```
+
+So "make our own animation" = place the mesh, clone a generator like `f001` re-targeted at
+that mesh / position / rotation (only `0x0B` needs a new value for a different spin), and
+write the generator's FourCC into the record's BlockID. `xi zone import-json` does exactly
+this for a placement `add` carrying `anim` (see
+[../zone/import-json.md](../zone/import-json.md) and
+[../zone/format.md → Generator-bound objects](../zone/format.md#generator-bound-objects-animated-placements)).
+
 ## Tooling: `xi fx`
 
 ```

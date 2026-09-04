@@ -4398,6 +4398,25 @@ def _export(params: dict) -> dict:
         else:
             results["vfx"] = {"addIds": add_ids}
 
+    # Copies of generator-bound objects (placements op:add carrying `anim`) get their generator
+    # clone auto-named the same way. Pin that id into the add's `anim.new_id` so every later
+    # publish re-creates the clone under the id the baked record's BlockID names.
+    plc_results = results.get("placements") if isinstance(results.get("placements"), dict) else None
+    anim_ids = (plc_results or {}).get("animIds") or []
+    if anim_ids:
+        by_uid = {a.get("uid"): a for a in anim_ids if a.get("uid")}
+        by_key = {(a.get("ts"), a.get("name")): a for a in anim_ids}
+        pinned = False
+        for ch_save in changes.get("placements") or []:
+            if ch_save.get("op") != "add" or not isinstance(ch_save.get("anim"), dict):
+                continue
+            hit = by_uid.get(ch_save.get("uid")) or by_key.get((ch_save.get("ts"), ch_save.get("name")))
+            if hit and ch_save["anim"].get("new_id") != hit["new_id"]:
+                ch_save["anim"]["new_id"] = hit["new_id"]
+                pinned = True
+        if pinned:
+            (d / "zone-changes.json").write_text(json.dumps(changes, indent=2), encoding="utf-8")
+
     # Apply each touched interior DAT in its own pass (modify-only this iteration; adds/deletes to
     # interiors are guarded editor-side). Counts roll into the top-line placement totals + a
     # per-interior breakdown for the publish console.

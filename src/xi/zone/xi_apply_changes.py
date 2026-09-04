@@ -62,6 +62,7 @@ from xi.zone.xi_zonedef import (add_placements, add_collision_transforms, add_to
                                   assign_placements_to_nearest_leaf, expand_placement_bounds_points, parse_zonedef,
                                   hide_placement, remove_index_from_its_leaf, TRANSFORM_SIZE, TRANSFORM_CULLGROUP,
                                   zonedef_record_size, record_block_id, clear_block_id,
+                                  OBJ_ARRAY_START, OBJ_BLOCK_ID,
                                   register_point_light, bind_light_to_object)
 from xi.fx.xi_core import (
     parse_sections as fx_parse_sections,
@@ -72,6 +73,8 @@ from xi.fx.xi_core import (
     _pos_offset,
     _tag_payload,
     _TAG_SCALE,
+    _OFF_GENFLAGS,
+    _AUTORUN_BIT,
 )
 from xi.zone.xi_decrypt import load_key_tables  # noqa: F401 (for key loading)
 
@@ -675,6 +678,8 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
     modified_bounds = []
     adds = []  # (src_index, pos, rot, scale, name) for add_placements
     xzone_adds: list[int] = []  # positions in `adds` that are cross-zone copies (BlockID must be cleared)
+    anim_adds: list[tuple[int, dict]] = []  # (position in `adds`, op) — copies of generator-bound objects
+    anim_ids: list[dict] = []   # generator ids allocated for those copies (pinned back into the change-set)
     # Template record for a cross-zone copy whose mesh has no placement yet: the first
     # ORDINARY static object, never a part of an animated group (BlockID@0x34 != 0). Record 0
     # of the mog houses is a door half carrying '_720' — cloning it made every copy a door
@@ -701,6 +706,8 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
                              tuple(ch["scale"]) if ch.get("scale") else (1.0, 1.0, 1.0),
                              target_name))
                 added += 1
+                if _anim_spec(ch):
+                    anim_adds.append((len(adds) - 1, ch))
                 _dbg(f"cross-zone add '{source_name}' -> '{target_name}'"
                      f"  template=idx{name_to_index.get(target_name, static_template)}"
                      f"  bbox={'found' if target_name in bboxes else 'MISSING'}")
@@ -738,6 +745,10 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
             struct.pack_into("<3f", data, rec + 0x10, *ch["pos"])
             struct.pack_into("<3f", data, rec + 0x1C, *ch["rot"])
             struct.pack_into("<3f", data, rec + 0x28, *ch["scale"])
+            # Generator-bound object (BlockID → 0x05): the client draws it at the GENERATOR's
+            # transform, so the generator moves with the record or the edit is invisible in-game.
+            _sync_bound_generator(data, record_block_id(data, idx, zonedef.data_start, zd.record_size),
+                                  ch["pos"], ch["rot"], ch["scale"])
             points = _bbox_points(bboxes[name], ch["pos"], ch["rot"], ch["scale"]) if name in bboxes else [ch["pos"]]
             expand_placement_bounds_points(data, zd, idx, points)
             modified_positions.append((idx, ch["pos"]))
@@ -769,6 +780,8 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
                 # collision. Hiding keeps every object fully registered (known-good
                 # append-only state). See hide_placement().
                 hide_placement(data, zonedef.data_start, pick, zd.header_offsets.get("collision", 0))
+                # …and the generator that draws a bound object, or it keeps spinning in place.
+                _silence_bound_generator(data, record_block_id(data, pick, zonedef.data_start, zd.record_size))
                 # NOTE: do NOT de-leaf the hidden object here. The leaf-repair experiment
                 # (remove_index_from_its_leaf) did NOT fix the dead-center crash in-game and
                 # was unverified, so we keep the PROVEN hide-by-move behaviour (object stays
@@ -785,6 +798,8 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
                          tuple(ch["scale"]) if ch.get("scale") else (1.0, 1.0, 1.0),
                          name))
             added += 1
+            if _anim_spec(ch):
+                anim_adds.append((len(adds) - 1, ch))
         else:
             click.echo(f"[placement] unknown op '{op}' for '{name}' — skipped", err=True)
             skipped += 1
@@ -806,11 +821,38 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
             base_index = node_count  # new records are appended after the existing array
             sec = add_placements(sec, adds, register_in_tree=True)
             zd3 = parse_zonedef(sec, 0x10, 0, len(sec))
-            # A cross-zone copy is a plain static object: it must not inherit its template's
-            # BlockID (animated-group FourCC), or the client hides every copy past the
-            # group's fourth part — the "barrel shows, fence doesn't" bug.
-            for k in xzone_adds:
+            # A copy is a plain static object: it must not inherit its template's BlockID. A
+            # door-group FourCC would make it a never-drawn fifth part (the "barrel shows, fence
+            # doesn't" bug), and a generator FourCC a record nothing draws — the generator only
+            # draws ITS object (RenderType 0). Copies that carry `anim` are re-bound below.
+            for k in range(len(adds)):
                 clear_block_id(sec, base_index + k, 0x10, zd3.record_size)
+            anim_specs: list = []   # (op, new generator id, pos, rot, scale, mesh FourCC)
+            if anim_adds:
+                from xi.fx.xi_copy import _auto_name
+                mesh_cc = _mesh_fourcc_by_name(data, table1, table2)
+                used = {_fourcc(data, s.start) for s in fx_parse_sections(data)}
+                for k, ch in anim_adds:
+                    anim = ch["anim"]
+                    src_id = str(anim.get("source_id") or "").strip()
+                    try:
+                        _check_anim_source(data, src_id, anim.get("source_dat") or "", anim.get("source_offset"), dest_zone_rel)
+                    except (ValueError, FileNotFoundError) as exc:
+                        click.echo(f"[anim] '{ch.get('name')}': {exc} — placed as a static object", err=True)
+                        continue
+                    want = str(anim.get("new_id") or "").strip()
+                    new_id = want if (want and want not in {u.strip() for u in used}) \
+                        else (_auto_name(src_id or "anim", used) or "").strip()
+                    if not new_id:
+                        click.echo(f"[anim] '{ch.get('name')}': no free generator id — placed as a static object", err=True)
+                        continue
+                    used.add(new_id.ljust(4))
+                    anim["new_id"] = new_id
+                    _src, a_pos, a_rot, a_scale, nm = adds[k]
+                    struct.pack_into("<4s", sec, 0x10 + OBJ_ARRAY_START + (base_index + k) * zd3.record_size + OBJ_BLOCK_ID,
+                                     new_id.encode("ascii", "replace")[:4].ljust(4))
+                    anim_specs.append((ch, new_id, a_pos, a_rot, a_scale, mesh_cc.get(nm)))
+                    _dbg(f"[anim] '{ch.get('name')}' record {base_index + k} bound to generator '{new_id}' (from '{src_id}')")
             xform_entries = []
             for k, (src, pos, rot, scale, nm) in enumerate(adds):
                 # Widen the space-tree leaf to the full transformed mesh bbox (broad-phase).
@@ -839,10 +881,22 @@ def _apply_placements(data: bytearray, changes: list, table1: bytes, table2: byt
 
         reencrypt_zone_objects(sec, 0x10, 0, len(sec), table1)
         data[zonedef.start:zonedef.start + zonedef.size] = sec
+        # The 0x1C is final; now clone each animated copy's generator (a same-DAT duplicate, or
+        # the source zone's with its non-mesh deps) re-targeted at the copy's transform + mesh.
+        if adds:
+            for ch, new_id, a_pos, a_rot, a_scale, link_cc in anim_specs:
+                try:
+                    final = _add_bound_generator(data, ch["anim"], new_id, a_pos, a_rot, a_scale, link_cc, dest_zone_rel)
+                    if final != new_id:
+                        click.echo(f"[anim] '{ch.get('name')}': generator landed as '{final}' but the record names '{new_id}'", err=True)
+                    anim_ids.append({"uid": ch.get("uid"), "ts": ch.get("ts"), "name": ch.get("name"), "new_id": final})
+                except (ValueError, FileNotFoundError) as exc:
+                    click.echo(f"[anim] '{ch.get('name')}': generator copy failed: {exc}", err=True)
     else:
         reencrypt_zone_objects(data, zonedef.data_start, zonedef.start, zonedef.size, table1)
     return {"modified": modified, "deleted": deleted, "added": added, "skipped": skipped,
-            "collision_tris": collision_tris, "unplaced_mesh_deletes": unplaced_mesh_deletes}
+            "collision_tris": collision_tris, "unplaced_mesh_deletes": unplaced_mesh_deletes,
+            "anim_added": len(anim_ids), "animIds": anim_ids}
 
 
 def _debug_dump_registration(sec: bytearray, new_objs: list) -> None:
@@ -884,9 +938,12 @@ def _debug_dump_registration(sec: bytearray, new_objs: list) -> None:
 # ---------------------------------------------------------------------------
 
 def _apply_vfx_add_xzone(data: bytearray, src_id: str, new_id: str, pos, source_dat_rel: str, source_offset=None,
-                         reserved_names: Optional[set[str]] = None) -> str:
+                         reserved_names: Optional[set[str]] = None,
+                         exclude_dep_types: tuple = ()) -> str:
     """Copy a 0x05 effect (and its deps: textures, meshes, SeSep 0x3D, …) from
-    *source_dat_rel* into *data* in-memory.  Returns the final FourCC stamped."""
+    *source_dat_rel* into *data* in-memory.  Returns the final FourCC stamped.
+    ``exclude_dep_types`` skips dependency section types the caller brings in itself
+    (a bound object's 0x2E mesh arrives with its placement, see _add_bound_generator)."""
     from xi.xi_config import FFXI_DIR, read_path_for
     from xi.fx.xi_copy import _effect_deps, _DEP_TYPES, _auto_name
 
@@ -951,7 +1008,8 @@ def _apply_vfx_add_xzone(data: bytearray, src_id: str, new_id: str, pos, source_
     dep_sections: list[bytearray] = []
     dep_ccs: set[bytes] = set()
     for cc in _effect_deps(bytes(sdata), ssecs, src):
-        src_matches = [s for s in ssecs if bytes(sdata[s.start:s.start + 4]) == cc and s.type_code in _DEP_TYPES]
+        src_matches = [s for s in ssecs if bytes(sdata[s.start:s.start + 4]) == cc
+                       and s.type_code in _DEP_TYPES and s.type_code not in exclude_dep_types]
         if not src_matches:
             continue
         same_cc_dest = [s for s in sections if bytes(data[s.start:s.start + 4]) == cc and s.type_code in _DEP_TYPES]
@@ -1137,6 +1195,192 @@ def _register_point_lights(data: bytearray, lights: list, table1: bytes, table2:
     return out
 
 
+
+# ---------------------------------------------------------------------------
+# Generator-bound objects (animated placements)
+# ---------------------------------------------------------------------------
+# A 0x1C record whose BlockID (+0x34) is a FourCC not starting '_'/'@' names the 0x05
+# generator that DRAWS it: the client marks the record RenderType 0 (skipped by the normal
+# pass, ZoneRenderer::SetRenderTypes) and the generator renders the linked 0x2E mesh at its
+# own StandardSetup base position, sec2 0x09 rotation and 0x0F scale, with its motion opcodes
+# on top (Rabao's windmill blades de_fusya02 ← f001/f002: RotationVelocity 0x0B + a sec3
+# RotationUpdater 0x05, 0.0122 rad per 60 Hz frame). Every non-door BlockID in the 597
+# retail zone DATs resolves to a generator in the same DAT (1,938 records). So an editor
+# move of such an object must move the GENERATOR too, a delete must silence it, and a copy
+# needs its own generator clone with the record's BlockID naming it — otherwise the copy is
+# invisible (BlockID without a generator) or a static ghost (record without a BlockID).
+
+_BLOCK_DOOR_PREFIX = (ord("_"), ord("@"))
+
+
+def _anim_spec(ch: dict) -> Optional[dict]:
+    """The `anim` record of a placement add — `{source_id, source_dat?, source_offset?, new_id?}`."""
+    a = ch.get("anim")
+    return a if isinstance(a, dict) and str(a.get("source_id") or "").strip() else None
+
+
+def _block_id_fourcc(block_id: int) -> Optional[bytes]:
+    """FourCC bytes of a generator-naming BlockID, or None for 0 / a door group."""
+    if not block_id:
+        return None
+    cc = struct.pack("<I", block_id & 0xFFFFFFFF)
+    if cc[0] in _BLOCK_DOOR_PREFIX:
+        return None
+    return cc
+
+
+def _sec2_op_payload(body: bytes, opcode: int) -> Optional[int]:
+    """Body offset of a sec2 (particle initializer) opcode's payload, walking the stream."""
+    if len(body) < 0x90:
+        return None
+    pos = struct.unpack_from("<I", body, 0x84)[0]
+    while 0 < pos and pos + 4 <= len(body):
+        cfg = struct.unpack_from("<I", body, pos)[0]
+        opc, size = cfg & 0xFF, (cfg >> 8) & 0x1F
+        if opc == 0 or size == 0:
+            break
+        if opc == opcode:
+            return pos + 4
+        pos += size * 4
+    return None
+
+
+def _patch_generator_transform(body: bytearray, pos=None, rot=None, scale=None,
+                               link_cc: Optional[bytes] = None) -> None:
+    """Rewrite a generator body's object transform in place: StandardSetup base position (+16)
+    and mesh link (+8), sec2 0x09 Rotation and 0x0F Scale — each only when the opcode exists."""
+    setup = _sec2_op_payload(bytes(body), 0x01)
+    if setup is not None:
+        if link_cc is not None and setup + 12 <= len(body):
+            body[setup + 8:setup + 12] = bytes(link_cc)[:4].ljust(4)
+        if pos is not None and setup + _SETUP_POS + 12 <= len(body):
+            struct.pack_into("<3f", body, setup + _SETUP_POS, *[float(v) for v in pos])
+    if rot is not None:
+        off = _sec2_op_payload(bytes(body), 0x09)
+        if off is not None and off + 12 <= len(body):
+            struct.pack_into("<3f", body, off, *[float(v) for v in rot])
+    if scale is not None:
+        off = _sec2_op_payload(bytes(body), 0x0F)
+        if off is not None and off + 12 <= len(body):
+            struct.pack_into("<3f", body, off, *[float(v) for v in scale])
+
+
+def _generator_sections(data, cc: bytes) -> list:
+    return [s for s in fx_parse_sections(data)
+            if s.type_code == EFFECT_TYPE and bytes(data[s.start:s.start + 4]) == cc]
+
+
+def _sync_bound_generator(data: bytearray, block_id: int, pos, rot, scale) -> int:
+    """Move the generator a bound record names along with the record. Returns generators patched."""
+    cc = _block_id_fourcc(block_id)
+    if cc is None:
+        return 0
+    n = 0
+    for s in _generator_sections(data, cc):
+        body = bytearray(data[s.start:s.start + s.size])
+        _patch_generator_transform(body, pos=pos, rot=rot, scale=scale)
+        data[s.start:s.start + s.size] = body
+        n += 1
+    if n:
+        _dbg(f"[anim] generator '{cc.decode('latin1').strip()}' moved with its record -> {tuple(pos)}")
+    return n
+
+
+def _silence_bound_generator(data: bytearray, block_id: int, far: float = -100000.0) -> int:
+    """A deleted (hidden) record's generator would keep drawing the object: clear its autoRun
+    flag and park its base position out of the world, the way hide_placement parks records."""
+    cc = _block_id_fourcc(block_id)
+    if cc is None:
+        return 0
+    n = 0
+    for s in _generator_sections(data, cc):
+        data[s.start + _OFF_GENFLAGS] &= (~_AUTORUN_BIT) & 0xFF
+        body = bytearray(data[s.start:s.start + s.size])
+        setup = _sec2_op_payload(bytes(body), 0x01)
+        if setup is not None and setup + _SETUP_POS + 12 <= len(body):
+            x, _y, z = struct.unpack_from("<3f", body, setup + _SETUP_POS)
+            struct.pack_into("<3f", body, setup + _SETUP_POS, x, far, z)
+            data[s.start:s.start + s.size] = body
+        n += 1
+    if n:
+        _dbg(f"[anim] generator '{cc.decode('latin1').strip()}' silenced with its deleted record")
+    return n
+
+
+def _mesh_fourcc_by_name(data: bytearray, table1: bytes, table2: bytes) -> dict[str, bytes]:
+    """0x2E mesh name -> section FourCC (the id a generator's StandardSetup links by)."""
+    out: dict[str, bytes] = {}
+    for section in parse_sections(data):
+        if section.type_code != SECTION_TYPE_ZONE_MESH:
+            continue
+        decrypt_zone_mesh(data, section.data_start, table1, table2)
+        name = data[section.data_start + 0x10:section.data_start + 0x20].split(b"\x00", 1)[0].decode("ascii", "replace").strip()
+        reencrypt_zone_mesh(data, section.data_start, table1, table2)
+        if name and name not in out:
+            out[name] = bytes(data[section.start:section.start + 4])
+    return out
+
+
+def _check_anim_source(data: bytearray, src_id: str, source_dat_rel: str, source_offset, dest_zone_rel: str) -> None:
+    """Raise unless the generator an `anim` names can be found (this DAT, or the source zone)."""
+    if not src_id:
+        raise ValueError("anim.source_id missing")
+    if source_dat_rel and _norm_zone_rel(source_dat_rel) != _norm_zone_rel(dest_zone_rel):
+        from xi.xi_config import FFXI_DIR, read_path_for
+        src_path = read_path_for(Path(FFXI_DIR) / source_dat_rel)
+        if not Path(src_path).exists():
+            raise FileNotFoundError(f"source zone {source_dat_rel} not found")
+        src = bytearray(Path(src_path).read_bytes())
+    else:
+        src = data
+    ssecs = fx_parse_sections(src)
+    if not any(s.type_code == EFFECT_TYPE and _fourcc(src, s.start).strip() == src_id for s in ssecs):
+        raise ValueError(f"animation generator '{src_id}' not found in {source_dat_rel or 'the zone'}")
+
+
+def _add_bound_generator(data: bytearray, anim: dict, new_id: str, pos, rot, scale,
+                         link_cc: Optional[bytes], dest_zone_rel: str) -> str:
+    """Clone the generator an `anim` add names — from this DAT, or from `source_dat` with its
+    non-mesh dependencies — as `new_id`, re-targeted at the copy's transform and mesh. The
+    record's BlockID already names `new_id`. Returns the id the clone landed under."""
+    src_id = str(anim.get("source_id") or "").strip()
+    source_dat_rel = anim.get("source_dat") or ""
+    source_offset = anim.get("source_offset")
+    if source_dat_rel and _norm_zone_rel(source_dat_rel) != _norm_zone_rel(dest_zone_rel):
+        # The 0x2E mesh came in with the placement (xi_-prefixed); link the clone to THAT copy.
+        final = _apply_vfx_add_xzone(data, src_id, new_id, None, source_dat_rel, source_offset,
+                                     exclude_dep_types=(0x2E,))
+        cc = final.encode("ascii", "replace")[:4].ljust(4)
+        for s in _generator_sections(data, cc):
+            body = bytearray(data[s.start:s.start + s.size])
+            body[_OFF_GENFLAGS] |= _AUTORUN_BIT
+            _patch_generator_transform(body, pos=pos, rot=rot, scale=scale, link_cc=link_cc)
+            data[s.start:s.start + s.size] = body
+        return final
+    sections = fx_parse_sections(data)
+    matches = [s for s in sections if s.type_code == EFFECT_TYPE and _fourcc(data, s.start).strip() == src_id]
+    src = None
+    if source_offset is not None:
+        try:
+            src = next((s for s in matches if s.start == int(source_offset)), None)
+        except (TypeError, ValueError):
+            src = None
+    if src is None:
+        # A FourCC can repeat across weather directories; the world copy is the autoRun one.
+        src = next((s for s in matches if data[s.start + _OFF_GENFLAGS] & _AUTORUN_BIT), matches[0] if matches else None)
+    if src is None:
+        raise ValueError(f"animation generator '{src_id}' not found in the zone")
+    body = bytearray(data[src.start:src.start + src.size])
+    body[0:4] = new_id.encode("ascii", "replace")[:4].ljust(4)
+    body[_OFF_GENFLAGS] |= _AUTORUN_BIT   # the copy must self-start, whichever copy was the donor
+    _patch_generator_transform(body, pos=pos, rot=rot, scale=scale, link_cc=link_cc)
+    anchor = next((s for s in sections if s.type_code == EFFECT_TYPE), None)
+    at = (anchor.start + anchor.size) if anchor else len(data)
+    data[at:at] = bytes(body)
+    _dbg(f"[anim] cloned generator '{src_id}' -> '{new_id}' at {tuple(pos)}")
+    return new_id
+
+
 def _apply_vfx_in_memory(data: bytearray, changes: list, table1: Optional[bytes] = None,
                          table2: Optional[bytes] = None) -> dict:
     """Apply VFX ops directly on a bytearray. Returns stats. With the key tables given,
@@ -1180,6 +1424,12 @@ def _apply_vfx_in_memory(data: bytearray, changes: list, table1: Optional[bytes]
                     off = _tag_payload(body, _TAG_SCALE)
                     if off is not None:
                         struct.pack_into("<3f", data, s.start + off, *ch["scale"])
+                        patched = True
+                if ch.get("rot") is not None:
+                    body = bytes(data[s.start: s.start + s.size])
+                    off = _sec2_op_payload(body, 0x09)   # sec2 0x09 RotationInitializer (3×f32 rad)
+                    if off is not None:
+                        struct.pack_into("<3f", data, s.start + off, *ch["rot"])
                         patched = True
                 break
             if patched:

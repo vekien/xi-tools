@@ -114,7 +114,7 @@ Each object record = **0x64 bytes** (full layout per xim `ZoneDefParser.parseZon
 | 0x10 | position (3×f32) |
 | 0x1C | rotation (3×f32, radians) |
 | 0x28 | scale (3×f32) |
-| 0x34 | **BlockID** (FourCC; 0 = ordinary static object). Non-zero + first byte `_`/`@` = one part of an animated multi-part object (a mog-house double door's halves both carry `_720`). The client takes such records OUT of the normal quad-tree pass (`RenderType 0`) and draws the group via an `UnderscoreAtStruct` of at most **four** parts — a fifth record with the same FourCC is never drawn. Cloned records must zero it (`xi_zonedef.clear_block_id`). |
+| 0x34 | **BlockID** (FourCC; 0 = ordinary static object). Any non-zero value takes the record OUT of the normal quad-tree pass (`RenderType 0`, `ZoneRenderer::SetRenderTypes`). First byte `_`/`@` = one part of an animated multi-part object (a mog-house double door's halves both carry `_720`), drawn by the client as an `UnderscoreAtStruct` of at most **four** parts — a fifth record with the same FourCC is never drawn. **Any other FourCC names the `0x05` generator that draws the object** — see [Generator-bound objects](#generator-bound-objects-animated-placements) below. Cloned records must zero it (`xi_zonedef.clear_block_id`) unless they get a generator of their own. |
 | 0x38 | high-def LOD threshold (f32) |
 | 0x3C | mid-def LOD threshold (f32) |
 | 0x40 | **draw distance** (f32) — engine stops drawing past this range (~1=interior, 1000=buildings) |
@@ -123,6 +123,43 @@ Each object record = **0x64 bytes** (full layout per xim `ZoneDefParser.parseZon
 | 0x4C | environment link (4-byte DatId) |
 | 0x50 | **file-id link** (u32) — for a "closed building" placeholder, the **sub-area id** whose interior replaces it (0 = none); see [subareas.md](subareas.md) |
 | 0x54 | point-light indices (4×u32, 1-based into the light table below; 0 = none) — the ONLY lights that shine on this object |
+
+### Generator-bound objects (animated placements)
+
+A record whose BlockID is a FourCC **not** starting `_`/`@` is drawn by the `0x05`
+generator of that name, not by the placement pass: the generator's `StandardSetup`
+links the same `0x2E` mesh (`StaticMesh`, `0x0B`) and carries the object's base
+position (payload `+16`), sec2 `0x09` Rotation holds the record's rotation, and the
+motion opcodes animate it. Rabao (`ROM2/12/123`) is the model case — the windmill
+blades:
+
+| record | mesh | BlockID | generator | motion |
+|---|---|---|---|---|
+| 175 | `de_fusya02` @ (−38.0, −4.45, 51.8) rot y 0.244 | `f001` | `f001`: StaticMesh `de_7`, base pos = record pos, `0x09` = (0, 0.244, 0) | `0x0B` RotationVelocity (0, 0, 0.0122) rad/frame + sec3 `0x05` RotationUpdater |
+| 274 | `de_fusya02` @ (−1.55, −4.45, 78.0) rot y 0.164 | `f002` | `f002`: same, `0x09` = (0, 0.164, 0) | `0x0B` (0, 0, 0.0105) |
+
+Across all 597 retail zone DATs, 1,938 records carry a non-door BlockID and **every one**
+resolves to a generator in the same DAT (286 zones). What those generators do, by opcode set:
+1,009 scroll a texture (`KF.TexU` — lava, water sheets), 801 add nothing (the generator just
+owns the draw: blend/render-state), 46 daylight colour + scale curves, 30 alpha keyframes,
+22 alpha + scale (lights), 16 spin (`RotationVelocity` + `RotationUpdater`: windmills in
+Konschtat `con_fu02_h` and Rabao), 4 keyframed yaw (`_or_fu02`), 4 yaw + spin (`_or_fu03`).
+Only 11 of the 1,938 generators are not `autoRun`.
+
+Consequences for tooling (all handled by `xi zone import-json`, see
+[import-json.md](import-json.md)):
+
+- **Move** a bound record → also patch the generator's base position / `0x09` / `0x0F`,
+  otherwise the visible object stays put.
+- **Delete** (hide) a bound record → also silence the generator (clear `autoRun`, park its
+  base position), otherwise it keeps drawing.
+- **Copy** a bound record → clone the generator under a fresh FourCC, re-target it at the
+  copy's transform and mesh, and write that FourCC into the copy's BlockID. A copy that
+  inherits the donor's BlockID is invisible (RenderType 0 with nothing drawing it); a copy
+  with BlockID 0 is a static ghost.
+
+The level editor plays the spin class (`View → Play Animations`, `core/zone-animations.js`)
+and carries the binding through copy/paste as the change-set `anim` field.
 
 ### Light table (`pointLightOff@0x18`)
 
