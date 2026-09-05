@@ -84,6 +84,7 @@ from xi.ui.items   import xi_items   as ui_items
 from xi.ui.spells  import xi_spells  as ui_spells
 from xi.utils    import xi_dds2png as dds2png, xi_png2dds as png2dds
 from xi.dialog   import xi_commands as dialog_cmds
+from xi.event import xi_sweep as event_sweep
 from xi.event    import xi_commands as event_cmds
 from xi.server   import xi_commands as server_cmds
 from xi.misc import xi_scan    as misc_scan
@@ -536,6 +537,12 @@ def event():
 
 event.add_command(event_cmds.cutscene_group, 'cutscene')
 event.add_command(event_cmds.dialogue_group, 'dialogue')
+event.add_command(event_cmds.explain_cmd, 'explain')
+event.add_command(event_cmds.decompile_cmd, 'decompile')
+event.add_command(event_cmds.survey_cmd, 'survey')
+event.add_command(event_cmds.npc_group, 'npc')
+event.add_command(event_cmds.lint_cmd, 'lint')
+event.add_command(event_sweep.sweep_cmd, 'sweep')
 
 # `dialogue` is the single home for all NPC-text work: authoring new dialogue events
 # (`actors`, `new` — defined in xi.event.xi_commands) plus editing the underlying

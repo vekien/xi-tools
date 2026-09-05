@@ -7,7 +7,7 @@ but it's grounded in the [format](format.md), the [opcode set](opcodes.md), the
 [dialogue tables](dialogue.md), and the [camera system](cutscenes.md#how-the-camera-works)
 documented in this folder.
 
-> **Status: partly shipped.** The **dialogue** slice of this design is built —
+> **Status: mostly shipped (2026-09-03: menus, branches, goto, server round-trip added — see [authoring.md](authoring.md#menus-branches-and-the-server-round-trip-xi-event-cutscene-compile-2026-09-03)).** The **dialogue** slice of this design is built —
 > [`xi event dialogue new`](authoring.md) appends lines and synthesizes a plain
 > multi-line dialogue event (byte-exact), returning an event id + a server Lua stub. The
 > rest below (camera, menus, branching, the full step compiler) is still a proposal: it

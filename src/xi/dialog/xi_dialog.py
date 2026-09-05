@@ -291,6 +291,18 @@ def build_container(blobs: list[bytes], obfuscated: bool = True) -> bytes:
 # Friendly authoring escapes -> raw bytes.
 #   \n -> 0x07 newline   \v -> 7F 31 prompt (press enter)   \\ -> literal '\'
 #   {player} -> 08   {npc} -> 09   {auto:N} -> 7F 34 NN (auto-advance N sec)
+#   {N} (digits) -> 0A NN  numeric event parameter N (server startEvent/updateEvent p_N)
+#   {item:N} -> 01 05 25 82 (80|N) 80 80  item name for the id in parameter N; {name:0xKK:N} other kinds
+#   {keyitem:N} -> kind 0x36 (key item name)   {rowitem:N} -> kind 0x24 (item name, coffer rows)
+#   {index:N}[a/b/c] -> 0C NN + literal bracket list: the client shows alternative number N
+#   {plural:N}[a/b] -> 7F 92 NN (alternative by the count in parameter N)   {rowname:N} -> in-row item name
+#   {qtyitem:C:I} -> 01 09 29 ... ("<count> <items>", count in parameter C, item id in parameter I)
+def _v7b(v: int) -> list[int]:
+    """The `82` value form: three bytes, seven bits each, low first, high bit set (zone 236 is
+    `ec 81 80`; parameter indexes fit in the first byte)."""
+    return [0x80 | (v & 0x7F), 0x80 | ((v >> 7) & 0x7F), 0x80 | ((v >> 14) & 0x7F)]
+
+
 def encode_event_string(s: str) -> bytes:
     """Encode authoring text (with escapes/tokens) into raw event-string bytes.
     Inverse-ish of the `text` rendering; see module docstring for the codes."""
@@ -327,6 +339,103 @@ def encode_event_string(s: str) -> bytes:
                     except ValueError:
                         raise DialogError(f"bad auto-prompt token: {{{tok}}}")
                     out += bytes([0x7F, 0x34, sec & 0xFF]); i = end + 1; continue
+                if tok.isdigit():
+                    # {n} -> 0A nn: numeric substitution of event parameter n
+                    # (Work_Zone[2 + n]; n >= 8 reads the extended Work_Zone_1700 bank).
+                    out += bytes([0x0A, int(tok) & 0xFF]); i = end + 1; continue
+                if tok == "options":
+                    out.append(0x0B); i = end + 1; continue     # menu rows start here (CodeQUERY case 11)
+                if tok.startswith("raw:"):
+                    # {raw:7f800101010120}: verbatim control bytes (retail menu rows open with
+                    # 7F 80 01 + 01 01 01 + space before the item-name code; meaning unknown).
+                    try:
+                        out += bytes.fromhex(tok[4:])
+                    except ValueError:
+                        raise DialogError(f"bad raw token: {{{tok}}}")
+                    i = end + 1; continue
+                if tok == "noprompt":
+                    # {noprompt}: marker only; the compiler does not append the 7F 31 prompt to
+                    # a line ending with it (retail lines such as Oseem 12588 have none)
+                    i = end + 1; continue
+                if tok.startswith("member:"):
+                    # {member:n} -> 19 nn: the name of party member n (Mog House menus, Bastok Markets 487)
+                    try:
+                        idx = int(tok[7:])
+                    except ValueError:
+                        raise DialogError(f"bad member token: {{{tok}}}")
+                    out += bytes([0x19, idx & 0xFF]); i = end + 1; continue
+                if tok == "gender":
+                    # {gender}[a/b] -> 7F 85 + literal brackets: alternative by the player's gender
+                    # (Magian Moogle 14471 "found {gender}[his/her] way")
+                    out += bytes([0x7F, 0x85]); i = end + 1; continue
+                if tok.startswith("plural:"):
+                    # {plural:n}[a/b] -> 7F 92 nn + literal brackets: the client picks the
+                    # alternative by the COUNT in parameter n ("{3} time{plural:3}[/s]",
+                    # "[that/those]" in Oseem 12580/12582); {index:n} picks by value instead.
+                    try:
+                        idx = int(tok[7:])
+                    except ValueError:
+                        raise DialogError(f"bad plural token: {{{tok}}} (use {{plural:n}}[a/b])")
+                    out += bytes([0x7F, 0x92, idx & 0xFF]); i = end + 1; continue
+                if tok.startswith("rowname:"):
+                    # {rowname:n} -> 7F 80 01 01 05 23 82 (80|n) 80 80: an item name (id in
+                    # parameter n) at the start of a query row, exactly as Oseem's stone rows
+                    # and eligible-equipment rows carry it (12575, 12582).
+                    try:
+                        idx = int(tok[8:])
+                    except ValueError:
+                        raise DialogError(f"bad rowname token: {{{tok}}}")
+                    if not 0 <= idx < 128:
+                        raise DialogError(f"name token index out of range: {{{tok}}}")
+                    out += bytes([0x7F, 0x80, 0x01, 0x01, 0x05, 0x23, 0x82, *_v7b(idx)]); i = end + 1; continue
+                if tok.startswith("qtyitem:"):
+                    # {qtyitem:c:i} -> 01 09 29 82 (80|c) 80 80 82 (80|i) 80 80: "<count> <item>"
+                    # with the plural item name, count in parameter c and item id in parameter i
+                    # ("I've got 4 pellucid stones in storage", Oseem 12579/12580).
+                    parts = tok.split(":")
+                    try:
+                        cidx, iidx = int(parts[1]), int(parts[2])
+                    except (IndexError, ValueError):
+                        raise DialogError(f"bad qtyitem token: {{{tok}}} (use {{qtyitem:c:i}})")
+                    out += bytes([0x01, 0x09, 0x29, 0x82, *_v7b(cidx), 0x82, *_v7b(iidx)]); i = end + 1; continue
+                if tok.startswith("index:"):
+                    # {index:n}[a/b/c] -> 0C nn followed by the literal bracket list: the client
+                    # picks alternative number (parameter n) ("Select your {index:8}[first/second]
+                    # augment", Tenshodo coffer 9940). The brackets stay literal text.
+                    try:
+                        idx = int(tok[6:])
+                    except ValueError:
+                        raise DialogError(f"bad index token: {{{tok}}} (use {{index:n}}[a/b])")
+                    out += bytes([0x0C, idx & 0xFF]); i = end + 1; continue
+                if tok.startswith("keyitem:") or tok.startswith("rowitem:"):
+                    # Name-by-kind shorthands: {keyitem:n} = kind 0x36 (key item whose id is in
+                    # parameter n; coffer menu 9931 rows), {rowitem:n} = kind 0x24 (item id in
+                    # parameter n as the coffer's "Obtain which item?" rows use it).
+                    kind = 0x36 if tok.startswith("keyitem:") else 0x24
+                    try:
+                        idx = int(tok.split(":")[1])
+                    except (IndexError, ValueError):
+                        raise DialogError(f"bad name token: {{{tok}}}")
+                    if not 0 <= idx < (1 << 21):
+                        raise DialogError(f"name token index out of range: {{{tok}}}")
+                    out += bytes([0x01, 0x05, kind, 0x82, *_v7b(idx)]); i = end + 1; continue
+                if tok.startswith("item:") or tok.startswith("name:"):
+                    # Special-name substitution 01 05 <kind> 82 <0x80|n> 80 80: the name of the
+                    # thing whose id sits in event parameter n. {item:n} = kind 0x25 (item name,
+                    # Bonanza Moogle menu rows / synergy text); {name:KIND:n} for the other
+                    # kinds seen in retail (0x23/0x24 item via row register, 0x36 key item,
+                    # 0x38 zone, 0x84 entity name, 0x40 RoE objective) — verify in game.
+                    parts = tok.split(":")
+                    try:
+                        if parts[0] == "item":
+                            kind, idx = 0x25, int(parts[1])
+                        else:
+                            kind, idx = int(parts[1], 0), int(parts[2])
+                    except (IndexError, ValueError):
+                        raise DialogError(f"bad name token: {{{tok}}} (use {{item:n}} or {{name:0xKK:n}})")
+                    if not 0 <= idx < (1 << 21):
+                        raise DialogError(f"name token index out of range: {{{tok}}}")
+                    out += bytes([0x01, 0x05, kind & 0xFF, 0x82, *_v7b(idx)]); i = end + 1; continue
                 # unrecognised token: fall through and emit '{' literally
         try:
             out += c.encode("cp932")

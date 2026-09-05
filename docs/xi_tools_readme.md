@@ -162,6 +162,8 @@ See [events/README.md](events/README.md) for the big picture + per-zone file IDs
 - [events/dialogue.md](events/dialogue.md) — NPC dialogue: `EventMessage` + `d_msg` formats, the event-string codec, control codes, in-game display
 - [events/cutscenes.md](events/cutscenes.md) — how a scripted scene plays: trigger → run → release, camera handling, the resource graph
 - [events/weather.md](events/weather.md) — weather **id → in-game name** table (+ element) for the weather opcodes
+- [events/retail-events.md](events/retail-events.md) — **decompile any retail event to JSON, edit it, recompile it, prove the round trip** (`explain`, `decompile --check`, `sweep`, `cutscene compile`)
+- [events/typed_opcodes.md](events/typed_opcodes.md) — the typed opcode table the decompiler and compiler share
 - [events/prototype.md](events/prototype.md) — how a **custom cutscene** could be authored as JSON, compiled to a DAT, and triggered
 - [events/event-data.md](events/event-data.md) — the extracted dataset (277 zones, ~326k dialogue lines) and how to search it
 

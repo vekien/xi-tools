@@ -357,26 +357,54 @@ def compile_cmd(cutscene_json, event_override, dialog_override, dry_run):
         cutscene = json.load(f)
 
     if not event_override:
-        raise click.ClickException(
-            "--event-dat required for now (auto-resolution from cast entity is a TODO).")
+        # A decompiled JSON carries the zone it came from; resolve both DATs from it.
+        zone = cutscene.get("zone")
+        if zone is None:
+            raise click.ClickException("--event-dat required (the JSON has no 'zone' field to resolve it from).")
+        from xi import xi_config
+        from xi.event import xi_explain as X
+        zf = X.zone_files(Path(xi_config.FFXI_DIR), [int(zone)])[0]
+        event_override = str(zf.event)
+        dialog_override = dialog_override or str(zf.dialog)
+    elif not Path(event_override).is_file():
+        event_override = str(_resolve_event_dat(event_override)[0])       # ROM-relative -> absolute
     if not dialog_override:
         # Derive dialog DAT path from event DAT by swapping the ROM subdir (21→25).
-        ep = Path(event_override).as_posix().upper()
-        if "/21/" in ep:
-            dialog_override = ep.replace("/21/", "/25/")
+        ep = Path(event_override).as_posix()
+        if "/21/" in ep.upper():
+            dialog_override = ep[:ep.upper().index("/21/")] + "/25/" + ep[ep.upper().index("/21/") + 4:]
         else:
             raise click.ClickException("--dialog-dat required (couldn't auto-derive)")
+    elif not Path(dialog_override).is_file():
+        dialog_override = str(_resolve_event_dat(dialog_override)[0])
 
     event_bytes = Path(event_override).read_bytes()
     dialog_bytes = Path(dialog_override).read_bytes()
 
     try:
-        res = xi_compile.compile_cutscene(cutscene, event_bytes, dialog_bytes)
+        from xi import xi_config
+        res = xi_compile.compile_cutscene(cutscene, event_bytes, dialog_bytes,
+                                          ffxi_dir=Path(xi_config.FFXI_DIR) if xi_config.FFXI_DIR else None)
     except (xi_compile.CutsceneCompileError, NotImplementedError) as e:
         raise click.ClickException(str(e))
 
     click.echo(f"event_id = {res.event_id}")
     click.echo(f"event_dat: {len(event_bytes)} -> {len(res.event_dat)} bytes")
+    # pre-flight lint of the compiled event (sizes, jumps, selectors, message ids, menu markers)
+    from xi.event import xi_lint, xi_compile as _xc
+    owner = None
+    for c in (cutscene.get("cast") or {}).get("cast") or []:
+        if c.get("id") == cutscene.get("actor"):
+            owner = _xc._resolve_entity(c["entity"])
+    if owner is not None:
+        for eid, lr in xi_lint.lint_dat(res.event_dat, res.dialog_dat, owner, res.event_id).items():
+            for w in lr.warnings:
+                click.echo(f"lint warning: {w}", err=True)
+            if not lr.ok:
+                for e in lr.errors:
+                    click.echo(f"lint error: {e}", err=True)
+                raise click.ClickException("lint failed; nothing written")
+        click.echo("lint: OK")
     click.echo(f"dialog_dat: {len(dialog_bytes)} -> {len(res.dialog_dat)} bytes")
     for w in res.warnings:
         click.echo(f"WARNING: {w}", err=True)
@@ -432,6 +460,298 @@ def _resolve_zone_dialog_event(dat: str):
     if not dhits:
         raise click.ClickException(f"No dialog DAT found for zone {zone_id} ({zone_name}).")
     return event_src, Path(FFXI_DIR) / dhits[0]["dat"], zone_id, zone_name
+
+
+# ---------------------------------------------------------------------------
+# `xi event explain` / `xi event survey` — annotated decodes for any NPC
+# ---------------------------------------------------------------------------
+
+@click.command("decompile")
+@click.argument("zone")
+@click.argument("who")
+@click.option("--event", "event_id", type=int, required=True, help="Event id to decompile.")
+@click.option("-o", "--output", type=click.Path(dir_okay=False), help="Write the xi.cutscene.v1 JSON here.")
+@click.option("--check", "check", is_flag=True, help="Recompile the JSON in bare mode and compare it with the retail event.")
+@click.option("--installed", "installed", is_flag=True, help="Read the installed DATs instead of the pristine .base copies (for our own events).")
+def decompile_cmd(zone, who, event_id, output, check, installed):
+    """Retail event bytecode -> xi.cutscene.v1 JSON (steps, subs, dialog text inline).
+
+    \b
+      xi event decompile 252 0x010FC08F --event 9506 -o oseem_9506.json --check
+      xi event decompile 243 "Nomad Moogle" --event 10196
+    """
+    import json as _json
+    import sys
+    from xi import xi_config
+    from xi.event import xi_explain as X, xi_decompile as D
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    _, _, zone_id, zone_name = _resolve_event_dat(zone)
+    if zone_id is None:
+        raise click.ClickException("give a zone id or name")
+    root = Path(xi_config.FFXI_DIR)
+    zf = X.zone_files(root, [zone_id])[0]
+    actors, blobs, names = X.load_zone(zf)
+    q = who.strip()
+    if q.lower().startswith("0x"):
+        actor_id = int(q, 16)
+    elif q.isdigit():
+        actor_id = int(q)
+    else:
+        actor_id = next((aid for aid, nm in names.items() if nm.lower() == q.lower()), None)
+        if actor_id is None:
+            raise click.ClickException(f"no actor named {who!r} in {zone_name}")
+    cs, ctx = D.decompile_event(root, zone_id, actor_id, event_id, installed=installed)
+    text = _json.dumps(cs, indent=1, ensure_ascii=False)
+    if output:
+        Path(output).write_text(text + "\n", encoding="utf-8")
+        click.echo(f"wrote {output}: {ctx.total_ops} opcodes, {ctx.raw_ops} raw ({100 * (ctx.total_ops - ctx.raw_ops) // max(1, ctx.total_ops)}% modelled), {len(cs['dialog']['lines'])} lines")
+    else:
+        click.echo(text)
+    for n in ctx.notes:
+        click.echo("  note: " + n)
+    if check:
+        r = D.check_roundtrip(root, zone_id, actor_id, event_id, cs)
+        click.echo(f"round trip: retail {r['retail_ops']} ops, ours {r['ours_ops']} ops, {r['mismatches']} mismatch(es); compiled as event {r['compiled_event']}")
+        for i, a, b in r["first_mismatches"]:
+            click.echo(f"  #{i}: retail {a}\n       ours   {b}")
+
+
+@click.command("explain")
+@click.argument("zone")
+@click.argument("who", required=False)
+@click.option("--event", "event_id", type=int, help="Only this event id.")
+@click.option("--list", "list_only", is_flag=True, help="List the zone's actors (id, name, events) and exit.")
+@click.option("-o", "--output", type=click.Path(dir_okay=False), help="Write the listing to a file (UTF-8).")
+def explain_cmd(zone, who, event_id, list_only, output):
+    """Annotated disassembly of one NPC's events: every operand resolved, dialog text inline,
+    conditions spelled out, 0x9D tables expanded, called subroutines decoded, feature summary.
+
+    \b
+      xi event explain 235 Isakoth
+      xi event explain "Bastok Markets" 0x010EB0B1 --event 26
+      xi event explain 243 --list
+    """
+    import sys
+    from xi import xi_config
+    from xi.event import xi_explain as X
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    _, _, zone_id, zone_name = _resolve_event_dat(zone)
+    if zone_id is None:
+        raise click.ClickException("give a zone id or name")
+    zfs = X.zone_files(Path(xi_config.FFXI_DIR), [zone_id])
+    if not zfs:
+        raise click.ClickException(f"no event DAT for zone {zone_id}")
+    zf = zfs[0]
+    actors, blobs, names = X.load_zone(zf)
+    if list_only or not who:
+        rows = sorted(actors, key=lambda a: -len(a.event_ids))
+        click.echo(f"{zone_name} ({zone_id}): {len(actors)} actors")
+        for a in rows:
+            real = [e for e in a.event_ids if e not in (0xFFFE, 0xFFFF)]
+            click.echo(f"  0x{a.actor_id:08X}  {len(real):3d} event(s)  {names.get(a.actor_id, '')}")
+        return
+    q = who.strip()
+    target = None
+    if q.lower().startswith("0x"):
+        target = next((a for a in actors if a.actor_id == int(q, 16)), None)
+    elif q.isdigit():
+        target = next((a for a in actors if a.actor_id == int(q)), None)
+    else:
+        ids = [sid for sid, n in names.items() if n.lower() == q.lower()] or \
+              [sid for sid, n in names.items() if q.lower() in n.lower()]
+        cands = [a for a in actors if a.actor_id in ids]
+        if len(cands) > 1:
+            listing = "\n".join(f"  0x{a.actor_id:08X}  {names.get(a.actor_id, '')}  {len(a.event_ids)} event(s)" for a in cands[:12])
+            raise click.ClickException(f"{q!r} matches several actors, pick an id:\n{listing}")
+        target = cands[0] if cands else None
+    if target is None:
+        raise click.ClickException(f"no actor {q!r} in {zone_name}; try --list")
+    L = X.explain_actor(bytes(target.scene_data), list(target.references), list(target.event_ids),
+                        list(target.event_offsets), blobs, names, only_event=event_id)
+    head = [f"{zone_name} ({zone_id})  actor 0x{target.actor_id:08X} {names.get(target.actor_id, '')}",
+            f"  references[]: {len(target.references)}   events: {[e for e in target.event_ids if e not in (0xFFFE, 0xFFFF)]}",
+            f"  features: {', '.join(sorted(L.features)) or 'plain dialogue'}", ""]
+    text = "\n".join(head + L.lines) + "\n"
+    if output:
+        Path(output).write_text(text, encoding="utf-8")
+        click.echo(f"wrote {output} ({len(L.lines)} lines)")
+    else:
+        click.echo(text)
+
+
+@click.command("survey")
+@click.option("--op", "op_", required=True, help="Opcode, e.g. 0x71.")
+@click.option("--sub", "sub_", default=None, help="Sub-opcode byte for variable opcodes, e.g. 0x12.")
+@click.option("--zone", "zones", multiple=True, help="Restrict to zone ids (repeatable). Default: every zone.")
+@click.option("-o", "--output", type=click.Path(dir_okay=False), help="Write rows to a file (UTF-8).")
+def survey_cmd(op_, sub_, zones, output):
+    """Every use of an opcode across the zones, operands resolved, with the last dialog line
+    printed before it. Used to pin the number-window parameters (xi event survey --op 0x71 --sub 0x12).
+    """
+    import sys
+    from xi import xi_config
+    from xi.event import xi_explain as X
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    op = int(op_, 0); sub = int(sub_, 0) if sub_ is not None else None
+    zids = [int(z) for z in zones] or None
+    zfs = X.zone_files(Path(xi_config.FFXI_DIR), zids)
+    rows = []
+    for zf in zfs:
+        try:
+            rows.extend(X.survey_zone(zf, op, sub))
+        except Exception as e:  # a broken DAT must not stop the survey
+            click.echo(f"skip {zf.zone_id} {zf.name}: {e}", err=True)
+    lines = [f"{h.zone_id:3d} {h.zone[:22]:22s} {h.actor[:22]:22s} ev{h.event_id!s:6s} +{h.offset:04x} | {h.operands} | next: {h.next_op[:60]} | prev: {h.previous_text[:110]}"
+             for h in rows]
+    click.echo(f"{len(rows)} use(s) of 0x{op:02x}" + (f" sub 0x{sub:02x}" if sub is not None else "") + f" in {len(zfs)} zone(s)")
+    if output:
+        Path(output).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        click.echo(f"wrote {output}")
+    else:
+        for l in lines[:400]:
+            click.echo(l)
+        if len(lines) > 400:
+            click.echo(f"... {len(lines) - 400} more (use -o)")
+
+
+@click.group("npc")
+def npc_group():
+    """Zone entity-name table (file 6720+zone): the client names an NPC only if its id is listed here."""
+    pass
+
+
+@npc_group.command("list")
+@click.argument("zone")
+@click.option("--tail", type=int, default=8, help="Show the last N records (default 8).")
+def npc_list_cmd(zone, tail):
+    """Show the zone's entity-name records: count, id range, gaps, next free id."""
+    import sys
+    from xi import xi_config
+    from xi.event import xi_explain as X
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    _, _, zone_id, zone_name = _resolve_event_dat(zone)
+    zf = X.zone_files(Path(xi_config.FFXI_DIR), [zone_id])[0]
+    if not zf.npc:
+        raise click.ClickException(f"no entity DAT for zone {zone_id}")
+    data = zf.npc.read_bytes()
+    recs = X.entity_records(data)
+    ids = [sid for sid, _ in recs if sid]
+    gaps = [(a, b) for a, b in zip(ids, ids[1:]) if b - a > 1]
+    click.echo(f"{zone_name} ({zone_id}) {zf.npc.relative_to(Path(xi_config.FFXI_DIR)).as_posix()}: "
+               f"{len(recs)} records, ids 0x{min(ids):08X}..0x{max(ids):08X}, {len(gaps)} gap(s), "
+               f"next free 0x{X.next_free_entity_id(data, zone_id):08X} ({X.next_free_entity_id(data, zone_id)})")
+    for sid, name in recs[-tail:]:
+        click.echo(f"  0x{sid:08X} {sid}  {name}")
+
+
+@npc_group.command("add")
+@click.argument("zone")
+@click.argument("name")
+@click.option("--id", "sid", default=None, help="Server id (hex 0x… or decimal). Default: last id + --gap.")
+@click.option("--gap", type=int, default=1, help="Distance past the last listed id when --id is omitted.")
+@click.option("--replace", is_flag=True, help="Overwrite the name if the id is already listed.")
+@click.option("--dry-run", is_flag=True)
+def npc_add_cmd(zone, name, sid, gap, replace, dry_run):
+    """Add an entity-name record so the client shows NAME for a new NPC id.
+
+    \b
+      xi event npc add 243 "Specialization Master" --gap 10
+      xi event npc add 243 "Specialization Master" --id 0x010F314D
+    Prints the id to use in data/zones/<zone>/npcs.yaml and writes the DAT in place under
+    FFXI_DIR with a .base backup (same convention as the event/dialog writers).
+    """
+    import sys
+    from xi import xi_config
+    from xi.event import xi_explain as X
+    from xi.xi_config import output_path_for
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    _, _, zone_id, zone_name = _resolve_event_dat(zone)
+    zf = X.zone_files(Path(xi_config.FFXI_DIR), [zone_id])[0]
+    if not zf.npc:
+        raise click.ClickException(f"no entity DAT for zone {zone_id}")
+    data = zf.npc.read_bytes()
+    new_id = int(sid, 0) if sid else X.next_free_entity_id(data, zone_id, gap)
+    if (new_id >> 12) & 0xFFF != zone_id or not (new_id & 0x01000000):
+        raise click.ClickException(f"id 0x{new_id:08X} is not in zone {zone_id}'s range (0x{0x01000000 | zone_id << 12:08X}..)")
+    try:
+        out = X.add_entity_name(data, new_id, name, replace=replace)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    rel = zf.npc.relative_to(Path(xi_config.FFXI_DIR)).as_posix()
+    click.echo(f"{zone_name} ({zone_id}): {name!r} -> id 0x{new_id:08X} ({new_id}), index {new_id & 0xFFF}")
+    click.echo(f"  entity DAT {rel}: {len(data)} -> {len(out)} bytes")
+    click.echo(f"  server row: data/zones/<zone>/npcs.yaml  {new_id}:  script: {name.replace(' ', '_')}  display_name: {name}")
+    if dry_run:
+        click.echo("[dry-run] not writing")
+        return
+    dst = Path(output_path_for(str(zf.npc)))
+    base = Path(str(dst) + ".base")
+    if not base.exists():
+        base.write_bytes(data)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(out)
+    click.echo(f"wrote {dst}")
+
+
+@click.command("lint")
+@click.argument("zone")
+@click.argument("who")
+@click.option("--event", "event_id", type=int, help="Only this event id.")
+def lint_cmd(zone, who, event_id):
+    """Pre-flight check of an actor's events (sizes, jumps, selectors, message ids, menu markers, end).
+
+    \b
+      xi event lint 243 0x010F3075 --event 10196
+      xi event lint 235 Isakoth
+    """
+    import sys
+    from xi import xi_config
+    from xi.event import xi_explain as X, xi_lint
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    _, _, zone_id, zone_name = _resolve_event_dat(zone)
+    zf = X.zone_files(Path(xi_config.FFXI_DIR), [zone_id])[0]
+    actors, blobs, names = X.load_zone(zf)
+    q = who.strip()
+    if q.lower().startswith("0x") or q.isdigit():
+        aid = int(q, 0)
+    else:
+        ids = [sid for sid, n in names.items() if n.lower() == q.lower()] or [sid for sid, n in names.items() if q.lower() in n.lower()]
+        if len(ids) != 1:
+            raise click.ClickException(f"{q!r} matches {len(ids)} actors; give an id")
+        aid = ids[0]
+    actor = next((a for a in actors if a.actor_id == aid), None)
+    if actor is None:
+        raise click.ClickException(f"actor 0x{aid:08X} has no block in {zone_name}")
+    results = xi_lint.lint_actor(actor, blobs, event_id)
+    bad = 0
+    for eid, res in sorted(results.items()):
+        status = "OK" if res.ok else "ERROR"
+        click.echo(f"event {eid}: {status}  ({res.opcodes} opcodes, {len(res.calls)} call(s), {len(res.warnings)} warning(s))")
+        for e in res.errors:
+            click.echo(f"    error   {e}")
+        for w in res.warnings:
+            click.echo(f"    warning {w}")
+        bad += not res.ok
+    if bad:
+        raise click.ClickException(f"{bad} event(s) with errors")
 
 
 @click.group("dialogue")

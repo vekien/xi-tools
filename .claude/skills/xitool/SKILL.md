@@ -225,7 +225,6 @@ xi object json ROM/1/41               # every placement
 xi anim list ROM/5/3                  # tracks: name, frames, joints
 xi tex json ROM/1/41 / xi ui tex list
 xi audio refs ROM/1/41                # which sounds a DAT references
-xi audio scan [--sound 5048]          # every DAT: where each sound is used + what that DAT is
 ```
 
 ### Entity mesh round trip
@@ -274,6 +273,7 @@ xi audio export --type music music10              # → exports/audio/music/*.wa
 xi audio decode path/to/se002060.spw --out out/
 xi audio import file.wav                          # → custom .spw (sfx only)
 xi audio install file.wav                         # place under sound/win/se/…
+xi audio scan [--sound 5048]          # every DAT: where each sound is used + what that DAT is
 ```
 
 ### UI textures, strings, items
@@ -293,6 +293,20 @@ xi event dialogue edit ROM/25/39.DAT --index 4 --text "Hello {player}!\nLine two
 xi event dialogue new 245 --json lines.json --actor 0x010F5022   # prints the event id + server Lua
 xi event cutscene export|import|compile …
 ```
+
+### Events: decompile retail, author in JSON, compile back (fork additions, 2026-09-04)
+
+```bash
+uv run xi event explain 243 0x010F30EA --event 10124          # annotated disassembly (stops at a sub's first return)
+uv run xi event decompile 252 0x010FC08F --event 9506 -o oseem_9506.json --check   # retail -> xi.cutscene.v1 JSON, then recompile and compare
+uv run xi event cutscene compile my_event.json                # JSON -> event/dialog DATs
+```
+
+The JSON (`docs/events/authoring.md`, sections from 2026-09-03 onward) is the DAT-independent
+form of an event: lines with text inline, steps, subs, tables, tokens. `decompile --check`
+recompiles in bare mode and compares opcodes with resolved operands; nine retail NPC events
+round-trip at 100% modelled with zero mismatches. Step reference: the `STEP_DISPATCH` table in
+`src/xi/event/xi_compile.py`; decoder: `src/xi/event/xi_decompile.py`; tests: `tests/test_decompile.py`.
 
 ### Custom content packaging (the reproducible path)
 ```bash
@@ -323,3 +337,8 @@ xi dll ffximain crashdump [dump.dmp]              # decode a minidump after a cr
   limits in §2.7 and `docs/common_crashes.md` before touching the writer.
 - Don't tell users to back up or restore DATs unprompted — the reset commands exist and
   the maintainers find restore chatter obstructive (`docs/HANDOVER.md`).
+
+### Typed opcodes and the zone-wide checker (2026-09-05, local fork)
+
+- Every fixed-layout opcode has a typed form in `src/xi/event/xi_typed.py` (`TYPED`), one table used by both the decompiler and the compiler; the field reference is `docs/events/typed_opcodes.md`. Ru'Lude Gardens decompiles with no `raw` steps. To add a form: read `F:\XiEvents\OpCodes x00NN.md`, add the entry (keyed by opcode, `(opcode, size)` or `(opcode, "sub", n)`), run `tests/test_decompile.py::test_typed_table_sizes`.
+- Zone-wide verification: `xi event sweep <zone> [--check] [--jobs 8]` decompiles every event of a zone (and, with `--check`, recompiles and compares each one with retail, then decodes our bytes a second time); `--summary sweep.tsv` appends one line per zone.

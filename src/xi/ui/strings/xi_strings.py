@@ -102,17 +102,39 @@ def _load(category: str, lang: str) -> tuple:
         raise click.ClickException(f'DAT not found: {disk_path}')
     data = disk_path.read_bytes()
     try:
-        table = D.parse(data, bitmask)
+        table = D.parse(data)  # header flip flag decides the XOR mask
     except D.DmsgError as e:
         raise click.ClickException(f'Failed to parse {rom_path}: {e}')
     return table, bitmask, sub_idx
+
+
+def _text_index(block, preferred: int) -> int:
+    """Sub-string index holding the block's display text. Prefers ``preferred``
+    (the category's configured slot); when that slot is absent or not a text
+    slot (quest tables put the id in sub[0], JP key items use sub[1]), falls
+    back to the first text sub-string. Returns -1 when the block has none."""
+    try:
+        subs = D._parse_block(block)
+    except D.DmsgError:
+        return -1
+    if preferred < len(subs) and subs[preferred]['marker'] == 1:
+        return preferred
+    for i, s in enumerate(subs):
+        if s['marker'] == 1:
+            return i
+    return -1
+
+
+def _block_text(block, preferred: int) -> str:
+    idx = _text_index(block, preferred)
+    return D.get_text(block, idx) if idx >= 0 else ''
 
 
 def _iter_strings(table: D.DmsgTable, sub_idx: int):
     """Yield (index, text) for every non-empty block in the table."""
     for i, block in enumerate(table.blocks):
         try:
-            text = D.get_text(block, sub_idx)
+            text = _block_text(block, sub_idx)
         except Exception:
             continue
         if text:
@@ -203,7 +225,7 @@ def import_cmd(category, json_file, lang, dry_run):
 
     table, bitmask, sub_idx = _load(category, lang)
 
-    entries = _json.loads(Path(json_file).read_text(encoding='utf-8'))
+    entries = _json.loads(Path(json_file).read_text(encoding='utf-8-sig'))  # tolerate a BOM
     if not isinstance(entries, list):
         raise click.ClickException('JSON must be a list of {id, text} objects.')
 
@@ -216,10 +238,14 @@ def import_cmd(category, json_file, lang, dry_run):
         if idx >= len(table.blocks):
             click.echo(f'  skip #{idx}: out of range (table has {len(table.blocks)} entries)', err=True)
             continue
+        slot = _text_index(table.blocks[idx], sub_idx)
+        if slot < 0:
+            click.echo(f'  skip #{idx}: block has no text slot', err=True)
+            continue
         try:
-            new_block = D.set_text(table.blocks[idx], sub_idx, text)
+            new_block = D.set_text(table.blocks[idx], slot, text, stride=table.stride)
             if dry_run:
-                old = D.get_text(table.blocks[idx], sub_idx)
+                old = D.get_text(table.blocks[idx], slot)
                 if old != text:
                     click.echo(f'  #{idx}: {old!r} -> {text!r}')
             else:
@@ -262,7 +288,10 @@ def export_cmd(category, lang, output, no_empty):
     table, _, sub_idx = _load(category, lang)
     entries = []
     for i, block in enumerate(table.blocks):
-        text = D.get_text(block, sub_idx)
+        try:
+            text = _block_text(block, sub_idx)
+        except D.DmsgError:
+            text = ''
         if no_empty and not text:
             continue
         entries.append({'id': i, 'text': text})
