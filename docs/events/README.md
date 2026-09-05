@@ -6,8 +6,10 @@ collects what we currently know about the event data format, the dialogue/messag
 formats, and the cutscene bytecode VM, drawn from the existing DAT research, our zone
 code, and the reference implementations in `thirdparty/`.
 
-> **Status.** `xi event cutscene export`, `xi event dialogue new`, and `xi event dialogue`
-> ship today. The event export disassembles a zone's events and **resolves operand
+> **Status.** `xi event decompile` turns any retail event into `xi.cutscene.v1` JSON and
+> `xi event cutscene compile` writes it back byte-exact; `xi event sweep` proves whole zones
+> (see [retail-events.md](retail-events.md)). `xi event cutscene export`, `xi event dialogue new`,
+> and `xi event dialogue` ship too. The event export disassembles a zone's events and **resolves operand
 > references**: dialogue ids show as `→ msg N`, and `load_zone` (`0x34`/`0x35`) targets as
 > `→ zone N Name` (see [the work-selector model](format.md#operand-references--the-references--work-selector-model)).
 > `xi event dialogue new` goes the other way — it **authors** a new NPC dialogue event
