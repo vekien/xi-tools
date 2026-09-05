@@ -93,6 +93,13 @@ nor a file id — it's an *index indirection* through `references[]`.
 > `src/xi/event/xi_event.py` via `_resolve_work_selector` (2-byte work-selector only —
 > including print opcodes). Selectors with the high bit clear can't be resolved statically
 > — they depend on VM run-time state.
+>
+> **Work-slot map (from the PS2 decompile, `XiEvent::getworkofs`):** `< 0x0800` =
+> `Work_Local[]` (per-event scratch, 64 ints), `0x1000–0x17FF` = `Work_Zone[]` (shared by
+> every event in the zone), `0x7F00–0x7F0B` = live fields of the event entity (pos X/Y/Z
+> ÷1000, heading ×4096/2π, is-local-player, server id…), `0x7F80–0x7F8B` = the same for the
+> local player. Special actor ids: `0x7FFFFFF0` player, `0x7FFFFFF1…F5` party members 1–5,
+> `0x7FFFFFF8` the event's own entity. Details: [reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md) §4.2–4.3.
 
 ---
 

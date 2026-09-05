@@ -115,7 +115,8 @@ camera through a few mode/trigger opcodes and the path itself lives elsewhere.
 > (`count` at `+0x10`, a smoothing/interp **mode** enum `0..4` at `+0x14`) then `count` ×
 > 48-byte keyframes: **eye** `vec3`, **focal length** (not degrees; `FOV° = 2·atan2(192, focal)`,
 > default ~350), **look-at** `vec3`, **roll** (radians), normalized **time**, + 12 zero pad
-> bytes. An engine-knowledgeable
+> bytes (per the PS2 `YmCameraKey`, the first four of those are `focus_near`/`focus_far`
+> `s16` depth-of-field values — [reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md) §6). An engine-knowledgeable
 > source from the FFXI **GDTV** community independently described the same — *"the camera
 > timeline VM is block type `0x07`, camera controls block type `0x06`, and the scheduler is
 > the same one effects use"* — matching both our decode and the xim-derived

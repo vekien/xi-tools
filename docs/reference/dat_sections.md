@@ -5,6 +5,10 @@ Canonical section type-code → name registry, from xim's parser
 dispatched in `DatParser.kt`). The type code is `sectionMeta & 0x7F`. xim renders
 these correctly, so these names are authoritative.
 
+The 2003 **PS2 client** uses the same codes for `0x05/0x06/0x07/0x19/0x2F/0x36/0x3D/0x3E/
+0x4A/0x54/0x5E` but different codes and headers for meshes, textures, skeletons and
+animation — see the PS2 class map in [ps2_decomp_crosscheck.md](ps2_decomp_crosscheck.md#3-dat-resource-container--verified-ps2-type-map-recovered).
+
 See [effect_system.md](../fx/effect_system.md) for how the effect-related sections
 (`0x05`/`0x07`/`0x19`/`0x1F`/`0x20`/`0x21`/`0x25`) connect, and how spells resolve to them.
 

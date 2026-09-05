@@ -64,6 +64,9 @@ Each zone's four DAT types resolve from the zone ID by fixed formulas (implement
 | **Dialog** (strings) | `6420 + zone_id` | `model_file_id + 1700` |
 | **NPC** (entities) | `6720 + zone_id` | `model_file_id + 2600` |
 
+The four base-ROM formulas are byte-identical in the 2003 PS2 client
+(`map_num + 100`, `+ 0x16BC`, `+ 0x1914`, `+ 0x1A40`) — [reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md) §2.
+
 Resolve a file_id → DAT path with [`xi ftable lookup`](../ftable/lookup.md). The
 full per-zone Model/Dialog/NPC/Event table (294 zones) is in
 [../zone/zones.md](../zone/zones.md).

@@ -14,6 +14,12 @@ opcode's width).
 > client's `kFixedSizes`/sub-tables; `var` marks a multi-case opcode whose length depends on
 > a sub-selector byte — confirm those against the bytes before emitting.
 > Anything marked *deprecated* has no live handler.
+>
+> **PS2 cross-check (2003 client decompile, DWARF names).** The original `XiEvent::ExecProg`
+> switch ends at **`0xA6`** — every opcode from `0xA7` up post-dates 2003. SE's own handler
+> names for the opcodes (`CodeIF`, `CodeQUERY`, `CodeSCHEDULOR`, `CodeDEFCAMERA`, …) and the
+> packets the VM sends (`0x87`/`0x88` → `0x01B`, `0x8C` → `0x058`, `0xA6` → `0x0EB`) are in
+> [reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md) §4.4. The `0x47` → `0x05C` send is not present in 2003.
 
 ---
 

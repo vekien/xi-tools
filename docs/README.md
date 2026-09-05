@@ -294,6 +294,7 @@ Core lookup tables and named-DAT catalog.
 | [reference/model-file-ids.md](reference/model-file-ids.md) | FTABLE/VTABLE structure, modelid formula, custom ID ranges |
 | [reference/named-dats.md](reference/named-dats.md) | fileId catalog: string tables, system messages, per-zone event/entity ranges |
 | [reference/dat_sections.md](reference/dat_sections.md) | DAT section type reference |
+| [reference/ps2_decomp_crosscheck.md](reference/ps2_decomp_crosscheck.md) | 2003 PS2 client decompile vs. these docs: verified formulas, SE names for event/scheduler opcodes, 2003 packet opcode tables, section-type map |
 | [ffximain/dll.md](ffximain/dll.md) | `xi dll` category: shared POL1 unpack/pack for FFXiMain / polcore / app |
 | [ffximain/ffximain.md](ffximain/ffximain.md) | FFXiMain.dll: POL1 algorithm, gear groups, model formulas, Ghidra |
 | [ffximain/polcore.md](ffximain/polcore.md) | polcore.dll: PlayOnline COM host, IPOLCoreCom, base collision with FFXiMain |

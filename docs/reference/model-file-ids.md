@@ -76,6 +76,10 @@ Last retail modelid (3500+ range) : 109480 - 98239 = 11241
 Tiger skeleton : modelid 308  →  file_id = 308 + 1300 = 1608  →  ROM/5/3.DAT  ✓
 ```
 
+The 2003 PS2 client (`XiSkeletonActor`, `ReferenceRead(modelid + 0x514)`) has only this
+range; gear is `model + model_group_tab[race][slot]` with `equipNum = slot << 12 | model`,
+i.e. the per-race/slot base-table mechanism — [ps2_decomp_crosscheck.md](ps2_decomp_crosscheck.md#model-ids--verified-for-the-2003-range).
+
 ---
 
 ## Gear Model Lookup

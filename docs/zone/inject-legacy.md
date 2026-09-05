@@ -84,6 +84,14 @@ section **data start** (after the section header). Two independent LightConfigs
 +0x8C  8×f32   sky-dome ring elevations (0→1)
 ```
 
+> **PS2 decompile names (`XiWeather` / `XiColorEnv` / `XiWorldEnv`, see
+> [reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md) §7):** `+0x04` point-light count, `+0x08` point-light table;
+> per block `room_light_col`, `room_light_vec`, `ambient_col`, `fog_col`, `fog_far`,
+> `fog_near`, `light_power`. When bit 0 of `+0x00` is set, the `+0x10`/`+0x30` slot is a
+> signed-byte **light direction**, not a colour. World block: `+0x50` focus_far, `+0x54`
+> focus_near (depth of field), `+0x58` clip_range, `+0x5C/+0x5D` focus step counts,
+> `+0x5E` sphere V divisions, `+0x60` effect ambient colour, `+0x64` zone sound resource.
+
 **Packed colour = RGBA byte order** (R at lowest address, then G, B, A). Top byte is
 often `0x80`. This is **not** the same as per-vertex mesh colour, which is **BGRA**.
 Sanity check: outdoor noon zenith rings should read blue-dominant. Fog far `== 0`

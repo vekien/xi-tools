@@ -145,6 +145,10 @@ The routine is a **timeline of commands** that fire generators, play animations,
 sounds, etc. It's what a spell/ability points at.
 
 ### Layout (`EffectRoutineParser.kt:33-93`)
+SE's names (PS2 decompile, `YmScheduler`): sec1 = `init_tag`, sec2 = `idle_tag`,
+sec3 = `die_tag`, totalDelay = `total_frame`. The per-tag task classes (camera `0x58`,
+time `0x7C/0x7D`, weather `0x7E`, depth-of-field `0x82/0x83` …) are tabulated in
+[reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md) §5.
 ```
 0x00  16  zeros
 0x10  u32 sec1Offset   (+ sectionStart)   sec1 = setup/conditional state

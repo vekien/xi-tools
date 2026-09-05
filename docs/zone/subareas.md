@@ -58,6 +58,15 @@ At `ds + dataOffset`: `numEntries` u32, then three zero u32 (pad), then
 | 0x34 | elevator bottom i16, 0x36 elevator top i16 (`pos.y + i16/256`) |
 | 0x38 | (8 bytes) |
 
+> **Corrections from the PS2 decompile (`KO_RectData`, DWARF field names — see
+> [reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md) §8):** `0x0C` is `tex_map_no` (u32), the only rotation is `ry`
+> at `0x10` (Y axis; `0x14` is padding); `0x2C` is `zone_no`, `0x30` is `arrow_flag` (u32),
+> `0x34` is `lift_height` (s16), `0x38` is the runtime `lift_current_height`, `0x3C` is `flag`.
+> The hit test scales into a unit cube (`|c| < 0.5`), so `0x18` holds **full extents**, not
+> half-extents. The header is `file_id, version, dummy[2], offset_tbl[8]` — `dataOffset` is
+> the first of up to eight sub-tables. Kind letters seen in the client: `'z'` zone line,
+> `'m'` map/sub-area, `'@'` lift, `'s'` sound region.
+
 The **first character of `sourceId`** classifies the volume:
 
 | `sourceId[0]` | Kind | Meaning |

@@ -412,3 +412,67 @@ notes; fold it into a dedicated doc if/when the rebase happens.
 *Generated as part of the 80→120 inventory project. Build scripts:
 `xi-tools/ghidra/FFXiMain/patch120/{build_objrel_120,build_ui120,build_ui120_inv}.py`.
 The `.patch` file is the canonical, tool-replayable form of all three.*
+
+---
+
+## 11. PS2 (2003) decompile cross-check
+
+The PlayStation 2 client decompile (`research/external/FFXI-PS2`, SE DWARF names — see
+[../reference/ps2_decomp_crosscheck.md](../reference/ps2_decomp_crosscheck.md)) has the same
+container design with original names. What it confirms and what it changes about the model
+in §1–§6:
+
+**Container storage (`gcitem.c`).** Item records live in the zone object at
+`GC_ZONE + 0x5748`, one block per category, stride **`0xCA8 = 0x51 × 0x28`** (record 0x28 in
+2003; PC grew it to 0x2C). 2003 has three categories, started in `mainloop.cpp` as
+`KmItem::Start(_g_pKmItemProperty, 0)`, `Myroom, 1`, `Closet, 2` — inventory, Mog Safe,
+Storage. `gcItemInit` zeroes `3 × 0xCA8` and writes each record's own slot byte.
+
+**The "sentinel" is slot 0, not an 81st row.** `gcItemIndex(cate, 0)` returns the row-0
+record and stamps it `-1` when empty; `KmItem::Sort` reserves list entry 0 as `0xFFFF`; every
+free-slot / count walk (`gcItemFreeSpaceGet`, `gcItemSpaceNumGet`, `gcItemOneSpeaceGet`,
+`KmItem::SearchFree`, `KmItem::Sort`) iterates **`for (i = 1; i < max; ++i)`**. So 81 rows =
+slot 0 (gil / "none") + 80 usable, and the `0x51 → 0x79` rewrite keeps that invariant.
+
+**Capacity is a raw byte from the server — retail never clamps it.** `RecvItemMax`
+(packet `0x01C`) is literally `memcpy(zone + 0x81E1, pkt + 4, 3)`; `gcItemMaxSpaceGet(cate)`
+returns that byte and is the bound used by all the walks above. The only places the literal
+`0x51` appears are the allocation, `gcItemInit`, the `gcItemLookNext` iterator and `KmItem`.
+This is the engine-side justification for **leaving `getSize` raw** (§4.1): the true limits
+are (a) the allocation stride, (b) the fixed `0x51` loops, (c) `u8` slot indexes — never a
+clamp on the reported size.
+
+**Inbound item packets are unbounded.** `RecvItemNum` / `RecvItemList` / `RecvItemAttr`
+(`0x01E`–`0x020`) write `zone + cate*0xCA8 + slot*0x28 + 0x5748` straight from the packet's
+category/slot bytes with no range check. The array size is the only guard — consistent with
+the "crashes downloading inventory" step being purely a stride/allocation problem.
+
+**`0xDEC` and `0x288` come from `KmItem`, the per-category sort/display model
+(`kmItem.cpp`, `include/KmItem.h`).**
+
+```
++0x00  m_Cate          (SAVE_ITEM_CATEGORY)
++0x0C  m_SortKey       (which of 9 sort orders is active)
++0x10  m_FilterFlg
++0x18  m_ItemNum[9]    u8 — entry count per sort order   (0x51-bounded)
++0x6C  m_BaseTbl[81]   KmItemBase, 0x2C each  = 0xDEC    (9 × u32 sort keys, name, slot, itemNo)
++0xE58 lists[9][81]    8-byte entries {u32 sortval, u16 itemNo, u8 slot, pad} = 0x288 per order
+```
+
+Bounds inside it: `Add` refuses when a list already holds `> 0x50` entries, `Del` and the
+memory-card `Load` clamp/reject at `0x51`, `Sort` walks `1..0x50`. In other words the PC
+per-bag stride `0x51 × 0x2C = 0xDEC` is `KmItemBase[81]`, and the `0x288` window arrays in
+§5 are, in 2003, **81 × 8-byte sort entries per sort order** rather than `2 panes × 0x51 × 4`.
+Both readings give `0x288` bytes; only the element shape differs. Worth a look when
+revisiting §5/§9: if the PC class kept the 8-byte entry, the widened size must be
+`0x79 × 8 = 0x3C8` per list, and the "pane × 0x51" multiplies are really "sort-order × 81".
+
+**Where the 2003 client hard-codes the stride** (the analog of the 183-edit staircase):
+`gcitem.c` (30 sites: init, index, walks, packet handlers, trade lists), `kmItem.cpp` (sort
+model, ~12), `ykWndItem.cpp` and `ykCommon.cpp` (UI list feeders that walk `1..max` from
+`+0x5770`), `gcshop.c` and `gcgroup.c` (read one record by slot for outbound packets). Same
+four buckets as §4: storage core, feeders/bag-walks, outbound slot users, window model.
+
+**Not in 2003:** 18 bags, the 0x2C record, `0x9860`-style object-relative table offsets, and
+any per-bag runtime state — so the PS2 tree cannot verify the relocation/SHIFT mechanics of
+§3, only the container invariants above.
