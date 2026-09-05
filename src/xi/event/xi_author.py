@@ -80,6 +80,54 @@ def append_dialog_lines(dialog_data: bytes, lines, paged: bool = False, reuse_id
     return xi_dialog.build_container(blobs, obf), msg_ids
 
 
+def append_dialog_block(dialog_data: bytes, blobs_in):
+    """Append a CONTIGUOUS run of entries and return ``(new_dat, first_id)``. If the same
+    run already exists contiguously (a re-publish), its first id is returned and the DAT
+    is left alone; otherwise every entry is appended fresh (no per-entry dedup, so the
+    ids stay consecutive — needed by ``say_indexed``, which prints ``base + n``)."""
+    blobs_in = [bytes(b) for b in blobs_in]
+    if not blobs_in:
+        raise ValueError("no dialog blobs given")
+    blobs, obf = xi_dialog.raw_entry_blobs(dialog_data)
+    n = len(blobs_in)
+    for start in range(0, len(blobs) - n + 1):
+        if all(bytes(blobs[start + i]) == blobs_in[i] for i in range(n)):
+            return dialog_data, start
+    first = len(blobs)
+    blobs.extend(blobs_in)
+    return xi_dialog.build_container(blobs, obf), first
+
+
+def append_dialog_blobs(dialog_data: bytes, blobs_in, reuse_ids=None):
+    """Like :func:`append_dialog_lines` but with pre-encoded entry blobs (raw bytes incl.
+    the NUL terminator), for strings cloned from retail entries whose binary placeholder
+    codes must survive untouched. Same in-place / dedup / append rules; returns
+    ``(new_dat_bytes, msg_ids)``."""
+    if not blobs_in:
+        raise ValueError("no dialog blobs given")
+    reuse_ids = list(reuse_ids or [])
+    blobs, obf = xi_dialog.raw_entry_blobs(dialog_data)
+    existing = {}
+    for idx, b in enumerate(blobs):
+        existing.setdefault(bytes(b), idx)
+    msg_ids = []
+    for i, blob in enumerate(blobs_in):
+        blob = bytes(blob)
+        slot = reuse_ids[i] if i < len(reuse_ids) else None
+        if slot is not None and 0 <= slot < len(blobs):
+            blobs[slot] = blob
+            existing.setdefault(blob, slot)
+            msg_ids.append(slot)
+        elif blob in existing:
+            msg_ids.append(existing[blob])
+        else:
+            idx = len(blobs)
+            blobs.append(blob)
+            existing[blob] = idx
+            msg_ids.append(idx)
+    return xi_dialog.build_container(blobs, obf), msg_ids
+
+
 def build_dialogue_bytecode(refs, msg_ids):
     """Build the scene bytecode for a show-messages event.
 
@@ -122,8 +170,11 @@ def add_dialogue_event(actors, actor_id: int, msg_ids, event_id=None):
 
     real_ids = [e for e in actor.event_ids if e not in SENTINELS]
     if event_id is None:
+        # Free on EVERY actor: an id shared with another block makes the client run that
+        # actor's same-numbered event as a participant of ours.
+        zone_ids = {e for a in actors for e in a.event_ids if e not in SENTINELS}
         event_id = (max(real_ids) + 1) if real_ids else 0
-        while event_id in SENTINELS:
+        while event_id in SENTINELS or event_id in zone_ids:
             event_id += 1
     else:
         event_id = int(event_id)

@@ -108,7 +108,7 @@ start-task fires a scheduler resource); the camera move itself lives in those `0
 | `0x25` | 1 | **Wait** for a menu select (from `0x24`). |
 | `0x26` | 1 | Yield the VM. *(May be deprecated.)* |
 | `0x27` | 7 | `FUNC_REQSet` → `XiEvent::ReqSet` (server-request helper). |
-| `0x28`–`0x29` | 7 | Like `0x27` with extra checks; end by calling `XiEvent::GetReqStatus`. |
+| `0x28`–`0x29` | 7 | Like `0x27` with extra checks; end by calling `XiEvent::GetReqStatus`. **The tag byte is a SLOT INDEX into the target entity's event offset table, not an event id** (client: `StackExecPointer = TagOffset[tagnum]`). Laityn 10003 drives her walk, lines and camera cues with `29 08 <Laityn> 0A..1A`, slots 10-26 of her 30-entry table. So an actor's table order is load-bearing: the compiler keeps a replaced event in its original slot and refuses a compile that reorders existing slots (found in game 2026-09-05: the moved entry shifted every later slot by one). |
 | `0x2A` | 6 | Like `0x27`/`0x28` with extra checks; ends by calling `XiEvent::GetReqStatus`. *(6 bytes, not 7 — matches `_FIXED_SIZES`; an earlier revision folded it into the 0x28–0x2A row.)* |
 | `0x2B` | 7 | **Print event message** with a given entity as speaker (like `0x1D`). Message operand = the same 2-byte `references[]` work-selector, at byte offset 5. |
 | `0x2C` | 13 | Create/load a `CMoSchedularTask` on an entity (an **entity action/animation**). |

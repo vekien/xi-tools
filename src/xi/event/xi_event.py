@@ -30,7 +30,7 @@ _FIXED_SIZES = [
     1, 3, 6, 3, 6, 3, 1, 5, 1, 5, 1, 1, 3, 0, 2, 17,
     15, 15, 15, 15, 2, 2, 0, 0, 6, 3, 17, 0, 0, 12, 0, 8,
     12, 4, 0, 0, 0, 4, 0, 0, 27, 8, 13, 17, 15, 15, 3, 0,
-    3, 5, 0, 7, 11, 17, 15, 15, 7, 1, 0, 0, 0, 17, 15, 15,
+    3, 5, 0, 7, 12, 17, 15, 15, 7, 1, 0, 0, 0, 17, 15, 15,
     17, 15, 15, 6, 0, 17, 15, 15, 0, 2,
 ]
 
@@ -56,7 +56,7 @@ _SUB_TABLES = {
                0x12: 2, 0x13: 2, 0x14: 6, 0x15: 6}),
     0xB7: (0, {0: 10, 1: 8, 2: 8, 3: 8, 4: 8}),
     0xCC: (4, {0: 10, 1: 10, 2: 14, 3: 10, 0x10: 6, 0x11: 4, 0x20: 4}),
-    0xD4: (2, {0: 2, 1: 8, 2: 2, 3: 6, 4: 12, 5: 12}),
+    0xD4: (2, {0: 8, 1: 8, 2: 8, 3: 6, 4: 12, 5: 12}),   # sub 0/2 run the 0x24 helper: op+sub+3 selectors (Isakoth page window @0x1bb6)
     0xD8: (6, {0: 6, 1: 8, 2: 8, 3: 8, 4: 12}),
 }
 
@@ -165,7 +165,7 @@ _ACTOR_ARG_OPCODES = {
     0x6C: (0,),                                               # fade entity colour
     0x6E: (0,),                                               # play emote animation
     0x2B: (0,),                                               # print message with speaker (speaker@0)
-    0x73: (0, 4), 0xC4: (0, 4),                               # cast magic (caster, target)
+    0x73: (0, 4), 0xC4: (1, 5),                               # cast magic (caster, target); C4 = 73 with a sub byte first (12 B)
 }
 
 # Opcodes that play an animation/emote directly on an entity (for the timeline).
