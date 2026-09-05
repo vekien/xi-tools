@@ -17,6 +17,7 @@ uv run xi --help                 # works with NO game install (help is exempt)
 uv run xi <group> --help
 uv run xi <group> <cmd> --help   # always check flags here first — docs can lag the code
 xi …                             # same, after `uv tool install -e .`
+xi run FILE [--dry-run] [-k] [--start N]   # replay a file of `xi …` lines (skips blanks/#, `set X=` → `%X%`)
 ```
 
 - **Every non-help command aborts unless `FFXI_DIR` points at a real install**

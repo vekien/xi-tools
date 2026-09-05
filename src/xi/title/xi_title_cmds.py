@@ -1077,6 +1077,104 @@ def sprite_cmd(dat_path, owner, sprite_index, file_offset,
     click.echo(f'wrote {out}')
 
 
+def _wardrobe_sprites(data: bytes) -> list:
+    """The twelve wardrobe 3-8 badge sprites: six `wardrb` icons and six `font` digits.
+
+    `xi title sprite --owner wardrb` reaches only the icons: a payload is owned by the
+    texture name that follows it, and the digit payloads are owned by `font`, which is
+    not a texture in this DAT, so the by-owner index never lists them. The digits are
+    the payloads whose own header says `wardrb` and whose following name is `font`.
+    Returns (kind, quad_offset, src_rect, dest_quad).
+    """
+    from xi.ui.xi_core import (SRC_RECT_OFFSET, _record_prefix, all_texture_sizes,
+                               parse_layout_records)
+
+    dims = all_texture_sizes(data)
+    recs = parse_layout_records(data)
+    out = []
+    for i in range(len(recs) - 1):
+        name, off, length = recs[i]
+        owner = recs[i + 1][0]
+        if owner == 'wardrb' and 'wardrb' in dims:
+            pre = _record_prefix(data, off, length, dims['wardrb'])
+            if pre is None:
+                continue
+            base = off + pre
+            rect = struct.unpack_from('<4H', data, base + SRC_RECT_OFFSET)
+            if rect[0] in (31, 32) and rect[1] in (31, 32) and rect[2:] == (0, 0):
+                out.append(('icon', base, rect, struct.unpack_from('<8H', data, base)))
+        elif name == 'wardrb' and owner == 'font':
+            base = off + (1 if length == 42 else 0)
+            quad = struct.unpack_from('<8H', data, base)
+            dw, dh = abs(quad[2] - quad[0]), abs(quad[5] - quad[1])
+            if dw <= 20 and dh <= 30:
+                rect = struct.unpack_from('<4H', data, base + SRC_RECT_OFFSET)
+                out.append(('digit', base, rect, quad))
+    return out
+
+
+@click.command('wardrobe')
+@click.argument('dat_path', metavar='DAT_FILE')
+@click.option('--hide', is_flag=True, help='Zero the dest quads so nothing is drawn.')
+@click.option('--icons/--no-icons', default=True, help='Include the wardrb icons.')
+@click.option('--digits/--no-digits', default=True, help='Include the 3-8 digits.')
+@click.option('--output', default=None, metavar='DAT_FILE',
+              help='Write elsewhere (default: overwrite DAT_FILE).')
+@click.option('--dry-run', is_flag=True, help='Show changes without writing.')
+def wardrobe_cmd(dat_path, hide, icons, digits, output, dry_run):
+    """List or hide the wardrobe 3-8 badges on the title screen.
+
+    Each badge is an icon sprite (texture `wardrb`) plus a digit sprite drawn from the
+    shared `font` atlas. `xi title sprite --owner wardrb --hide` clears the icons only;
+    the digits are owned by `font`, which is not in this DAT, so this command is the
+    way to clear them.
+
+    \b
+    Examples:
+      uv run xi title wardrobe path/to/50.DAT
+      uv run xi title wardrobe path/to/50.DAT --hide --dry-run
+      uv run xi title wardrobe path/to/50.DAT --hide --no-icons
+    """
+    path = _resolve_title_ui_dat(dat_path)
+    data = bytearray(path.read_bytes())
+    found = _wardrobe_sprites(bytes(data))
+    wanted = [s for s in found if (s[0] == 'icon' and icons) or (s[0] == 'digit' and digits)]
+
+    click.echo(f'{path}')
+    click.echo(f'{"kind":<6} {"quad@":>10}  {"dest TL":>10}  {"dest BR":>10}  {"src WH":>8}  {"src XY":>10}')
+    for kind, base, rect, quad in found:
+        sw, sh, sx, sy = rect
+        drawn = '' if any(quad) else '  (hidden)'
+        click.echo(f'{kind:<6} 0x{base:08x}  ({quad[0]},{quad[1]})  ({quad[6]},{quad[7]})  '
+                   f'{sw}x{sh}  ({sx},{sy}){drawn}')
+    n_icon = sum(1 for s in found if s[0] == 'icon')
+    n_digit = sum(1 for s in found if s[0] == 'digit')
+    click.echo(f'({n_icon} icons, {n_digit} digits; expected 6 + 6)')
+    if not hide:
+        return
+
+    targets = [s for s in wanted if any(s[3])]
+    if not targets:
+        click.echo('  (nothing to hide — already zero)')
+        return
+    click.echo(f'hide: {len(targets)} sprite(s)')
+    if dry_run:
+        click.echo('(dry-run — not written)')
+        return
+    for _kind, base, _rect, _quad in targets:
+        struct.pack_into('<8H', data, base, *([0] * 8))
+
+    out = Path(output) if output else path
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        try:
+            ensure_base(out)
+        except Exception:
+            pass
+    out.write_bytes(data)
+    click.echo(f'wrote {out}')
+
+
 @click.command('swap-sections')
 @click.argument('a', type=int)
 @click.argument('b', type=int)
@@ -1296,36 +1394,29 @@ def menu_cmd(dat_path, menu_tag, elem_index, button_id,
         target = section.elements[elem_index]
         target_label = f'elem[{elem_index}] btn={target.button_id}'
 
-    click.echo(f'[{menu_tag}] {section.name}  {target_label}')
-    click.echo(
-        f'  before: xy=({target.x},{target.y}) wh=({target.width},{target.height}) '
-        f'btn={target.button_id} nav=({target.nav_up},{target.nav_down},'
-        f'{target.nav_left},{target.nav_right}) tid={target.title_id}'
-    )
-
     use_up, use_down, use_left, use_right = nav_up, nav_down, nav_left, nav_right
     if isolate:
         use_up = use_down = use_left = use_right = -1
 
     changes = []
-    if new_x is not None:
-        changes.append(f'x {target.x}->{new_x}')
-    if new_y is not None:
-        changes.append(f'y {target.y}->{new_y}')
-    if new_w is not None:
-        changes.append(f'w {target.width}->{new_w}')
-    if new_h is not None:
-        changes.append(f'h {target.height}->{new_h}')
-    if use_up is not None:
-        changes.append(f'up {target.nav_up}->{use_up}')
-    if use_down is not None:
-        changes.append(f'down {target.nav_down}->{use_down}')
-    if use_left is not None:
-        changes.append(f'left {target.nav_left}->{use_left}')
-    if use_right is not None:
-        changes.append(f'right {target.nav_right}->{use_right}')
-    for c in changes:
-        click.echo(f'  {c}')
+    for name, cur, new in (
+        ('x', target.x, new_x), ('y', target.y, new_y),
+        ('w', target.width, new_w), ('h', target.height, new_h),
+        ('up', target.nav_up, use_up), ('down', target.nav_down, use_down),
+        ('left', target.nav_left, use_left), ('right', target.nav_right, use_right),
+    ):
+        if new is not None and new != cur:
+            changes.append(f'{name} {cur}->{new}')
+
+    state = (
+        f'xy=({target.x},{target.y}) wh=({target.width},{target.height}) '
+        f'nav=({target.nav_up},{target.nav_down},{target.nav_left},{target.nav_right})'
+    )
+    head = f'[{menu_tag}] {target_label}'
+    if changes:
+        click.echo(f'{head}: ' + ', '.join(changes))
+    else:
+        click.echo(f'{head}: {state}  (no change)')
 
     if dry_run:
         click.echo('(dry-run — not written)')

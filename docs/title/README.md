@@ -32,6 +32,7 @@ uv run xi title set-zone 12 115      # point segment 12 at another zone
 uv run xi title aim 12               # auto re-place cameras above the section's zone
 uv run xi title menu                 # title UiMenus (loby): move / size / nav
 uv run xi title sprite               # 0x31 sprites (dest/src): logo, ex*, …
+uv run xi title wardrobe             # wardrobe 3-8 badges (icons + font digits): list / --hide
 ```
 
 Every command reads `ROM/0/23.DAT` under `FFXI_DIR` unless given a path, and `--ffxi DIR`

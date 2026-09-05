@@ -93,6 +93,16 @@ if you only want them gone from the title art: zero the layout dest quads (below
 
 **Goal:** remove wardrobe 3–8 icons and/or digits from the title screen.
 
+```bash
+uv run xi title wardrobe path/to/50.DAT                 # list the 6 icons + 6 digits
+uv run xi title wardrobe path/to/50.DAT --hide          # zero all 12 dest quads
+uv run xi title wardrobe path/to/50.DAT --hide --no-icons   # digits only
+```
+
+`xi title sprite --owner wardrb --index N --hide` clears the **icons only**: the digit
+payloads are owned by `font`, which is not a texture in this DAT, so the by-owner sprite
+index never lists them. The manual method below is what `xi title wardrobe` does.
+
 **Method:** set each sprite’s **destination quad** (8× `u16` screen corners) to all zeros.
 A zero-area dest is not drawn. Source rects and texture pixels can stay untouched.
 

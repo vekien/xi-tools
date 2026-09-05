@@ -93,6 +93,7 @@ from xi.misc import xi_stage   as misc_stage
 from xi.misc import xi_orphans as misc_orphans
 from xi.misc import xi_navmesh as misc_navmesh
 from xi import xi_simplified
+from xi import xi_run
 from xi.dats import xi_dats
 
 
@@ -126,6 +127,7 @@ def cli():
 from xi.misc import xi_bridge_server as misc_bridge
 cli.add_command(misc_bridge.cmd, 'bridge')
 cli.add_command(batch_cmds.batch, 'batch')
+cli.add_command(xi_run.cmd, 'run')
 cli.add_command(xi_dats.group, 'dats')
 
 
@@ -356,6 +358,7 @@ title.add_command(title_cmds.export_cmd,    'export')
 title.add_command(title_cmds.import_cmd,    'import')
 title.add_command(title_cmds.menu_cmd,      'menu')
 title.add_command(title_cmds.sprite_cmd,    'sprite')
+title.add_command(title_cmds.wardrobe_cmd,  'wardrobe')
 
 
 @ui.group('layout')

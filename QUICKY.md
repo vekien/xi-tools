@@ -24,6 +24,7 @@ xi misc
 xi model
 xi mount
 xi object
+xi run
 xi server
 xi tex
 xi ui
@@ -406,6 +407,19 @@ xi batch audio_music
 xi batch audio_sfx
 xi batch dat_header_dump
 ```
+
+## Run (script of commands)
+
+```text
+xi run FILE                 # run each `xi …` line in FILE; skips blanks, `#` comments, ``` fences
+xi run FILE --dry-run       # print the expanded commands only
+xi run FILE -k              # keep going past a failing line
+xi run FILE --start 12      # resume from line 12 (printed when a run stops)
+```
+
+`set NAME=value` lines define `%NAME%` (or `${NAME}`) for later lines, so a pasted
+batch-style script such as `docs/title/custom_title_screen.md` runs as-is. Lines may start
+with `xi`, `uv run xi` or the bare group; a trailing `\` or `^` continues onto the next line.
 
 ## Events
 

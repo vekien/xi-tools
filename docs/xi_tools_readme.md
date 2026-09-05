@@ -11,6 +11,11 @@ uv run xi --help
 `uv run xi dats new` — place gear/mount/entity DATs into the live install
 (`FFXI_DIR`) from a project manifest ([docs](dats/README.md)).
 
+**Repeating a list of commands?** `uv run xi run FILE` runs every `xi …` line in a
+text/markdown file (blank lines and `#` comments skipped, `set NAME=value` → `%NAME%`),
+stopping at the first failure and printing the `--start N` to resume from. Example script:
+[title/custom_title_screen.md](title/custom_title_screen.md).
+
 **Client crashing after a publish?** See [common_crashes.md](common_crashes.md) —
 diagnosis guide for the recurring crashes (overlay tables shadowing a registration,
 scene-file churn, FFXI-2003 on zone-in) and what to check in the Ashita log.
