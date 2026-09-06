@@ -148,8 +148,15 @@ xi zone make-template
 xi zone scaffold-server
 xi zone delete
 xi zone footsteps
+xi zone package             # bundle custom zones (DATs, tables, override-tree tables, server Lua) into one zip
+xi zone patch-proto         # convert a prototype zone's 0x54 placement records to retail 0x64
+xi zone import-collision    # replace/append the whole collision from an OBJ (--compact-buckets, --reset)
 xi zone fx
 xi zone fx list
+
+# zone export defaults to what the client draws; add the filtered classes back:
+xi zone export ROM/23/95 --with-collision-proxies --with-far-lod
+xi zone export ROM/1/41 --no-subareas
 
 xi object json
 xi object export
@@ -246,8 +253,17 @@ xi title list                                 # title screen zones, cameras, wea
 xi title weather --section 12
 xi title timeline                             # shot list per segment (--json to save)
 xi title set-zone 12 115                      # swap a segment's zone
+xi title aim 12                               # re-aim a segment's cameras into its new zone
+xi title swap-sections 4 12                   # exchange two whole segments (see docs/HANDOVER.md §1.6)
 xi title camera export                        # -> exports/title/camera.json (exact round trip)
 xi title camera import                        # <- exports/title/camera.json
+xi title import exports/title/data.json       # cameras (+ --timing) back from the full export
+
+# Title UI DAT (ROM/119/50): menus, sprites, wardrobe badges
+xi title menu ROM/119/50.DAT                  # list / move / size / nav the loby UiMenus
+xi title sprite ROM/119/50.DAT --list-owners  # 0x31 sprites: dest quads + src rects (--dx/--dy/--hide …)
+xi title wardrobe ROM/119/50.DAT              # list the wardrobe 3-8 icons + digits
+xi title wardrobe ROM/119/50.DAT --hide       # …and hide them (--no-icons / --no-digits)
 
 xi ui layout
 xi ui layout damv-pos
@@ -363,11 +379,17 @@ xi mv update
 xi mv update --only gear,music
 xi mv update --only images,npcs --dry-run
 xi mv update --only file-ids
+xi mv update --only zone-names          # curated mog-house names onto zones.json
+
+xi mv database                          # item + d_msg tables -> mv/db/<table>.<lang>.json
+xi mv database --only armor,weapons --lang en
 ```
+
+Full reference: [docs/mv/README.md](docs/mv/README.md).
 
 | Target | Source | What it adds |
 |---|---|---|
-| `gear` | FFXiMain race tables → FTABLE | missing gear model ids per race/slot |
+| `gear` | FFXiMain race tables → FTABLE | missing gear model ids per race/slot (+ fishing rods as `rod: true` Ranged rows) |
 | `gear-sets` | `gear_sets.json` + existing labels | `set` on each gear row (content set) |
 | `gear-labels` | `(JOB Set)` label suffix | rewrites to `JOB - Name` |
 | `music` | `sound*/win/music/data` | unnamed `music*.bgw` |
@@ -376,6 +398,8 @@ xi mv update --only file-ids
 | `effects` | spell / ability / weapon-skill animation → file_id | missing VFX DATs |
 | `images` | DAT section scan (textures only) | missing map, UI and cutscene art |
 | `npcs` | modelid → file_id → DAT, named from `mob_pools` / `npc_list` | missing entity models |
+| `npc-anims` | `Directory (0x01)` sections in the model DAT | `anims` packs on trusts / multi-form monsters that borrow clips from other DATs |
+| `zone-names` | `MOG_HOUSE_NAMES` in `xi.zone.xi_list` | hand-verified mog-house names on `zones.json` rows |
 | `file-ids` | reverse FTABLE/VTABLE | `fileId` on every row in every list |
 
 VFX file_id bands (`offset + animation`): spells `2800`, job abilities `4412`,
@@ -424,10 +448,18 @@ with `xi`, `uv run xi` or the bare group; a trailing `\` or `^` continues onto t
 ## Events
 
 ```text
+xi event explain 243 Laityn                   # annotated disassembly of an NPC's events (--event N, --list)
+xi event decompile 252 0x010FC08F --event 9506 -o oseem.json --check   # retail -> xi.cutscene.v1 JSON, prove the round trip
+xi event sweep 243 --check --jobs 8           # decompile (+ recompile/compare) every event of a zone (--summary sweep.tsv)
+xi event survey --op 0x71 --sub 0x12          # every use of an opcode across all zones
+xi event lint 243 0x010F3075 --event 10196    # pre-flight checks before compiling
+xi event npc list 243                         # zone entity-name table: ids, gaps, next free id
+xi event npc add 243 "Name" --gap 10          # register a name for a new NPC id
+
 xi event cutscene
 xi event cutscene export
 xi event cutscene import
-xi event cutscene compile
+xi event cutscene compile my_event.json       # JSON -> event/dialog DATs (finds the zone's DATs itself)
 
 xi event dialogue
 xi event dialogue actors
@@ -481,4 +513,5 @@ xi misc navmesh-prep
 
 xi server db
 xi server status
+xi server npc-snapshot      # bake the offline npc_list fallback the editor uses without a DB
 ```

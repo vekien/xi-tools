@@ -27,6 +27,7 @@ and a UE5 engine port where they confirm or clarify format details.
 - [Mounts](#mounts)
 - [UI Textures](#ui-textures)
 - [Title Screen](#title-screen)
+- [Model Viewer](#model-viewer)
 - [Entity & NPC](#entity--npc)
 - [Object Placement](#object-placement)
 - [Key Items](#key-items)
@@ -107,6 +108,8 @@ and per-object mesh (0x2A) import/export.
 | [zone/zones.md](zone/zones.md) | Zone ID reference and custom zone creation |
 | [zone/prototype-zones.md](zone/prototype-zones.md) | Unreleased dev/prototype maps in `ROM/0/`: the older layout they use (chained mesh groups, `0x54` placements) and why they load half-empty |
 | [zone/prototype-collision.md](zone/prototype-collision.md) | Worked example (ROM/0/41 as zone 501): stride conversion incl. `.base`, collision size ceiling, rebuilding collision from scratch |
+| [zone/viewer-prototype-town.md](zone/viewer-prototype-town.md) | How the model viewer renders prototype/town DATs: dual meshes, windmills, shadows, time of day |
+| [zone/package.md](zone/package.md) | `xi zone package`: bundle custom zones with their tables, Ashita override-tree tables and server Lua into one zip |
 | [mesh/format.md](mesh/format.md) | 0x2A mesh + 0x20 texture binary format, opcodes, engine constraints |
 | [mesh/export.md](mesh/export.md) | Exporting a mesh DAT to glTF/FBX |
 | [mesh/import.md](mesh/import.md) | Importing an edited mesh back into a DAT |
@@ -125,7 +128,10 @@ reference, camera handling, and a cutscene authoring guide.
 | [events/format.md](events/format.md) | Event DAT binary format: actor blocks, event-id table, scene bytecode |
 | [events/opcodes.md](events/opcodes.md) | Complete event-VM opcode reference (0x00–0xD9) |
 | [events/cutscenes.md](events/cutscenes.md) | How a scripted scene plays: trigger → run → release, camera, resource graph |
-| [events/authoring.md](events/authoring.md) | Authoring custom cutscenes and NPC dialogue events |
+| [events/authoring.md](events/authoring.md) | Authoring custom cutscenes and NPC dialogue events; the `xi.cutscene.v1` JSON step vocabulary; `explain` / `survey` / `lint` / `npc` |
+| [events/retail-events.md](events/retail-events.md) | Decompile any retail event to JSON, edit it, recompile byte-exact; `sweep` proves whole zones |
+| [events/typed_opcodes.md](events/typed_opcodes.md) | The typed opcode table the decompiler and compiler share |
+| [events/cutscene-dev-guide.md](events/cutscene-dev-guide.md) | Browser editor + compile pipeline for custom cutscenes |
 | [events/dialogue.md](events/dialogue.md) | NPC dialogue: `EventMessage` + `d_msg` formats, codec, control codes |
 | [events/event-data.md](events/event-data.md) | Extracted dataset: 277 zones, ~326k dialogue lines |
 | [events/weather.md](events/weather.md) | Weather id → in-game name table for weather opcodes |
@@ -162,6 +168,7 @@ decode, and how the game links sounds to effects, zones, and mobs.
 | [audio/format.md](audio/format.md) | `.bgw`/`.spw` binary format, ADPCM codec, byte-exact gotchas |
 | [audio/pmv.md](audio/pmv.md) | Opening movie: `mov\*.pmv` (`PMUS` + XOR → MPEG-2 ES) + companion WAV-as-`.bgw` |
 | [audio/refs.md](audio/refs.md) | `0x3D` SoundEffectPointer: how the game links sounds to effects/zones |
+| [audio/scan.md](audio/scan.md) | `xi audio scan`: where every sound is used across every DAT, and how each DAT is identified (zone / NPC / spell / gear …) |
 | [sounds/footsteps.md](sounds/footsteps.md) | Terrain type → footstep sound + decal |
 
 ---
@@ -243,8 +250,24 @@ fog per segment. Commands live under `xi title …`.
 | [title/README.md](title/README.md) | `xi title` — list, timeline, weather, camera round trip, zone swap |
 | [title/ui_chrome.md](title/ui_chrome.md) | Title UI DAT `119/50`: textures, UiMenu, UiElementGroup / `lobbywin`, ownership |
 | [title/main_menu.md](title/main_menu.md) | Character-select strip (`loby2win`): move labels, text ids, hide buttons |
-| [title/wardrobe_numbers.md](title/wardrobe_numbers.md) | Hide title-screen wardrobe 3–8 badges (layout in `ROM/119/50`, not DLL/font) |
+| [title/wardrobe_numbers.md](title/wardrobe_numbers.md) | Hide title-screen wardrobe 3–8 badges (layout in `ROM/119/50`, not DLL/font); `xi title wardrobe --hide` |
+| [title/custom_title_screen.md](title/custom_title_screen.md) | Worked example: a fully customised login screen as a runnable `xi run` script |
 | [dats/ROM_0_23.md](dats/ROM_0_23.md) | The `titl` format: scene nodes, camera keyframes, zone sections, weather records |
+| [HANDOVER.md](HANDOVER.md) | Hard-won lessons from the title-screen and UI-texture work: findings, dead ends, the unresolved opening-segment problem, things that will bite you |
+
+---
+
+## Model Viewer
+
+Bakes the JSON that [xi-model-viewer](https://github.com/vekien/xi-model-viewer)
+loads: asset lists (gear, NPCs, effects, music, zones …) and the item / text database
+tables. Commands live under `xi mv …`.
+
+| Doc | Summary |
+|-----|---------|
+| [mv/README.md](mv/README.md) | `xi mv update` targets (gear sets, trust animation packs, mog-house names, file ids …) and `xi mv database` |
+| [anim/fishing.md](anim/fishing.md) | Fishing rods as a second actor: the per-race rod table and how the viewer grafts the rig |
+| [zone/viewer-prototype-town.md](zone/viewer-prototype-town.md) | Rendering prototype/town DATs in the viewer |
 
 ---
 
@@ -313,15 +336,15 @@ searching the decompressed binary for gear/model formula constants.
 
 | File | Summary |
 |------|---------|
-| [dats/research/pol_decompress.md](dats/research/pol_decompress.md) | How to use the decompressor + background on the LZSS algorithm |
-| [dats/research/pol_decompress.py](dats/research/pol_decompress.py) | Standalone decompressor: POL1 → `FFXiMain_unpacked.dll` (Ghidra/IDA) |
-| [dats/research/pol1_inspect.py](dats/research/pol1_inspect.py) | PE section inspector: dump POL1 layout and stub region |
-| [dats/research/pol1_unpack.py](dats/research/pol1_unpack.py) | Exploratory OEP finder + brute-force rotation/XOR attempts |
-| [dats/research/pol_gear_formula.md](dats/research/pol_gear_formula.md) | Gear race-offset constants found in the decompressed binary |
-| [dats/research/search_gear_formula.py](dats/research/search_gear_formula.py) | Search decompressed binary for gear race-offset constants |
-| [dats/research/search_model_formula.py](dats/research/search_model_formula.py) | Search decompressed binary for monster modelid formula constants |
-| [dats/research/texture_convert.py](dats/research/texture_convert.py) | Texture conversion helper |
-| [dats/research/header_summary.json](dats/research/header_summary.json) | Aggregated DAT header scan results |
+| [research/pol_decompress.md](../research/pol_decompress.md) | How to use the decompressor + background on the LZSS algorithm |
+| [research/pol_decompress.py](../research/pol_decompress.py) | Standalone decompressor: POL1 → `FFXiMain_unpacked.dll` (Ghidra/IDA) |
+| [research/pol1_inspect.py](../research/pol1_inspect.py) | PE section inspector: dump POL1 layout and stub region |
+| [research/pol1_unpack.py](../research/pol1_unpack.py) | Exploratory OEP finder + brute-force rotation/XOR attempts |
+| [research/pol_gear_formula.md](../research/pol_gear_formula.md) | Gear race-offset constants found in the decompressed binary |
+| [research/search_gear_formula.py](../research/search_gear_formula.py) | Search decompressed binary for gear race-offset constants |
+| [research/search_model_formula.py](../research/search_model_formula.py) | Search decompressed binary for monster modelid formula constants |
+| [research/texture_convert.py](../research/texture_convert.py) | Texture conversion helper |
+| [research/header_summary.json](../research/header_summary.json) | Aggregated DAT header scan results |
 
 ---
 
@@ -332,5 +355,4 @@ Reference material from other researchers.
 | File | Summary |
 |------|---------|
 | [external_source/zone184_event22.md](external_source/zone184_event22.md) | Annotated event bytecode dump — zone 184, event 22 |
-| [external_source/dump_event.py](external_source/dump_event.py) | Event DAT dumper script |
 | [external_source/New-Player-Cutscene-Pipeline.md](external_source/New-Player-Cutscene-Pipeline.md) | New-player cutscene pipeline notes |

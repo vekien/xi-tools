@@ -272,16 +272,6 @@
   "hand": "Hand-to-hand",
   "hand-to-hand": "Hand-to-hand"
  },
- "_groupLabelsComment": [
-  "Display names for the weapon-type `group` on a gear row. The raw value is",
-  "the item DB's skill name, which abbreviates some past readability ('Hand'",
-  "for hand-to-hand). Keys are that raw value lowercased with runs of",
-  "whitespace collapsed; a group with no entry here is shown as it is."
- ],
- "groupLabels": {
-  "hand": "Hand-to-hand",
-  "hand-to-hand": "Hand-to-hand"
- },
  "retiredSets": [
   "Limbus"
  ],

@@ -173,12 +173,64 @@ The mob/NPC pathfinding navmesh (`.nav`) is baked from this same collision soup 
 see **[navmesh.md](navmesh.md)** (`xi zone navmesh <dat>`). It's a separate
 server-side artifact; rebuild it when your collision edits affect where mobs roam.
 
-## What's next
+## Replace the whole collision — `xi zone import-collision`
 
-**Full-replace** (`--collision <obj>`) — rebuild the entire collision block from
-scratch (grid-bucketed, identity transforms), for major edits or fully custom
-zones. Higher risk (fall-through on errors). Planned after the append path is
-confirmed in-game.
+```bash
+uv run xi zone import-collision ROM10/1/4 4.collision.obj              # replace (default)
+uv run xi zone import-collision ROM10/1/4 hull.obj --floor --terrain 1  # unlabelled faces = grass floor
+uv run xi zone import-collision ROM10/1/4 extra.obj --append --camera-block
+uv run xi zone import-collision ROM10/1/4 hull.obj --reset --floor --camera-block
+uv run xi zone import-collision ROM10/1/4 hull.obj --compact-buckets --dry-run
+```
+
+Bakes an authored OBJ as the zone's collision. **Replace is the default**: the existing
+collision meshes are removed and the OBJ becomes the whole soup, which is what a fully
+custom zone or a rebuilt hull wants. `--append` keeps the existing collision and layers
+the OBJ on top, the same as `zone import --add-collision`.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--replace` / `--append` | replace | Rebuild the collision block from the OBJ, or add to what is there |
+| `--wall` / `--floor` | wall | Flag for faces whose material is not `col_wall_*` / `col_floor_*` |
+| `--terrain N` | `0` | Terrain id (0–10) for faces without a `col_*_<terrain>` material — picks the footstep sound |
+| `--scale F` | `1.0` | Multiply the OBJ coordinates (`0.01` if the DCC exported centimetres) |
+| `--camera-block` | off | Make the collision block the camera too; default is camera-transparent like FFXI's invisible blockers |
+| `--reset` | off | Restore the DAT from `.base` first, discarding **all** prior edits (placements, VFX, everything), then bake |
+| `--compact-buckets` | off | Bucket each triangle into its centroid cell only — see below |
+| `--dry-run` | off | Parse, print the summary, write nothing |
+
+Before writing, the command prints the triangle count (wall / floor split) and the
+world-space extent, and notes when every face fell through to the fallback flag (many
+DCCs drop `usemtl` on export). After writing it reports how much of the collision
+section's size ceiling is used.
+
+### `--compact-buckets` — bake cost tracks triangles, not area
+
+The collision block is a grid of buckets. The default bake puts every triangle into
+**every** cell its bounding box overlaps, so section cost scales with the *area* a
+triangle covers rather than the triangle count — coarsening a mesh buys nothing, because
+triangle count falls as `1/size²` while duplication rises as `size²`. Measured on
+`ROM/0/28`: 130 bytes per triangle for small triangles, 403 for 6-yalm ones, which capped
+a 918 × 1134 zone at a ~150-yalm disc of walkable ground.
+
+The client's collision query does not read one cell: it sweeps the neighbourhood around
+the query point (±1 cell, or ±2 with a runtime flag). So a triangle registered only in
+its **centroid** cell is still found, as long as the triangle is small relative to a cell
+(~3 yalms). `--compact-buckets` does exactly that: 130 → 58 bytes per triangle, and
+combined with an adaptive remesh it fits a whole large zone (97k triangles, 90% of the
+section) where the default bucketing managed a disc.
+
+It is opt-in because a triangle much larger than the sweep radius can be missed. A
+coarse hand-authored hull still wants the default spread behaviour; a dense remeshed
+heightfield wants `--compact-buckets`.
+
+### Facing
+
+Both bake paths emit every face as a pair of **mirror twins** wound the way retail
+winds them, so a face blocks from either approach. Builds before 2026-09-04 flipped only
+the normal, which left three.js boxes solid from the *inside* only — a zone baked with
+one of those walks through its blockers; re-bake it. Details under
+[Technical notes](#technical-notes).
 
 ---
 

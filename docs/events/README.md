@@ -84,7 +84,14 @@ full per-zone Model/Dialog/NPC/Event table (294 zones) is in
   event-id table, the scene bytecode).
 - **[authoring.md](authoring.md)** — **`xi event dialogue new`**: inject dialogue lines +
   synthesize a new event that prints them (the byte-exact writer + verified `print_msg`
-  encoding). The shipped slice of [prototype.md](prototype.md).
+  encoding). The shipped slice of [prototype.md](prototype.md). Also the `xi.cutscene.v1`
+  JSON step vocabulary the compiler reads, and the reading tools `xi event explain`,
+  `survey`, `lint` and `npc list` / `npc add` (the zone entity-name table).
+- **[retail-events.md](retail-events.md)** — **decompile any retail event to JSON, edit it,
+  recompile it byte-exact**: `explain` → `decompile --check` → `sweep` (whole zones, all
+  293 retail zones clean) → `cutscene compile`.
+- **[typed_opcodes.md](typed_opcodes.md)** — the typed opcode table (`src/xi/event/xi_typed.py`)
+  the decompiler and compiler share: one entry per fixed-layout opcode, field names and sizes.
 - **[opcodes.md](opcodes.md)** — the **complete event-VM opcode reference** (0x00–0xD9).
 - **[dialogue.md](dialogue.md)** — how NPC dialogue is stored and shown: the
   `EventMessage` and `d_msg` string formats, the (Shift-JIS-ish) event-string codec,

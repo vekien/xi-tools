@@ -14,16 +14,23 @@ a zone DAT (`ROM/<dir>/<dat>.DAT`). Mirrors the `xi zone` command group.
 | `zone export` | [export.md](export.md) | Export a whole zone (meshes + placements + textures) to GLB/FBX |
 | `zone import` | [import.md](import.md) | Import an edited whole-zone GLB (move/rotate/scale/delete + mesh-merge) |
 | `zone import-json` | [import-json.md](import-json.md) | Apply a JSON change-set from the web level editor |
-| `gui zone` | — | Serve the browser-based [web level editor](../../web/leveleditor/README.md) |
+| `bridge` | [import-json.md](import-json.md) | WebSocket backend the [xi-zone-editor](https://github.com/vekien/xi-zone-editor) talks to (`xi bridge --port 8777`) |
 | `zone reset` | [reset.md](reset.md) | Restore a zone DAT to pristine (undo all edits) |
 | `zone new` | [templates.md](templates.md) | Create a custom zone (**requires** `--template <id>`; see [templates.md](templates.md)); optional `--sky <DAT>` to splice atmosphere |
 | `zone delete` | — | Remove a custom zone (ID ≥ 400) — deletes DAT, zeros FTABLE10, prints server SQL |
+| `zone package` | [package.md](package.md) | Bundle custom zones — DATs, FTABLE10/VTABLE10 in the game folder **and** every Ashita override tree, `zone.lua`, `scripts/zones/<name>/` — into one zip with a manifest |
+| `zone patch-proto` | [prototype-zones.md](prototype-zones.md#converting-a-zone-so-the-client-can-read-it) | Convert a pre-production zone's `0x54` placement records to the `0x64` stride the retail client reads (idempotent) |
 | `zone build-from-manifest` | — | Assemble a custom zone from a Godot designer `build_manifest.json`; reads biome + size from the manifest |
 | `zone json --fx` | [../fx/README.md](../fx/README.md) | Inspect the zone's `0x05` VFX generators as JSON |
 | `zone export --collision` | [collision.md](collision.md) | Export the player-collision mesh (MZB) to `.collision.obj` + `.mtl` + `.collision.json` |
 | `zone import --add-collision` | [collision.md](collision.md) | Append new collision blockers from an authored `.obj` |
+| `zone import-collision` | [collision.md](collision.md#replace-the-whole-collision--xi-zone-import-collision) | Replace (or append) the whole collision from an authored `.obj`; `--compact-buckets` for dense meshes |
 | `zone navmesh` | [navmesh.md](navmesh.md) | Bake a server navmesh (`.nav`) from the zone's collision (native Recast/Detour) |
 | `zone navmesh-info` | [navmesh.md](navmesh.md) | Inspect/validate a Detour `.nav` (ours or stock) |
+
+`zone export` defaults to what the client actually draws: collision-only proxies,
+far-distance stand-in copies are filtered out (`--with-collision-proxies`, `--with-far-lod`
+add them back; `--no-subareas` drops shop/inn interiors) — see [export.md](export.md#options).
 
 ## Individual objects — `object …`
 
@@ -47,9 +54,13 @@ compatibility alias.
 
 ```bash
 # Browse + edit visually, then write back
-uv run xi gui zone                       # move/rotate/scale, copy/paste, delete
+uv run xi bridge                         # backend for xi-zone-editor: move/rotate/scale, copy/paste, delete
 #   → Changes ▸ Export JSON ▸ zone-changes.json
 uv run xi zone import-json zone-changes.json
+
+# Ship a custom zone (DATs + tables + override-tree tables + server Lua) as one zip
+uv run xi zone package --zone 403 --dry-run
+uv run xi zone package --zone 403
 
 # Add a new prop from a model
 uv run xi object export ROM/1/41 gaitou01     # get a GLB to base it on

@@ -30,6 +30,7 @@ uv run xi title camera export        # slim camera paths -> exports/title/camera
 uv run xi title camera import        # write camera.json back
 uv run xi title set-zone 12 115      # point segment 12 at another zone
 uv run xi title aim 12               # auto re-place cameras above the section's zone
+uv run xi title swap-sections 4 12   # exchange two whole segments (zone, cameras, weather) — see HANDOVER §1.6 before relying on it
 uv run xi title menu                 # title UiMenus (loby): move / size / nav
 uv run xi title sprite               # 0x31 sprites (dest/src): logo, ex*, …
 uv run xi title wardrobe             # wardrobe 3-8 badges (icons + font digits): list / --hide

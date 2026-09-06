@@ -6,6 +6,15 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
+## Unreleased
+
+[Compare v1.6.4...main](https://github.com/vekien/xi-tools/compare/v1.6.4...main)
+
+- Fixed the two "Dev / XI Modified" rows in the model viewer's zone list (403 Dev Castle Town, 404 Dev Town) pointing at the wrong ROM10 DATs; they now carry the right paths and file ids.
+- Docs: new model-viewer reference (`xi mv update` targets including `npc-anims` and `zone-names`, `xi mv database`), a `xi zone package` guide, `xi zone import-collision` and `--compact-buckets` in the collision doc, the zone-export filter flags, and the command lists brought up to date with `xi run`, the title, event and zone commands added since v1.5.12.
+
+---
+
 ## v1.6.4 — 2026-09-05
 
 [Compare v1.6.3...v1.6.4](https://github.com/vekien/xi-tools/compare/v1.6.3...v1.6.4)

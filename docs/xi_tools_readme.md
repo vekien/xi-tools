@@ -109,12 +109,15 @@ See [zone/README.md](zone/README.md) for the full command table.
 
 - `uv run xi zone export` ([docs](zone/export.md)) — Decrypt + export a zone (meshes + placements + textures) to `.glb`/`.fbx`; `--collision` also exports the player-collision mesh
 - `uv run xi zone import` ([docs](zone/import.md)) — Import an edited GLB back (move/rotate/scale/delete + mesh-merge + add collision)
-- `uv run xi zone import-json` — Apply a JSON change-set from the web level editor to a local output mirror
+- `uv run xi zone import-json` ([docs](zone/import-json.md)) — Apply a JSON change-set from the web level editor to a local output mirror
 - `uv run xi dats prepare zone-changes.json ...` ([docs](dats/README.md)) — Add a zone change-set to a distributable DAT package
-- `uv run xi gui zone` — Serve the browser-based level editor at `http://localhost:8777/`
+- `uv run xi bridge` — WebSocket backend for the [xi-zone-editor](https://github.com/vekien/xi-zone-editor) desktop app (`ws://127.0.0.1:8777/ws`)
 - `uv run xi object …` ([docs](object/README.md)) — Add, move, replace, clone, or delete individual placements
+- `uv run xi zone import-collision <dat> hull.obj` ([docs](zone/collision.md#replace-the-whole-collision--xi-zone-import-collision)) — Replace (or `--append`) the whole collision from an authored OBJ; `--compact-buckets` fits dense meshes
 - `uv run xi zone navmesh` ([docs](zone/navmesh.md)) — Bake a server navmesh (`.nav`) from the zone's collision
 - `uv run xi zone new` — Create a blank zone from the pre-baked template; `--sky <DAT>` to splice atmosphere
+- `uv run xi zone patch-proto <dat>` ([docs](zone/prototype-zones.md)) — Convert a pre-production zone's `0x54` placements to the retail `0x64` stride
+- `uv run xi zone package` ([docs](zone/package.md)) — Bundle custom zones (DATs, FTABLE10/VTABLE10 incl. Ashita override copies, server Lua) into one zip
 - `uv run xi zone delete <id>` — Remove a custom zone (400+), zero FTABLE10, print server SQL
 - `uv run xi zone build-from-manifest` — Assemble a zone from a Godot designer `build_manifest.json`
 - `uv run xi zone reset` — Restore a zone DAT to pristine
@@ -157,6 +160,11 @@ table, see the DIALOGUE section below). The docs below cover the bytecode VM, th
 dialogue/message formats, and the already-extracted dialogue dataset.
 See [events/README.md](events/README.md) for the big picture + per-zone file IDs.
 
+- `uv run xi event explain <zone> <actor|name> [--event N]` ([docs](events/retail-events.md)) — annotated disassembly: every operand resolved, dialog text inline; `--list` shows a zone's actors
+- `uv run xi event decompile <zone> <actor> --event N -o out.json --check` ([docs](events/retail-events.md)) — retail event → `xi.cutscene.v1` JSON, then recompile and compare
+- `uv run xi event sweep <zone…> --check --jobs 8` ([docs](events/retail-events.md)) — decompile and round-trip every event of one or more zones
+- `uv run xi event cutscene compile my_event.json` ([docs](events/authoring.md)) — JSON → event/dialog DATs; resolves the zone's DATs from the JSON
+- `uv run xi event lint <zone> <actor>` / `survey --op 0x71` / `npc list|add <zone>` ([docs](events/authoring.md)) — pre-flight checks, opcode surveys, the entity-name table
 - [events/format.md](events/format.md) — Event DAT binary format (per-actor blocks, event-id table, scene bytecode)
 - [events/opcodes.md](events/opcodes.md) — the complete event-VM opcode reference (0x00–0xD9)
 - [events/dialogue.md](events/dialogue.md) — NPC dialogue: `EventMessage` + `d_msg` formats, the event-string codec, control codes, in-game display
@@ -248,6 +256,31 @@ Simplified flow:
 |---|---|---|
 | 39541 | `ROM/119/50.DAT` | Title / splash + font sheet (2 textures) |
 | 39542 | `ROM/119/51.DAT` | Main UI sheet — buttons, gauges, icons, keyboard (28 textures) |
+
+## TITLE SCREEN
+
+The login screen flies real zones as a live background (`ROM/0/23.DAT`, `titl`); the
+logos, wardrobe badges and menus are in `ROM/119/50.DAT` (`lobb`). Every command takes
+`--ffxi DIR` to target a pivot/override tree for one call.
+
+- `uv run xi title list` / `timeline` / `weather` ([docs](title/README.md)) — zone segments, shot list per segment, fog per segment
+- `uv run xi title set-zone 12 115` then `xi title aim 12` ([docs](title/README.md)) — point a segment at another zone and re-aim its cameras
+- `uv run xi title export` / `import` / `camera export` / `camera import` ([docs](title/README.md)) — byte-exact camera round trip (`--timing` for the `0x0210` durations)
+- `uv run xi title menu` / `sprite` / `wardrobe` ([docs](title/ui_chrome.md), [main_menu.md](title/main_menu.md), [wardrobe_numbers.md](title/wardrobe_numbers.md)) — move UiMenus, patch sprite quads, hide the wardrobe 3–8 badges
+- Worked example as a runnable script: [title/custom_title_screen.md](title/custom_title_screen.md) (`xi run docs/title/custom_title_screen.md`)
+
+#### References
+
+- [title/README.md](title/README.md) — command reference, camera JSON fields, timing, play order
+- [dats/ROM_0_23.md](dats/ROM_0_23.md) — the `titl` byte format
+- [HANDOVER.md](HANDOVER.md) — findings, dead ends and the unresolved opening-segment problem
+
+## MODEL VIEWER
+
+Bake the JSON [xi-model-viewer](https://github.com/vekien/xi-model-viewer) loads.
+
+- `uv run xi mv update [--only gear,npcs,…] [--dry-run]` ([docs](mv/README.md)) — append missing rows to `mv/lists/*.json`; curated names are never rewritten. Targets: `gear`, `gear-sets`, `gear-labels`, `music`, `sfx`, `zone-music`, `effects`, `images`, `npcs`, `npc-anims`, `zone-names`, `file-ids`
+- `uv run xi mv database [--only armor,weapons] [--lang en,jp]` ([docs](mv/README.md)) — decode the item and `d_msg` tables once to `mv/db/<table>.<lang>.json`
 
 ## FFXIMAIN
 

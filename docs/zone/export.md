@@ -4,7 +4,8 @@ Export an FFXI **zone** (static area geometry) to a self-contained `.glb` and a
 texture-embedded `.fbx`, with every object instanced and placed in world space.
 
 ```bash
-uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--base] [--raw] [--alpha-scale N]
+uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--alpha-scale N]
+                            [--with-collision-proxies] [--with-far-lod] [--no-subareas]
 uv run xi zone export ROM/1/41            # Lower Jeuno
 ```
 
@@ -39,6 +40,11 @@ Zones are a different format from entity models (no skeleton); see
 | `--collision` | Also dump the **player-collision mesh** (the `0x1C` MZB triangle soup) to `<stem>.collision.obj` + `.mtl` + `.collision.json`. Same frame as the `.glb` so it overlays. See [collision.md](collision.md). |
 | `--base` | Export from the pristine original instead of your edited DAT — handy to regenerate a clean model after edits. |
 | `--raw` | Omit the orientation-correction node (raw FFXI coords). View-only — a raw export is not meant to be re-imported. |
+| `--right-handed` | Bake the handedness flip into the geometry instead of the correction node — for game engines (Godot, Unreal) that drop negative node scale, which would mirror the zone and break collision. |
+| `--json` | Also write `<stem>.zone.json`: every placement (full TRS, LOD, links), mesh list, textures, per-weather ambient sounds, companion event/dialog/NPC DAT paths, sub-area interior DATs. |
+| `--with-collision-proxies` | Include **collision-only placements** — draw distance exactly `1.0`, the sentinel the client treats as never-render (`hitwall_*`, `kabe-atariyou`, `hit_*`, `id_board*` / `id_box*`). Retail has 15,835 of them; Ru'Aun Gardens is 45% proxies. Off by default: they stack invisible geometry on the zone. |
+| `--with-far-lod` | Include **far copies** — `m_` / `lnd_` meshes that stand in for richer geometry the zone also places (Ru'Aun's `m_osid_*` islands, `m_bri_*` bridge). The client shows one or the other by region, so exporting both puts the cheap copy inside the detailed one. Only fires where a richer same-stem twin is actually placed, so ordinary `m_` props (`m_bed_02`, `m_pot`) are never affected. |
+| `--no-subareas` | Omit placements tagged with a sub-area id: shop and inn interiors in the towns, and in Ru'Aun Gardens a whole second low-detail copy of the sky. Included by default — they are real geometry, drawn inside their own volume. See [subareas.md](subareas.md). |
 | `--alpha-scale N` | Multiply texture alpha by `N` (clamped to 255) before writing the PNGs. **Default `2.0`** — see below. Pass `1.0` for the raw FFXI alpha, or higher to force more opacity. |
 
 ## Texture opacity (`--alpha-scale`)

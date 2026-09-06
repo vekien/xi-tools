@@ -186,7 +186,8 @@ Resolution order for any question about a command:
 | `xi ftable` | `src/xi/ftable/` | `docs/ftable/*.md`, `docs/reference/model-file-ids.md` |
 | `xi dats` | `src/xi/dats/` | `docs/dats/README.md`, `schema/*.json` |
 | `xi dll` | `src/xi/dll/`, `src/xi/ffximain/` | `docs/dll/README.md`, `docs/ffximain/*.md` |
-| `xi batch`, `xi misc`, `xi server`, `xi bridge`, `xi mv` | `src/xi/{batch,misc,server,zone/xi_bridge.py,mv}/` | `QUICKY.md`, `docs/zone/navmesh.md` |
+| `xi mv` | `src/xi/mv/` (+ `gear_sets.json`, `npc_anims.json`) | `docs/mv/README.md`, `docs/anim/fishing.md` |
+| `xi batch`, `xi misc`, `xi server`, `xi bridge` | `src/xi/{batch,misc,server,zone/xi_bridge.py}/` | `QUICKY.md`, `docs/zone/navmesh.md` |
 
 Cross-cutting references:
 - `docs/README.md` — index of every format doc with one-line summaries.
@@ -307,6 +308,17 @@ form of an event: lines with text inline, steps, subs, tables, tokens. `decompil
 recompiles in bare mode and compares opcodes with resolved operands; nine retail NPC events
 round-trip at 100% modelled with zero mismatches. Step reference: the `STEP_DISPATCH` table in
 `src/xi/event/xi_compile.py`; decoder: `src/xi/event/xi_decompile.py`; tests: `tests/test_decompile.py`.
+
+### Title screen and model-viewer lists
+```bash
+xi title list / timeline / weather                # ROM/0/23.DAT segments, shot list, fog
+xi title set-zone 12 115 && xi title aim 12       # swap a segment's zone, then re-aim its cameras
+xi title camera export / camera import            # byte-exact keyframe round trip
+xi title wardrobe ROM/119/50.DAT --hide           # hide wardrobe 3-8 badges; menu / sprite for UiMenus + sprite quads
+xi mv update [--only gear,npcs] [--dry-run]       # append-only refresh of mv/lists/*.json (docs/mv/README.md)
+xi mv database [--only armor --lang en]           # item + d_msg tables -> mv/db/*.json
+xi zone package --zone 403 [--dry-run]            # custom zone + tables + override-tree tables + server Lua -> zip
+```
 
 ### Custom content packaging (the reproducible path)
 ```bash

@@ -121,15 +121,19 @@ See [`.env.sample`](.env.sample) for the full list.
 - Object export/import/replace/clone/delete/set-placement/swap-placement
 - `xi zone new`, `make-template`, `scaffold-server`, `delete`, `footsteps`
 - `xi zone package` — bundle a custom zone with everything it needs into one deployable package
-- Template zones built from prototype geometry
-- Collision: export to OBJ, append authored blockers, strip or fully replace the mesh
+- Template zones built from prototype geometry; `xi zone patch-proto` converts pre-production zones so the retail client reads them
+- Collision: export to OBJ, append authored blockers, strip or fully replace the mesh (`xi zone import-collision`, `--compact-buckets` for dense meshes)
+- Zone export defaults to what the client draws — collision proxies and far-LOD copies filtered, with flags to add them back
+- Generator-bound objects and pasted point lights survive copy / move / delete through the editor change-set
 - FX inspect/set/copy/delete/export (zone particle & light generators)
 
 ### Title / login screen
 
 - `xi title` — the login screen's zones, cameras and weather (`ROM/0/23.DAT`)
-- `list`, `timeline` (shot list per segment), `set-zone`, `weather`
+- `list`, `timeline` (shot list per segment), `set-zone`, `aim` (re-aim cameras into a new zone), `weather`
 - `export` everything to one JSON; `camera export` / `import` round-trip the camera keyframes
+- Title UI DAT (`ROM/119/50`): `menu` moves/sizes UiMenus, `sprite` patches sprite quads, `wardrobe` hides the wardrobe 3–8 badges
+- A worked, runnable custom-title-screen script: [docs/title/custom_title_screen.md](docs/title/custom_title_screen.md)
 
 ### Navmesh
 
@@ -149,12 +153,19 @@ See [`.env.sample`](.env.sample) for the full list.
 
 - Event manipulation for cutscenes, dialog, custom NPCs
 - Cutscene export/import; dialogue actors, search, edit, reset
-- Event authoring / compile helpers under `xi event`
+- `xi event decompile` — any retail event to readable JSON; `cutscene compile` writes it back byte-exact (`--check` proves it)
+- `xi event sweep` — round-trip every event in a zone in parallel; all 293 retail zones with event data come back clean
+- `xi event explain` / `survey` / `lint` / `npc` — annotated disassembly, opcode surveys, pre-flight checks, the zone entity-name table
 
 ### Model viewer lists
 
-- `xi mv update` — refresh [xi-model-viewer](https://github.com/vekien/xi-model-viewer)'s baked asset lists (gear, gear sets, music, images, NPCs, file ids), with `--only` and `--dry-run`
+- `xi mv update` — refresh [xi-model-viewer](https://github.com/vekien/xi-model-viewer)'s baked asset lists (gear, gear sets, music, images, NPCs, trust animation packs, mog-house names, file ids), with `--only` and `--dry-run`
 - `xi mv database` — bake the viewer's Database tables to JSON
+- Reference: [docs/mv/README.md](docs/mv/README.md)
+
+### Scripting
+
+- `xi run FILE` — replay a text or markdown file of `xi …` lines (skips blanks, comments and code fences; `set NAME=value` variables; `--dry-run`, `-k`, `--start N`)
 
 ### Bulk actions & data
 
