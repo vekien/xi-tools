@@ -20,7 +20,7 @@ ours. A table entry is keyed by opcode, or by (opcode, size) when the size selec
 TYPED: dict = {
     # scheduler requests (XiEvent::ReqSet helpers): a = priority byte, b = request index
     0x27: ("request", [("a", "u8"), ("entity", "ent"), ("b", "u8")]),
-    0x2A: ("request_wait", [("a", "u8"), ("entity", "ent")]),
+    0x2A: ("request_level", [("a", "u8"), ("entity", "ent")]),      # GetReqLevel: a query, never waits
     # entity render flags: the byte is the new value / mask for Flags0 / Flags2 / Flags3
     0x2F: ("render_flags0", [("flag", "u8"), ("entity", "ent")]),
     0x7C: ("render_flags2", [("flag", "u8"), ("entity", "ent")]),
@@ -38,7 +38,7 @@ TYPED: dict = {
     0x76: ("wait_render", [("entity", "ent")]),      # yields on Render.Flags0 / Flags3
     0x5E: ("stop_action", [("tag", "tag")]),         # back to the idle motion
     0x7B: ("stop_talking", [("entity", "ent")]),     # NpcSpeechFrame = -1
-    0x6C: ("fade_color", [("entity", "ent"), ("a", "sel"), ("b", "sel")]),
+    0x6C: ("transparency", [("entity", "ent"), ("a", "sel"), ("b", "sel")]),   # CodeTRANSPAR
     0x9A: ("wait_music", []),
     0x30: ("continue_off", []),                      # ucoff_continue = 0
     0x78: ("reset_time", []),                        # game timer on, zone weather reset
@@ -259,6 +259,7 @@ def spec_for(op: int, size: int, sub: int = -1):
 def opcode_for(name: str, step: dict):
     """(opcode, fields) for a step by name: the form whose fields the step carries, where a
     ``bytes`` field must match the data length exactly; among several the largest form wins."""
+    name = ALIASES.get(name, name)
     def fits(fields) -> bool:
         for f in fields:
             fname, kind = f[0], f[1]
@@ -290,6 +291,63 @@ def opcode_for(name: str, step: dict):
                 if best is None or size < best[2]:
                     best = (key[0] if isinstance(key, tuple) else key, fields, size)
     return None if best is None else (best[0], best[1])
+
+
+# Step names that changed; the compiler accepts the old name and the decompiler emits the new one.
+ALIASES = {
+    "fade_color": "transparency",      # 0x6C, SE: CodeTRANSPAR
+    "companion": "request_wait",       # 0x29, SE: CodeREQEW (ReqSetWait): run a slot of another entity's table and wait
+}
+
+# Entity-state work selectors (XiEvent::getworkofs, 0x7F00-0x7F8B): runtime values of the event
+# entity (0x7F0x) and of the local player (0x7F8x). Positions are millimetres, headings are
+# enDirCli(rad) * 4096 / (2*pi); "flag25" is bit 25 of Render.Flags01. Carried as {"state": name}.
+STATE_SELECTORS = {
+    "event_x": 0x7F00, "event_z": 0x7F01, "event_y": 0x7F02, "event_dir": 0x7F03,
+    "event_job": 0x7F06, "event_race": 0x7F07, "event_level": 0x7F08, "event_server_id": 0x7F0A, "event_flag25": 0x7F0B,
+    "player_x": 0x7F80, "player_z": 0x7F81, "player_y": 0x7F82, "player_dir": 0x7F83,
+    "player_job": 0x7F86, "player_race": 0x7F87, "player_level": 0x7F88, "player_server_id": 0x7F8A, "player_flag25": 0x7F8B,
+}
+STATE_NAMES = {v: k for k, v in STATE_SELECTORS.items()}
+
+# Square Enix's own handler names (XiEvent::Code*), from the PS2 client's DWARF symbols via the
+# XiEvents notes and docs/reference/ps2_decomp_crosscheck.md. The 2003 switch ends at 0xA6.
+SE_NAMES = {
+    0x02: "CodeIF", 0x1F: "CodeMOVE", 0x23: "MESWAIT", 0x24: "CodeQUERY", 0x25: "CodeQUERYWAIT",
+    0x28: "CodeREQSW", 0x29: "CodeREQEW", 0x2C: "CodeSCHEDULOR", 0x2D: "CodeMAPSCHEDULOR", 0x31: "CodeSMOVE",
+    0x34: "XiZone::Open", 0x35: "XiZone::Open (no close)", 0x40: "CodeSETBITWORK", 0x41: "CodeGETBITWORK",
+    0x45: "CodeLOADSCHEDULER", 0x46: "CodeDEFCAMERA", 0x4A: "CodeDTURA", 0x50: "CodeENDSCHEDULOR",
+    0x51: "CodeENDMAPSCHEDULOR", 0x52: "CodeENDLOADSCHEDULER_Main", 0x53: "CodeWAITSCHEDULOR",
+    0x54: "CodeWAITMAPSCHEDULOR", 0x55: "CodeWAITLOADSCHEDULER_Main", 0x5A: "CodeMOVE2", 0x5B: "CodeLOADEXTSCHEDULERMain",
+    0x62: "CodeLOADEVENTSCHEDULER", 0x65: "CodeGETDISTANCEAA", 0x66: "CodeLOADEXTSCHEDULERMain", 0x6C: "CodeTRANSPAR",
+    0x6E: "CodeEMOT", 0x71: "CodeOPENPASSWIN", 0x72: "CodeGETWEATER", 0x73: "CodeMAGICSCHEDULOR", 0x75: "CodeLOADROOM",
+    0x7E: "CodeCHOCOBO", 0x7F: "CodeQUERYWAIT2", 0x80: "CodeLOADWAIT", 0x8B: "CodeSETEVENTMARK",
+    0x98: "XiZone::IsReadingExtData", 0x9F: "CodeLOADEVENTSCHEDULER2", 0xA0: "CodeWAITLOADSCHEDULER_Main",
+    0xA1: "CodeENDLOADSCHEDULER_Main", 0xA2: "CodeWAITLOADSCHEDULER_Main", 0xA3: "CodeENDLOADSCHEDULER_Main",
+}
+
+
+def render_doc() -> str:
+    """The markdown behind docs/events/typed_opcodes.md (python -c "from xi.event import xi_typed; print(xi_typed.render_doc())")."""
+    rows = []
+    for key, (nm, fields) in TYPED.items():
+        op = key if isinstance(key, int) else key[0]
+        form = "" if isinstance(key, int) else (f"sub {key[2]:02X}" if len(key) == 3 else f"size {key[1]}")
+        fl = ", ".join(f"`{f[0]}`:{f[1]}" + (f"[{f[2]}]" if f[1] == "bytes" else "") for f in fields)
+        rows.append((nm, op, form, fl))
+    rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    out = ["## Typed retail opcodes (`xi_typed.TYPED`)", "",
+           "One table drives both directions: `xi event decompile` emits these steps and the compiler writes them back byte for byte. "
+           "Field kinds: `u8` / `u16` literal, `sel` selector (constant through `references[]` or a register), `reg` register, "
+           "`ent` entity id, `tag` scheduler tag, `name16` 16-byte name, `tbl` table label, `msg` dialog line, `bytes[n]` verbatim. "
+           "The SE column is Square Enix's handler name where the PS2 client's symbols give one (the 2003 client ends at `0xA6`).", "",
+           "| step | opcode | form | fields | SE handler |", "|---|---|---|---|---|"]
+    for nm, op, form, fl in rows:
+        out.append(f"| `{nm}` | `{op:02X}` | {form} | {fl} | {SE_NAMES.get(op, '')} |")
+    out += ["", "Old names still accepted by the compiler: " + ", ".join(f"`{a}` -> `{b}`" for a, b in sorted(ALIASES.items())) + ".", "",
+            "Entity-state selectors, carried as `{\"state\": name}` wherever a register is accepted: "
+            + ", ".join(f"`{k}` = `{v:04X}`" for k, v in STATE_SELECTORS.items()) + "."]
+    return "\n".join(out) + "\n"
 
 
 NAMES = sorted({nm for nm, _ in TYPED.values()})
