@@ -1073,13 +1073,15 @@ def _work_selector(spec) -> int:
             return 0x1700 + int(spec["work1700"])
         if "local" in spec and 0 <= int(spec["local"]) < 0x1000:
             return int(spec["local"])
+        if "state" in spec and spec["state"] in xi_typed.STATE_SELECTORS:
+            return xi_typed.STATE_SELECTORS[spec["state"]]   # entity / local-player runtime state (0x7F00-0x7F8B)
         if "sel" in spec and 0 <= int(spec["sel"]) <= 0xFFFF:
             return int(spec["sel"])            # a raw selector the decompiler could not name (retail
                                                # occasionally writes an immediate ref where a register goes)
     if isinstance(spec, int) and 0 <= spec < 0x100:
         return WORK_ZONE_BASE + spec
     raise CutsceneCompileError(
-        f"register spec must be 'menu_result', {{'param': n}}, {{'work': n}}, {{'work1700': n}} or {{'local': n}}, got {spec!r}")
+        f"register spec must be 'menu_result', {{'param': n}}, {{'work': n}}, {{'work1700': n}}, {{'local': n}} or {{'state': name}}, got {spec!r}")
 
 
 def _value_selector(ctx: _Ctx, spec) -> int:
@@ -2288,6 +2290,7 @@ STEP_DISPATCH: dict[str, Callable] = {
     "look": _step_look,
     "look_at": _step_look_at,
     "companion": _step_companion,
+    "request_wait": _step_companion,
     "action": _step_action,
     "wait_task": _step_wait_task,
     "schedule": _step_schedule,
@@ -2320,6 +2323,9 @@ STEP_DISPATCH: dict[str, Callable] = {
 }
 for _typed_name in xi_typed.NAMES:
     STEP_DISPATCH[_typed_name] = _step_typed          # retail-shaped fixed-layout opcodes
+for _old, _new in xi_typed.ALIASES.items():           # renamed steps: old JSON keeps compiling
+    if _new in STEP_DISPATCH:
+        STEP_DISPATCH[_old] = STEP_DISPATCH[_new]
 
 
 # ---------------------------------------------------------------------------

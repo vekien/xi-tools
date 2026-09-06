@@ -257,7 +257,9 @@ Decoded from Bastok Markets (Isakoth 0x010EB0B1 event 26 + page routine 0x1866..
 Home Points, Voidwatch Purveyor). Register specs accepted everywhere a value or
 register is expected: `{"param": n}` (server parameter n = `Work_Zone[2+n]`, i.e.
 `startEvent` / `updateEvent` p_n), `{"work": n}`, `{"work1700": n}`, `{"local": n}`,
-`"result"` (Work_Zone[1]), `"menu_result"` (Work_Zone[0]); a bare integer is a constant.
+`"result"` (Work_Zone[1]), `"menu_result"` (Work_Zone[0]), `{"state": name}` (the client's
+runtime state selectors 0x7F00-0x7F8B: `player_race`, `player_job`, `player_level`, `event_x`, ...;
+the full list is in [typed_opcodes.md](typed_opcodes.md)); a bare integer is a constant.
 
 | step | emits | notes |
 |---|---|---|

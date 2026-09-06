@@ -353,6 +353,8 @@ class Ctx:
             return {"work": sel - 0x1000}
         if sel < 0x1000:
             return {"local": sel}
+        if sel in xi_typed.STATE_NAMES:
+            return {"state": xi_typed.STATE_NAMES[sel]}   # entity / local-player runtime state
         return {"sel": sel}           # unnamed selector bank: carried verbatim
 
     def is_const(self, sel: int) -> bool:
@@ -659,7 +661,7 @@ def decode_op(ctx: Ctx, pos: int, nxt_op: Optional[int], labels: dict[int, str],
     if op == 0x4A:
         return [{"op": "look_at", "a": ctx.ent(ctx.u32(pos + 1)), "b": ctx.ent(ctx.u32(pos + 5))}], sz
     if op == 0x29:
-        return [{"op": "companion", "a": sc[pos + 1], "entity": ctx.ent(ctx.u32(pos + 2)), "b": sc[pos + 6]}], sz
+        return [{"op": "request_wait", "a": sc[pos + 1], "entity": ctx.ent(ctx.u32(pos + 2)), "b": sc[pos + 6]}], sz   # CodeREQEW: b = slot of the entity's event table
     if op == 0x53:
         return [{"op": "wait_task", "a": ctx.ent(ctx.u32(pos + 1)), "b": ctx.ent(ctx.u32(pos + 5)), **_tag(sc, pos + 9)}], sz
     if op in (0x5B, 0x66):
@@ -1122,7 +1124,7 @@ def decompile_loaded(actors, blobs, names, zf, actor_id: int, event_id: int, whi
         op = st.get("op")
         for k in ("a", "b", "target", "entity", "from", "to", "speaker"):
             v = st.get(k)
-            if op in ("action", "wait_task", "schedule", "look", "look_at", "look_talk", "companion", "task", "effect", "effect_bare",
+            if op in ("action", "wait_task", "schedule", "look", "look_at", "look_talk", "companion", "request_wait", "task", "effect", "effect_bare",
                       "render_flag", "load_wait", "ui_flag", "calibrate", "print2") and isinstance(v, str):
                 ent_entry(v)
         if op in ("action", "wait_task", "schedule", "task") and st.get("tag"):

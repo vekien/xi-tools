@@ -113,3 +113,16 @@ def test_replace_keeps_event_slot(root, zone, actor, event, slot):
     moved = [i for i, (x, y) in enumerate(zip(before.event_offsets, after.event_offsets)) if x != y]
     assert moved == [slot], moved
     assert bytes(after.scene_data[:len(before.scene_data)]) == bytes(before.scene_data)
+
+
+def test_state_selectors_and_aliases():
+    """0x7F00-0x7F8B selectors round-trip by name; renamed steps keep their old names as aliases."""
+    from xi.event import xi_typed, xi_compile, xi_decompile as D2
+    for name, sel in xi_typed.STATE_SELECTORS.items():
+        assert D2.Ctx.reg(sel) == {"state": name}
+        assert xi_compile._work_selector({"state": name}) == sel
+    for old, new in xi_typed.ALIASES.items():
+        assert xi_compile.STEP_DISPATCH[old] is xi_compile.STEP_DISPATCH[new]
+    assert xi_typed.opcode_for("fade_color", {"entity": "self", "a": 0, "b": 0})[0] == 0x6C
+    assert xi_typed.opcode_for("transparency", {"entity": "self", "a": 0, "b": 0})[0] == 0x6C
+    assert xi_typed.opcode_for("request_level", {"a": 0, "entity": "self"})[0] == 0x2A
