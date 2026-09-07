@@ -353,5 +353,5 @@ xi dll ffximain crashdump [dump.dmp]              # decode a minidump after a cr
 
 ### Typed opcodes and the zone-wide checker (2026-09-05, local fork)
 
-- Every fixed-layout opcode has a typed form in `src/xi/event/xi_typed.py` (`TYPED`), one table used by both the decompiler and the compiler; the field reference is `docs/events/typed_opcodes.md`. Ru'Lude Gardens decompiles with no `raw` steps. To add a form: read `F:\XiEvents\OpCodes x00NN.md`, add the entry (keyed by opcode, `(opcode, size)` or `(opcode, "sub", n)`), run `tests/test_decompile.py::test_typed_table_sizes`.
+- Every fixed-layout opcode has a typed form in `src/xi/event/xi_typed.py` (`TYPED`), one table used by both the decompiler and the compiler; the field reference is `docs/events/typed_opcodes.md`. Ru'Lude Gardens decompiles with no `raw` steps. To add a form: read `F:\XiEvents\OpCodes\0x00NN.md`, add the entry (keyed by opcode, `(opcode, size)` or `(opcode, "sub", n)`), run `tests/test_decompile.py::test_typed_table_sizes`.
 - Zone-wide verification: `xi event sweep <zone> [--check] [--jobs 8]` decompiles every event of a zone (and, with `--check`, recompiles and compares each one with retail, then decodes our bytes a second time); `--summary sweep.tsv` appends one line per zone.
