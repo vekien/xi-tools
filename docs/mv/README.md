@@ -62,6 +62,11 @@ zones). Those are manual — see `xi zone json --rooms --dev`.
 `effects` resolves an animation id to a file id by band (`offset + animation`): spells
 `2800` (`0xAF0`), job abilities `4412`, weapon skills `4912`. `mob_skills` and
 `item_usable` animations are **not** file ids — they index the caster's own motion set.
+For a PC-skeleton actor that motion set is the per-race weapon-skill banks in
+`FFXiMain.dll` (`xi anim ws N`; server rows with id < 256 go out as the weapon-skill
+packet), and the same number picks a different DAT per race — see
+[../anim/weapon-skills.md](../anim/weapon-skills.md). `weapon_skills.sql` only reaches
+the primary bank (animations ≤ 240); nothing in the server data uses the extended bank yet.
 
 ### Gear sets and labels
 

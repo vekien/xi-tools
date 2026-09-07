@@ -231,6 +231,10 @@ ProcMon read-counts from a boot trace in parens — higher = hit more often.
 * Menu / mission / dialogue / NPC string tables (per-zone and global). Many boot-loaded.
 * e.g. `ROM/165/84.DAT` = zone-name table. The newer expansion mission text likely lives in
   `d_msg` (not yet pinned).
+* `ROM/181/72.DAT` = ability / weapon-skill names (5,888 fixed 80-byte blocks, no XOR; block *i*
+  names ability record *i* of `ROM/118/114`'s `comm` table — 255 = Dimensional Death), JP twin
+  `ROM/181/68`. `ROM/181/73.DAT` = spell names. The full EN/JP list of name tables is
+  `DMSG_TABLES` in `xi.mv.xi_database`; see [anim/weapon-skills.md](anim/weapon-skills.md).
 * Other `d_*` tables: `d_at` (large attribute table, e.g. `ROM/280/2.DAT`, 7 MB+),
   `d_me` (message data). `d_si`/`d_zv`/`d_be`/`d_de`/`d_pa`/`d_ri`/`d_ct`/`d_gh` uncatalogued.
 

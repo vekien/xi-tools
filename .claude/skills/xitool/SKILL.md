@@ -171,7 +171,7 @@ Resolution order for any question about a command:
 | Command group | Package | Docs |
 |---|---|---|
 | `xi mesh` | `src/xi/entity/mesh/` | `docs/mesh/{export,import,format}.md` |
-| `xi anim` | `src/xi/entity/anim/` | `docs/anim/quickref.md` first, then `export/import/schedule/emotes/format.md` |
+| `xi anim` | `src/xi/entity/anim/` | `docs/anim/quickref.md` first, then `export/import/schedule/emotes/format.md`; weapon-skill animation numbers / banks: `docs/anim/weapon-skills.md` |
 | `xi entity`, `xi model` | `src/xi/entity/` | `docs/entity/`, `docs/model/{json,free}.md` |
 | `xi gear` | `src/xi/gear/` | `docs/gear/*.md`, `docs/reference/model-file-ids.md` |
 | `xi mount` | `src/xi/mount/` | `docs/mounts/{README,mechanism,data}.md` |
@@ -224,6 +224,7 @@ xi audio search <name> / xi audio json --type music|sfx
 xi fx json ROM/1/41                   # every 0x05 effect + decoded params
 xi object json ROM/1/41               # every placement
 xi anim list ROM/5/3                  # tracks: name, frames, joints
+xi anim ws 259                        # weapon-skill animation -> each race's DAT (0-255 primary bank, 256-271 extended)
 xi tex json ROM/1/41 / xi ui tex list
 xi audio refs ROM/1/41                # which sounds a DAT references
 ```

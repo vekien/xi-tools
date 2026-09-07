@@ -28,6 +28,7 @@ from xi.entity   import xi_inject as inject, xi_list as list_, xi_recommend as r
 from xi.entity.anim    import xi_export as anim_export
 from xi.entity.anim    import xi_import as anim_import
 from xi.entity.anim    import xi_schedule as anim_schedule
+from xi.entity.anim    import xi_ws as anim_ws
 from xi.entity.mesh    import xi_export as mesh_export
 from xi.entity.mesh    import xi_import as mesh_import
 from xi.dll.cli import dll_group
@@ -265,6 +266,7 @@ anim_top.add_command(anim_export.list_cmd,  'list')
 anim_top.add_command(anim_import.cmd,       'import')
 anim_top.add_command(xi_simplified.anim_json_cmd, 'json')
 anim_top.add_command(anim_schedule.group,   'schedule')
+anim_top.add_command(anim_ws.cmd,           'ws')        # weapon-skill animation -> per-race DAT
 
 
 @entity.group()

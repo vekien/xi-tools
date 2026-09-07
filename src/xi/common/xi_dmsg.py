@@ -30,6 +30,10 @@ Layout references (English client):
   key items   ROM/175/35.DAT  fixed 700,  flip,  sub[0].marker=keyitem id,
                                                   sub[4]=name 5=plural 6=desc
   titles      ROM/180/78.DAT  fixed 256,  flip,  sub[0]=title
+  abilities   ROM/181/72.DAT  fixed 80,   plain, sub[0]=name; block i names the
+                                                  `comm` record i of ROM/118/114
+                                                  (5888 blocks; 255 = Dimensional
+                                                  Death, unnamed rows hold '.')
   job names   ROM/165/86.DAT  variable,   flip,  sub[0]=name
   merit menu  ROM/169/75.DAT  variable,   flip,  sub[0]=name/description
 """

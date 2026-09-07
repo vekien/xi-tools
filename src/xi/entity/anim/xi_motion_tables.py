@@ -43,6 +43,7 @@ exception, by game design).
 """
 
 import struct
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -69,12 +70,42 @@ MOTION_CATEGORY_HINTS: Dict[str, int] = {
     'battle':      0xC825C825,  # engaged/cast clips, per weapon-animation-type
     'dwMain':      0x6F9F6F9F,  # dual-wield main-hand clips
     'dwOff':       0xEF9DEF9D,  # dual-wield off-hand clips
-    'weaponSkill': 0xCB81CB81,  # weapon-skill clips, per animation id
+    'weaponSkill': 0xCB81CB81,  # weapon-skill clips, animation 0..255 (body + 2 companion blocks of 256)
+    'weaponSkillExt': 0x0BF00BF0,  # weapon-skill clips, animation 256..271 (body + 2 companion blocks of 16)
 }
 
 # Categories whose real clips are a contiguous prefix from the base (rest of the
 # window is unrelated). Everything else fills its window densely.
 SPARSE_CATEGORIES = frozenset({'movement', 'emote', 'dance'})
+
+# Weapon-skill banks. The client resolves a weapon-skill animation number (the
+# 12-bit value in the 0x028 action packet, category 3) through TWO banks, chosen
+# by comparing the number with 256 (FFXiMain loader, branch after the category
+# selector):
+#
+#     animation <  256:  file_id = primary_body[race]  + animation
+#     animation >= 256:  file_id = extended_body[race] + (animation - 256)
+#
+# Each bank is one table region in the DLL: a 9-row u16 body table (row 0
+# duplicates HumeMale -- that pair is the hint), a zero word, then nine
+# (companionA, companionB) u16 pairs. The companions sit at body + slots and
+# body + 2*slots: the primary bank strides 256 per block, the extended bank 16.
+# Both companion blocks hold the part-2 (waist) clips of the same slot (b0?2
+# tracks, a few KB, no `main`) -- the body/waist split the emote +6 sibling and
+# the battle "skirt" pack use; which lower-body variant picks A over B is not
+# pinned down. Adding an animation >= 256 to the PRIMARY base therefore lands
+# in companion A of slot (animation - 256): a real DAT with no `main` routine
+# -- the wrong asset.
+# See docs/anim/weapon-skills.md.
+WS_PRIMARY_SLOTS = 256
+WS_EXTENDED_SLOTS = 16
+WS_EXTENDED_FIRST = 256
+WS_COMPANION_TABLE_OFFSET = 0x14  # bytes from the body table to the companion pairs
+_WS_BANK_LAYOUT = {
+    # bank name: (category hint, first animation, body slots per race)
+    'primary':  ('weaponSkill',    0,                 WS_PRIMARY_SLOTS),
+    'extended': ('weaponSkillExt', WS_EXTENDED_FIRST, WS_EXTENDED_SLOTS),
+}
 
 # Start DLL hint scan past the PE headers/code to avoid coincidental matches
 # (the lookup tables live well past here; matches UE5's 0x30000 scan floor).
@@ -272,3 +303,119 @@ def enumerate_race_animations(
             seen.add(wspec)
             yield race, 'emote', resolver.file_id_for(wspec) or 0, wspec, wanims
                 # dense: skip non-animation slot, keep filling the window
+
+
+# -- weapon-skill banks --------------------------------------------------------
+
+@dataclass(frozen=True)
+class WsBank:
+    """One weapon-skill bank read from FFXiMain.dll (see ``_WS_BANK_LAYOUT``)."""
+    name: str                      # 'primary' | 'extended'
+    first_animation: int           # 0 | 256
+    slots: int                     # body slots per race: 256 | 16
+    body: Tuple[int, ...]          # 8 per-race body base file_ids (RACE_NAMES order)
+    companion_a: Tuple[int, ...]   # 8 per-race part-2 (waist) bases = body + slots
+    companion_b: Tuple[int, ...]   # 8 per-race part-2 (waist, 2nd variant) bases = body + 2*slots
+    table_offset: int              # file offset of the body table in the DLL
+
+    @property
+    def last_animation(self) -> int:
+        return self.first_animation + self.slots - 1
+
+    def contains(self, animation: int) -> bool:
+        return self.first_animation <= animation <= self.last_animation
+
+
+@dataclass(frozen=True)
+class WsSlot:
+    """A weapon-skill animation resolved for one race."""
+    race: str
+    animation: int
+    bank: str
+    index: int                     # slot inside the bank (animation - first_animation)
+    file_id: int                   # body DAT
+    companion_a: int               # part-2 (waist) DAT
+    companion_b: int               # part-2 (waist) DAT, second variant
+
+
+def read_ws_bank(dll: bytes, name: str) -> Optional[WsBank]:
+    """Read one weapon-skill bank (``'primary'`` / ``'extended'``) from the DLL, or
+    None when its hint is absent. The table SHAPE is validated, not its offset:
+    the companion pairs must sit exactly ``slots`` and ``2*slots`` above the body
+    row for every race, otherwise the hint matched something else."""
+    hint_key, first, slots = _WS_BANK_LAYOUT[name]
+    off = find_table_offset(dll, MOTION_CATEGORY_HINTS[hint_key])
+    if off < 0:
+        return None
+    body = read_race_bases(dll, off)
+    comp = off + WS_COMPANION_TABLE_OFFSET
+    pairs = [struct.unpack_from('<HH', dll, comp + (i * 4)) for i in range(1, 9)]
+    comp_a = [a for a, _ in pairs]
+    comp_b = [b for _, b in pairs]
+    if any(a != b0 + slots or b != b0 + 2 * slots
+           for b0, a, b in zip(body, comp_a, comp_b)):
+        return None
+    return WsBank(name, first, slots, tuple(body), tuple(comp_a), tuple(comp_b), off)
+
+
+def weapon_skill_banks(dll: bytes) -> Dict[str, WsBank]:
+    """``{'primary': WsBank, 'extended': WsBank}`` -- whichever banks the DLL has."""
+    out: Dict[str, WsBank] = {}
+    for name in _WS_BANK_LAYOUT:
+        bank = read_ws_bank(dll, name)
+        if bank is not None:
+            out[name] = bank
+    return out
+
+
+def race_index(race) -> int:
+    """0..7 index into RACE_NAMES from a name ('HumeMale', 'Mithra', ...) or a
+    0-based index. The client rejects race indices past Galka -- so do we."""
+    if isinstance(race, int):
+        idx = race
+    else:
+        key = str(race).replace(' ', '').replace('_', '').lower()
+        aliases = {'tarutarumale': 'tarumale', 'tarutarufemale': 'tarufemale',
+                   'taru': 'tarumale', 'tarutaru': 'tarumale', 'hume': 'humemale',
+                   'elvaan': 'elvaanmale'}
+        key = aliases.get(key, key)
+        names = [n.lower() for n in RACE_NAMES]
+        if key not in names:
+            raise ValueError(f'unknown race {race!r}; one of {", ".join(RACE_NAMES)}')
+        idx = names.index(key)
+    if not 0 <= idx < len(RACE_NAMES):
+        raise ValueError(f'race index {idx} out of range 0..{len(RACE_NAMES) - 1} '
+                         f'(the client rejects actor race indices past Galka)')
+    return idx
+
+
+def weapon_skill_slot(banks: Dict[str, WsBank], race, animation: int) -> WsSlot:
+    """Resolve a weapon-skill animation number for a race exactly as the client
+    does: ``< 256`` through the primary bank, ``>= 256`` through the extended
+    bank. Raises ValueError for numbers outside the discovered bank extents --
+    callers should diagnose those, never mask to 8 bits or keep adding."""
+    ri = race_index(race)
+    animation = int(animation)
+    if not 0 <= animation <= 0xFFF:
+        raise ValueError(f'animation {animation} is not a 12-bit action animation number')
+    bank = banks.get('primary' if animation < WS_EXTENDED_FIRST else 'extended')
+    if bank is None or not bank.contains(animation):
+        have = ', '.join(f'{b.name} {b.first_animation}..{b.last_animation}'
+                         for b in banks.values()) or 'none'
+        raise ValueError(f'animation {animation} is outside the weapon-skill banks '
+                         f'found in FFXiMain.dll ({have})')
+    idx = animation - bank.first_animation
+    return WsSlot(RACE_NAMES[ri], animation, bank.name, idx,
+                  bank.body[ri] + idx, bank.companion_a[ri] + idx, bank.companion_b[ri] + idx)
+
+
+def resolve_weapon_skill(animation: int, race=None,
+                         dll: Optional[bytes] = None) -> List[WsSlot]:
+    """``[WsSlot]`` for ``animation`` -- one per race, or just ``race``. Reads the
+    banks from FFXiMain.dll (``dll`` bytes, else the install's DLL)."""
+    data = dll if dll is not None else load_maindll()
+    banks = weapon_skill_banks(data)
+    if not banks:
+        raise ValueError('No weapon-skill bank tables found in FFXiMain.dll (unexpected build).')
+    races = [race_index(race)] if race is not None else range(len(RACE_NAMES))
+    return [weapon_skill_slot(banks, ri, animation) for ri in races]

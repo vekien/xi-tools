@@ -80,6 +80,10 @@ and a **bare glTF name** you drop in that folder (`--layer yap.gltf`, or
 > race straight from the game (FFXiMain motion tables + FTABLE) into
 > `exports/anim/<Race>/<category>/…`. Scope with `--race` / `--category`; this is
 > texture-free by design (it would otherwise write a PNG per track across ~180k tracks).
+> Categories: `movement, emote, dance, action, fishing, battle, dwMain, dwOff,
+> weaponSkill, weaponSkillExt` — the last two are the primary (animations 0–255) and
+> extended (256–271) weapon-skill banks, each walked with its two companion blocks
+> (see [weapon-skills.md](weapon-skills.md)).
 
 ### Digit-less = merged full-body clip
 

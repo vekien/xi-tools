@@ -61,7 +61,7 @@ loads at boot, and deep dives into specific well-known DATs.
 | `ROM/0/27.DAT` | [dats/ROM_0_27.md](dats/ROM_0_27.md) | UI animation / value curves (`damv`) |
 | `ROM/1/41.DAT` | [dats/ROM_1_41.md](dats/ROM_1_41.md) | |
 | `ROM/97/*.DAT` | [dats/ROM_97_menu_strings.md](dats/ROM_97_menu_strings.md) | Menu label string tables (`XISTRING`, plain ASCII) |
-| `ROM/118/114.DAT` | [dats/ROM_118_114.md](dats/ROM_118_114.md) | |
+| `ROM/118/114.DAT` | [dats/ROM_118_114.md](dats/ROM_118_114.md) | Boot-loaded numeric tables (`menu`): `mnc2`, `mon_`, `levc`, the rotated `mgc_` (magic) and `comm` (ability) records |
 | `ROM/118/115.DAT` | [dats/ROM_118_115.md](dats/ROM_118_115.md) | Live mission/quest text DB (`menu`, ROR-1 encoded) |
 | `ROM/165/84.DAT` | [dats/ROM_165_84.md](dats/ROM_165_84.md) | |
 | `ROM/168/25.DAT` | [dats/ROM_168_25.md](dats/ROM_168_25.md) | Auto-translate phrase dictionary |
@@ -84,6 +84,7 @@ the `0x07` scheduler that cutscenes use to drive character motion.
 | [anim/emotes.md](anim/emotes.md) | Emote & skeleton-less DATs: base skeleton, overlay slots, routine duration |
 | [anim/quickref.md](anim/quickref.md) | One-page cheatsheet of common export/import/layer commands |
 | [anim/fishing.md](anim/fishing.md) | Fishing rods & hand props: the client's per-race rod table, rod DATs, dependent-actor playback, the logging hatchet, and how `xi mv update` / the viewer reproduce them |
+| [anim/weapon-skills.md](anim/weapon-skills.md) | Weapon-skill animations: the three unrelated id spaces, the primary (0–255) and extended (256–271) per-race motion banks with their companion blocks, the rotated ability table, the name table, the effect-directory naming pattern and its counterexamples, `xi anim ws` |
 
 ---
 

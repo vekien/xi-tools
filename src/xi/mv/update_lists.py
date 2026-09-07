@@ -657,6 +657,14 @@ _WS_ANIM_MAX = 245  # band ends at file_id 5157
 # the monster's own model DAT, not a standalone VFX file. Same for
 # `item_usable.animation` — that is the player's use motion (it resolves into the
 # gear model band), not an effect file.
+#
+# One nuance: the server sends mob_skills rows with id < 256 as category 3
+# (SkillFinish, the weapon-skill packet), so on a humanoid (PC-skeleton) mob
+# that animation number goes through the per-race weapon-skill MOTION banks in
+# FFXiMain.dll (xi.entity.anim.xi_motion_tables / `xi anim ws`) — still not
+# this VFX band. weapon_skills.sql is also not the complete set of such moves;
+# the hidden humanoid ones (e.g. 255 dimensional_death -> anim 190) live in
+# mob_skills. See docs/anim/weapon-skills.md.
 
 
 def _norm_effect_path(p: str) -> str:

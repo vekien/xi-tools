@@ -14,7 +14,14 @@ Copy-paste commands for the common animation tasks. `<dat>` is a ROM-relative sp
 uv run xi anim list  <dat>                 # every track: name, frames, joints, seconds
 uv run xi anim list  <dat> --json          # same, as JSON
 uv run xi anim json  <dat>                 # all tracks as JSON
+uv run xi anim ws 259                      # weapon-skill animation number -> each race's DAT (two banks)
+uv run xi anim ws                          # the per-race weapon-skill bank tables in FFXiMain.dll
 ```
+
+`anim ws` resolves the 12-bit action-packet animation (`weapon_skills.animation`,
+`!injectaction 3 N`) the way the client does: 0–255 through the primary bank,
+256–271 through the extended bank — never `base + N` past 255. Details in
+[weapon-skills.md](weapon-skills.md).
 
 ## Export (to glTF for Blender / C4D)
 

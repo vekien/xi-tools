@@ -1620,7 +1620,7 @@ def _export_all_races(fbx: bool, output: Optional[Path], race_filter: Optional[s
 @_click.option('--category', default=None,
                help='No-DAT bulk mode only: restrict to these motion categories '
                     '(comma-separated): movement, emote, dance, action, fishing, '
-                    'battle, dwMain, dwOff, weaponSkill.')
+                    'battle, dwMain, dwOff, weaponSkill, weaponSkillExt.')
 @_click.option('--skip-existing', is_flag=True, default=False,
                help='No-DAT bulk mode: skip clips whose output file already exists '
                     '(resume a long run).')

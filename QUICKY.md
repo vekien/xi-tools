@@ -80,6 +80,7 @@ xi mesh json
 xi anim export
 xi anim import
 xi anim list
+xi anim ws                     # weapon-skill animation number -> per-race motion DAT
 xi anim json
 xi anim schedule
 xi anim schedule list
@@ -404,7 +405,8 @@ Full reference: [docs/mv/README.md](docs/mv/README.md).
 
 VFX file_id bands (`offset + animation`): spells `2800`, job abilities `4412`,
 weapon skills `4912`. `mob_skills` and `item_usable` animations are *not* file
-ids — they index the caster's own motion set.
+ids — they index the caster's own motion set (for PC skeletons: the per-race
+weapon-skill banks, `xi anim ws N`, docs/anim/weapon-skills.md).
 
 `gear-sets` writes a single `set` field holding every bucket: Artifact, Relic
 and Empyrean (read off the existing `(JOB Set)` label suffix), `Ebur / Furia /

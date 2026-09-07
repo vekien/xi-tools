@@ -12,6 +12,9 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 - Fixed the two "Dev / XI Modified" rows in the model viewer's zone list (403 Dev Castle Town, 404 Dev Town) pointing at the wrong ROM10 DATs; they now carry the right paths and file ids.
 - Docs: new model-viewer reference (`xi mv update` targets including `npc-anims` and `zone-names`, `xi mv database`), a `xi zone package` guide, `xi zone import-collision` and `--compact-buckets` in the collision doc, the zone-export filter flags, and the command lists brought up to date with `xi run`, the title, event and zone commands added since v1.5.12.
+- New `xi anim ws N` resolves a weapon-skill animation number to the motion DAT each race plays. The client uses two per-race banks in `FFXiMain.dll`: numbers 0–255 go through the primary bank and 256–271 through a separate extended bank, so adding 259 to the primary base (which gave a waist-clip DAT with no `main` routine) was wrong. `xi anim list` and bulk `xi anim export` now enumerate the extended bank as `weaponSkillExt`.
+- `xi ui layout mnc2-pos --records` now undoes the per-record byte rotation of the `comm` (ability) and `mgc_` (magic) tables in `ROM/118/114.DAT`, names each ability row from `ROM/181/72.DAT`, and lists all 2,816 rows; `--raw` shows the on-disk bytes.
+- Docs: `docs/anim/weapon-skills.md` — the three unrelated weapon-skill id spaces (name id, server animation number, per-race file id), the bank tables and their companion blocks, the decoded ability table, the effect-directory naming pattern with its counterexamples, and what remains unproven.
 
 ---
 

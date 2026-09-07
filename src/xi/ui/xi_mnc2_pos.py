@@ -7,6 +7,8 @@ from pathlib import Path
 import click
 
 from xi.xi_config import FFXI_DIR, editable_dat, read_path_for
+from xi.common.xi_menu_records import (COMM_TYPE_NAMES, decode_record,
+                                       load_ability_names)
 
 
 @dataclass
@@ -25,13 +27,19 @@ class BlockLayout:
     note: str
 
 
+# On disk a block's record payload starts right after its 16-byte section header
+# (tag + 0x10); the BlockLayout.data_skip of 0x30 is FFXiMain's *pointer*
+# convention (block_start + 0x30), which is what the block summary reports.
+RECORD_PAYLOAD_SKIP = 0x10
+
 BLOCK_LAYOUTS = {
     # FFXiMain stores each located block pointer as block_start + 0x30.
     'mnc2': BlockLayout(0x30, None, None, 'indexed model/animation tables'),
     'mon_': BlockLayout(0x30, None, None, 'uint16 lookup table'),
     'levc': BlockLayout(0x30, None, None, 'uint16 level/curve table'),
-    'mgc_': BlockLayout(0x30, 0x64, 0x400, '1024 fixed records'),
-    'comm': BlockLayout(0x30, 0x30, 0x700, '1792 fixed records'),
+    'mgc_': BlockLayout(0x30, 0x64, 0x400, '1024 fixed records, rotated per record'),
+    # 2816 records on disk; the client iterates only the first 0x700 (1792).
+    'comm': BlockLayout(0x30, 0x30, 0xB00, '2816 fixed records, rotated per record'),
     'end\\0': BlockLayout(0, None, None, 'terminator'),
 }
 
@@ -90,45 +98,55 @@ def _print_blocks(blocks: list[Mnc2Block]) -> None:
         )
 
 
-def _print_record_samples(data: bytes, block: Mnc2Block, limit: int) -> None:
+def _print_record_samples(data: bytes, block: Mnc2Block, limit: int,
+                          raw: bool = False, names: bool = True) -> None:
+    """List the fixed records of ``comm`` / ``mgc_``.
+
+    Both tables obfuscate every record independently (bytes +2/+0xB/+0xC plain,
+    the rest rotated by an amount derived from those three — see
+    :mod:`xi.common.xi_menu_records`). By default the rotation is undone, so the
+    id at +0 is the record index and ``comm`` +2 is the ability type; ``raw``
+    prints the on-disk bytes instead."""
     layout = BLOCK_LAYOUTS.get(block.tag)
     if not layout or not layout.record_size or not layout.record_count:
         click.echo(f'Record listing is not defined for {block.tag}.')
         return
 
-    start = block.offset + layout.data_skip
+    start = block.offset + RECORD_PAYLOAD_SKIP
     end = min(block.next_offset, start + layout.record_size * layout.record_count)
     shown = 0
+    mode = 'raw on-disk bytes' if raw else 'decoded (per-record rotation undone)'
+    click.echo(f'{block.tag} fixed records — {mode}:')
 
-    click.echo(f'{block.tag} fixed records:')
-    if block.tag == 'comm':
-        click.echo(f'  {"idx":>5} {"off":>8} {"id":>5} {"b2":>4} {"b3":>4} {"w4":>5} {"w8":>5} {"b0e":>4} {"b0f":>4} raw[0:16]')
+    def records():
         for idx in range(layout.record_count):
             off = start + idx * layout.record_size
             if off + layout.record_size > end:
                 break
-            rec = data[off:off + layout.record_size]
+            rec = bytes(data[off:off + layout.record_size])
+            yield idx, off, (rec if raw else decode_record(rec))
+
+    if block.tag == 'comm':
+        ability_names = load_ability_names() if (names and not raw) else []
+        click.echo(f'  {"idx":>5} {"off":>8} {"id":>5} {"type":>4}  {"kind":<18} {"name":<24} rec[0:16]')
+        for idx, off, rec in records():
             rec_id = struct.unpack_from('<H', rec, 0)[0]
-            if rec_id in {0, 0xffff}:
+            if rec_id == 0xffff or not any(rec[2:]):
                 continue
-            w4 = struct.unpack_from('<H', rec, 4)[0]
-            w8 = struct.unpack_from('<H', rec, 8)[0]
+            kind = '-' if raw else COMM_TYPE_NAMES.get(rec[2], str(rec[2]))
+            name = ability_names[rec_id] if rec_id < len(ability_names) else ''
             click.echo(
-                f'  {idx:>5} 0x{off:06x} {rec_id:>5} {rec[2]:>4} {rec[3]:>4} '
-                f'{w4:>5} {w8:>5} {rec[0x0e]:>4} {rec[0x0f]:>4} {rec[:16].hex(" ")}'
+                f'  {idx:>5} 0x{off:06x} {rec_id:>5} {rec[2]:>4}  {kind:<18} {name[:24]:<24} '
+                f'{rec[:16].hex(" ")}'
             )
             shown += 1
             if shown >= limit:
                 break
     elif block.tag == 'mgc_':
-        click.echo(f'  {"idx":>5} {"off":>8} {"id":>5} {"w2":>5} {"b0c":>4} {"b0d":>4} {"w3e":>5} {"w40":>5} {"w42":>5} raw[0:16]')
-        for idx in range(layout.record_count):
-            off = start + idx * layout.record_size
-            if off + layout.record_size > end:
-                break
-            rec = data[off:off + layout.record_size]
+        click.echo(f'  {"idx":>5} {"off":>8} {"id":>5} {"w2":>5} {"b0c":>4} {"b0d":>4} {"w3e":>5} {"w40":>5} {"w42":>5} rec[0:16]')
+        for idx, off, rec in records():
             rec_id = struct.unpack_from('<H', rec, 0)[0]
-            if rec_id in {0, 0xffff}:
+            if rec_id == 0xffff or not any(rec[2:]):
                 continue
             w2 = struct.unpack_from('<H', rec, 2)[0]
             w3e = struct.unpack_from('<H', rec, 0x3e)[0]
@@ -154,6 +172,10 @@ def _print_record_samples(data: bytes, block: Mnc2Block, limit: int) -> None:
               help='Maximum candidate rows to print.')
 @click.option('--records', is_flag=True,
               help='List decoded fixed records for mgc_ or comm instead of heuristic x/y candidates.')
+@click.option('--raw', is_flag=True,
+              help='With --records: print the on-disk bytes without undoing the per-record rotation.')
+@click.option('--names/--no-names', default=True, show_default=True,
+              help='With --records --block comm: name each record from ROM/181/72.DAT.')
 @click.option('--offset', 'patch_offset', default=None,
               help='Absolute hex/decimal offset to patch as int16 x/y/w/h tuple.')
 @click.option('--x', 'new_x', default=None, type=int, help='New int16 x value at --offset.')
@@ -166,6 +188,8 @@ def cmd(
     block_tag: str,
     limit: int,
     records: bool,
+    raw: bool,
+    names: bool,
     patch_offset: str | None,
     new_x: int | None,
     new_y: int | None,
@@ -227,7 +251,7 @@ def cmd(
 
     for block in selected:
         if records:
-            _print_record_samples(data, block, limit)
+            _print_record_samples(data, block, limit, raw=raw, names=names)
             click.echo()
             continue
         hits = _candidate_pairs(data, block.offset, block.next_offset)
