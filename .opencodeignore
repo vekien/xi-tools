@@ -32,7 +32,6 @@ Thumbs.db
 venv/
 web/leveleditor/assets/*.dat.base
 web/leveleditor/workspaces/
-web/particleeditor/game
 zone-changes
 zone-custom
 zone-data/

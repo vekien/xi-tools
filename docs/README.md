@@ -190,7 +190,6 @@ fountains, lamps, fire, smoke, clouds, and point lights.
 | [fx/delete.md](fx/delete.md) | Removing effects |
 | [fx/set.md](fx/set.md) | Editing effect params in place |
 | [fx/json.md](fx/json.md) | JSON dump format |
-| [fx/editor.md](fx/editor.md) | Browser-based particle/weapon-effect editor |
 
 ---
 
@@ -206,7 +205,6 @@ from `FFXiMain.dll`.
 | [gear/import.md](gear/import.md) | Gear mesh import |
 | [gear/inject-legacy.md](gear/inject-legacy.md) | Legacy injection path |
 | [gear/edit.md](gear/edit.md) | Editing gear records |
-| [gear/particle-editor.md](gear/particle-editor.md) | Weapon particle editor |
 | [gear/json.md](gear/json.md) | JSON schema |
 | [reference/model-file-ids.md](reference/model-file-ids.md) | FTABLE/VTABLE structure, modelid formula, custom ID ranges |
 

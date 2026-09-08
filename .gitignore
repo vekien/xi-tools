@@ -27,7 +27,6 @@ exports/
 research/
 Thumbs.db
 venv/
-web/particleeditor/game
 web/leveleditor/workspaces/
 web/leveleditor/editor.json
 workspaces/

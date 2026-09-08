@@ -417,8 +417,9 @@ in a routine points at a `0x2A` section instead of a skeleton animation, it's a 
 
 ## Testing the Cutscene Player
 
-1. `xi gui zone` (port 8777) — kills existing processes first or you get
-   phantom WebSocket connections pinned to stale processes.
+1. `xi bridge` (port 8777) — kill any process still holding that port first, or
+   you get phantom WebSocket connections pinned to stale processes. Then open
+   [xi-zone-editor](https://github.com/vekien/xi-zone-editor).
 2. Load zone 126 (Qufim Island).
 3. Events tab → Timeline → Load Cutscene → event 0x3F (63).
 4. You should see: Iroha + 5 other NPCs placed in Qufim geometry, playing idle
@@ -429,8 +430,8 @@ in a routine points at a `0x2A` section instead of a skeleton animation, it's a 
 
 **Kill/restart loop** (Windows):
 ```powershell
-Stop-Process -Name "python" -Force  # or target the specific xi gui zone PID
-xi gui zone
+Stop-Process -Name "python" -Force  # or target the specific xi bridge PID
+xi bridge
 ```
 Then hard-refresh the browser (Ctrl+Shift+R) — the WebSocket is pinned to the old
 process otherwise.

@@ -56,7 +56,7 @@ List the meshes/placements in a zone with `object list`, or browse them visually
 uv run xi object json ROM/1/41
 
 # or the web level editor — the Objects panel shows every mesh name
-uv run xi gui zone
+uv run xi bridge   # then open xi-zone-editor
 ```
 
 (`xi zone json` lists the *zones* and their DAT paths.)

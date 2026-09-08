@@ -24,7 +24,8 @@ uv run xi zone import-json <changes_json> [dat_path] [--dry-run]
 ## Typical workflow
 
 ```
-1. Open the web editor:  uv run xi gui zone
+1. Start the backend:    uv run xi bridge
+   Open the web editor:  https://github.com/vekien/xi-zone-editor
 2. Load a zone, make edits (move/rotate/scale/delete objects, move VFX)
 3. Changes > Export JSON  →  zone-changes.json
 4. uv run xi zone import-json zone-changes.json
@@ -122,4 +123,4 @@ or read one by one, instead of the single batch `import-json`:
 - **`xi fx delete`** — remove individual VFX by FourCC
 - **`xi fx set`** — modify VFX position / scale / color individually
 - **`xi fx copy`** — duplicate / transplant a VFX
-- **`xi gui zone`** — start the web editor that generates the JSON
+- **`xi bridge`** — the backend the web editor that generates this JSON talks to

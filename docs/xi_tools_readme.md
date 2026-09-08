@@ -141,8 +141,6 @@ See [fx/README.md](fx/README.md) for the full command table + workflows.
 - `uv run xi fx copy` ([docs](fx/copy.md)) — Duplicate an effect — same-DAT, or cross-DAT (`--from`) bringing its deps
 - `uv run xi fx delete` ([docs](fx/delete.md)) — Remove effect(s) by exact name or name-prefix
 - `uv run xi fx export` ([docs](fx/export.md)) — Export an effect's 3D mesh + material/texture + decoded params bundle
-- `uv run xi gui weapon` ([docs](fx/editor.md)) — Serve the browser-based particle/weapon-effect editor at `http://localhost:8776/`
-- `uv run xi gui spells` ([docs](fx/spells.md)) — Serve the browser-based spell-effect editor at `http://localhost:8774/`
 
 #### References
 
@@ -279,7 +277,7 @@ logos, wardrobe badges and menus are in `ROM/119/50.DAT` (`lobb`). Every command
 
 Bake the JSON [xi-model-viewer](https://github.com/vekien/xi-model-viewer) loads.
 
-- `uv run xi mv update [--only gear,npcs,…] [--dry-run]` ([docs](mv/README.md)) — append missing rows to `mv/lists/*.json`; curated names are never rewritten. Targets: `gear`, `gear-sets`, `gear-labels`, `music`, `sfx`, `zone-music`, `effects`, `images`, `npcs`, `npc-anims`, `zone-names`, `file-ids`
+- `uv run xi mv update [--only gear,npcs,…] [--dry-run]` ([docs](mv/README.md)) — append missing rows to `mv/lists/*.json`; curated names are never rewritten. Targets: `gear`, `gear-sets`, `gear-labels`, `ws-unreleased`, `music`, `sfx`, `zone-music`, `effects`, `images`, `npcs`, `npc-anims`, `zone-names`, `file-ids`
 - `uv run xi mv database [--only armor,weapons] [--lang en,jp]` ([docs](mv/README.md)) — decode the item and `d_msg` tables once to `mv/db/<table>.<lang>.json`
 
 ## FFXIMAIN

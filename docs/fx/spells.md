@@ -229,7 +229,7 @@ particle can't wedge the loop). `dur <= 0` = a single instantaneous burst.
 
 ### Requires a restart
 
-Backend (new module + RPCs) and frontend JS both change → restart `xi gui zone` (kill orphaned
+Backend (new module + RPCs) and frontend JS both change → restart `xi bridge` (kill orphaned
 procs on port 8777 first — see [the install gotcha](../../README.md)) and hard-refresh.
 
 ---

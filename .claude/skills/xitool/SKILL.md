@@ -161,9 +161,9 @@ Rules that follow:
 Resolution order for any question about a command:
 
 1. **`QUICKY.md`** — the public command surface. If a command isn't listed there it is
-   hidden, renamed or gone. Known renames you'll meet in older docs: `xi gui zone` → the
-   editor now talks to **`xi bridge`**; `xi zone object …` → **`xi object …`**;
-   `xi entity anim` → **`xi anim`**; `xi audio music/sfx list` → `xi audio json`.
+   hidden, renamed or gone. Known renames you'll meet in older docs:
+   `xi zone object …` → **`xi object …`**; `xi entity anim` → **`xi anim`**;
+   `xi audio music/sfx list` → `xi audio json`.
 2. **`uv run xi <group> <cmd> --help`** — the real flags.
 3. **`docs/<area>/<cmd>.md`** — behaviour, examples, verified-in-game notes.
 4. **`src/xi/<area>/xi_<cmd>.py`** — the code. Groups map to packages:

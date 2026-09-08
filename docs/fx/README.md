@@ -23,7 +23,6 @@ operations — no cipher, no reimport step.
 | `fx copy` | [copy.md](copy.md) | Duplicate an effect — same-DAT, or cross-DAT (brings its deps) |
 | `fx delete` | [delete.md](delete.md) | Remove effect(s) by exact name or name-prefix |
 | `fx export` | [export.md](export.md) | Export an effect's 3D mesh + material/texture + decoded params as a bundle |
-| `gui weapon` | [editor.md](editor.md) | Serve the browser-based particle/weapon-effect editor |
 
 `xi zone json --fx` provides the same effect dump from the zone command group.
 
