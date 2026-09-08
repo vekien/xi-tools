@@ -158,6 +158,8 @@ def echo_report(r: dict, *, dry_run: bool) -> None:
     if "by_race" in r and r["by_race"]:
         detail = ", ".join(f"{k}:{v}" for k, v in r["by_race"].items())
         parts.append(f"({detail})")
+    if "files" in r:
+        parts.append(f"{r['files']} files, {r['bytes'] / 1e6:.1f} MB")
     if "by_cat" in r and r["by_cat"]:
         detail = ", ".join(f"{k}:{v}" for k, v in r["by_cat"].items())
         parts.append(f"({detail})")

@@ -37,6 +37,20 @@ Every target is **append-only**: it adds rows the list lacks and leaves curated 
 labels and groupings alone. A full run reads ~53k DAT headers; progress streams per
 target so the command never goes quiet.
 
+### Publishing to the model viewer
+
+Every run ends by rewriting `manifest.json` in the lists directory: a sha256 and
+byte count for each JSON file beside it. That is not bookkeeping — it is the
+publish step. XI Model Viewer fetches this file from `main` at boot and replaces
+any list whose contents no longer match the copy it holds, so a list refreshed
+here and pushed reaches every install without a new build. A list pushed without
+its manifest reaches nobody, which is why the step is not opt-in.
+
+The comparison is content-addressed, so there is no version to bump on either
+side: a list reverted by hand goes back to matching on its own. The manifest
+indexes whatever JSON is in the directory, so a list this tool does not generate
+— the viewer's `zone_npcs.json` — is covered as soon as it sits beside the rest.
+
 ### Targets
 
 | Target | Source | What it adds |
@@ -54,6 +68,7 @@ target so the command never goes quiet.
 | `npc-anims` | `Directory (0x01)` sections in each model DAT | `anims` on NPC rows whose model borrows animation packs from other DATs (trusts, multi-form monsters) |
 | `zone-names` | `MOG_HOUSE_NAMES` in `xi.zone.xi_list` | Hand-verified names on mog-house rows in `zones.json`, matched by path; ids, fileIds and custom zones are left alone |
 | `file-ids` | reverse FTABLE/VTABLE | `fileId` on every row in every list |
+| _(always, last)_ | the lists themselves | `manifest.json` — one sha256 + byte count per JSON beside it. Not opt-in: this is what publishes a list to the model viewer (see above) |
 
 Not covered: `floors.json`, and a full `zones.json` regeneration (new or renamed named
 zones). Those are manual — see `xi zone json --rooms --dev`.
@@ -159,7 +174,7 @@ xi-model-viewer and must stay in step with it.
 | `src/xi/mv/server_names.py` | NPC names from `mob_pools` / `npc_list` |
 | `src/xi/mv/gear_sets.json` | Set membership, label fixes, section order, `rangedDisplay`, `fishingRods`, `groupLabels`, `retiredSets` |
 | `src/xi/mv/npc_anims.json` | `npc-anims` tunables |
-| `mv/lists/*.json` | The shipped lists: `characters`, `npcs`, `effects`, `images`, `music`, `sfx`, `zone_music`, `zones`, `floors` |
+| `mv/lists/*.json` | The shipped lists: `characters`, `npcs`, `effects`, `images`, `music`, `sfx`, `zone_music`, `zones`, `floors`, `zone_npcs` — plus `manifest.json`, their sha256 index, which the model viewer updates itself from |
 | `mv/db/` | `xi mv database` output (gitignored) |
 
 Related: [../anim/fishing.md](../anim/fishing.md), [../zone/prototype-zones.md](../zone/prototype-zones.md)

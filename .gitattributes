@@ -2,3 +2,11 @@
 # YAML front-matter parser from finding the closing delimiter, so it swallows the
 # entire document into the front-matter table and renders it as one wall of text.
 *.md text eol=lf
+
+# The model viewer downloads these from raw.githubusercontent.com and checks each
+# one against the sha256 in manifest.json. raw serves the blob as git stores it,
+# while `xi mv update` hashes the working copy — so under core.autocrlf those are
+# two different byte streams and every list fails verification on every client,
+# forever. Pin them to LF so the working copy, the blob and what raw serves are
+# the same bytes.
+mv/lists/*.json text eol=lf

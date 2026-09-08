@@ -6,8 +6,10 @@ Current shipped JSON is the base. These updaters only add missing entries
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
@@ -1959,6 +1961,90 @@ def update_file_ids(
     }
 
 
+# ── manifest (lists/manifest.json) ───────────────────────────────────────────
+
+# The index the model viewer updates itself from. It ships baked into the .exe,
+# but it also reads this file from THIS repo on GitHub at boot and pulls any
+# list whose sha256 no longer matches what it holds. So the manifest is not
+# bookkeeping — it is the publish step. A list pushed without it reaches nobody,
+# which is why `xi mv update` writes it at the end of every run rather than
+# leaving it to be remembered.
+#
+# It indexes whatever JSON is in the directory, so a list this tool does not
+# generate (the viewer's zone_npcs.json) is covered the moment it is dropped in
+# beside the rest.
+MANIFEST_NAME = "manifest.json"
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_manifest(
+    lists_dir: Path, *, dry_run: bool = False, notify: Notify = _noop,
+) -> Report:
+    """Rewrite ``<lists_dir>/manifest.json`` from the JSON files beside it.
+
+    Content-addressed, with no version counter: the viewer compares each hash
+    against the copy it actually holds, so there is no number to bump, nothing
+    to get out of step, and a list reverted by hand goes back to matching on its
+    own. ``generated`` is for humans and is only touched when a hash moves —
+    rewriting it every run would turn a no-op into a commit.
+    """
+    if not lists_dir.is_dir():
+        return {"target": "manifest", "wrote": False,
+                "error": f"not a directory: {lists_dir}"}
+
+    notify("hashing lists")
+    files = {
+        p.name: {"sha256": _sha256(p), "bytes": p.stat().st_size}
+        for p in sorted(lists_dir.glob("*.json"))
+        if p.name != MANIFEST_NAME
+    }
+
+    out = lists_dir / MANIFEST_NAME
+    prev: dict = {}
+    if out.is_file():
+        try:
+            prev = _load_json(out)
+        except json.JSONDecodeError:
+            prev = {}
+
+    changed = sorted(
+        n for n in set(files) | set(prev.get("files") or {})
+        if files.get(n, {}).get("sha256") != (prev.get("files") or {}).get(n, {}).get("sha256")
+    )
+    if not changed:
+        return {
+            "target": "manifest",
+            "file": str(out),
+            "added": 0,
+            "files": len(files),
+            "bytes": sum(f["bytes"] for f in files.values()),
+            "wrote": False,
+        }
+
+    manifest = {
+        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "files": files,
+    }
+    if not dry_run:
+        _write_json(out, manifest, dry_run=False, indent=1)
+
+    return {
+        "target": "manifest",
+        "file": str(out),
+        "added": len(changed),
+        "files": len(files),
+        "bytes": sum(f["bytes"] for f in files.values()),
+        "samples": changed[:10],
+        "wrote": not dry_run,
+    }
+
 # ── registry ─────────────────────────────────────────────────────────────────
 
 # gear-sets runs before gear-labels so the set is recorded before the label
@@ -2043,4 +2129,13 @@ def run_updates(
         reports.append(report)
         if on_report:
             on_report(report)
+
+    # Always last, and never opt-in: the manifest is what publishes a list to
+    # the model viewer, so a run that refreshed a list but left the manifest
+    # behind would look like it worked and reach no one.
+    notify = (lambda m: on_step("manifest", m)) if on_step else _noop
+    report = write_manifest(lists_dir, dry_run=dry_run, notify=notify)
+    reports.append(report)
+    if on_report:
+        on_report(report)
     return reports

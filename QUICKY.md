@@ -403,6 +403,7 @@ Full reference: [docs/mv/README.md](docs/mv/README.md).
 | `npc-anims` | `Directory (0x01)` sections in the model DAT | `anims` packs on trusts / multi-form monsters that borrow clips from other DATs |
 | `zone-names` | `MOG_HOUSE_NAMES` in `xi.zone.xi_list` | hand-verified mog-house names on `zones.json` rows |
 | `file-ids` | reverse FTABLE/VTABLE | `fileId` on every row in every list |
+| _(always, last)_ | the lists themselves | `manifest.json` — what publishes a list to the model viewer |
 
 VFX file_id bands (`offset + animation`): spells `2800`, job abilities `4412`,
 weapon skills `4912`. `mob_skills` and `item_usable` animations are *not* file
