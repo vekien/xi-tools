@@ -393,6 +393,7 @@ Full reference: [docs/mv/README.md](docs/mv/README.md).
 | `gear` | FFXiMain race tables → FTABLE | missing gear model ids per race/slot (+ fishing rods as `rod: true` Ranged rows) |
 | `gear-sets` | `gear_sets.json` + existing labels | `set` on each gear row (content set) |
 | `gear-labels` | `(JOB Set)` label suffix | rewrites to `JOB - Name` |
+| `ws-unreleased` | `FFXiMain.dll` extended WS bank | animations 256-271 as a **WS (Unreleased)** action category |
 | `music` | `sound*/win/music/data` | unnamed `music*.bgw` |
 | `sfx` | `sound*/win/se` | unnamed `se*` folders and `.spw` |
 | `zone-music` | `zone_settings.sql` | full rebuild of the zone → BGM map |

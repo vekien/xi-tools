@@ -87,7 +87,8 @@ def cmd(
 
     if only:
         targets = [t.strip().lower() for t in only.split(",") if t.strip()]
-        aliases = {"zone_music", "file_ids", "fileids", "gear_sets", "gear_labels", "zone_names"}
+        aliases = {"zone_music", "file_ids", "fileids", "gear_sets", "gear_labels",
+                   "zone_names", "ws_unreleased"}
         bad = [t for t in targets if t not in ALL_TARGETS and t not in aliases]
         if bad:
             raise click.ClickException(
@@ -160,6 +161,8 @@ def echo_report(r: dict, *, dry_run: bool) -> None:
     if "by_cat" in r and r["by_cat"]:
         detail = ", ".join(f"{k}:{v}" for k, v in r["by_cat"].items())
         parts.append(f"({detail})")
+    if r.get("placeholders"):
+        parts.append(f"dumm-slots {r['placeholders']}")
     if r.get("skipped_missing_file"):
         parts.append(f"skip-missing-file {r['skipped_missing_file']}")
     if r.get("skipped_path_already_listed"):

@@ -1289,6 +1289,149 @@ def update_gear_labels(
     }
 
 
+# ── unreleased weapon skills (characters.json) ───────────────────────────────
+
+# The client resolves a weapon-skill animation through two per-race banks in
+# FFXiMain.dll (docs/anim/weapon-skills.md, `xi anim ws`). The primary bank,
+# animations 0-255, is the catalogue the lists already name. The extended bank,
+# 256-271, is not: ROM/181/72 has no name for a single one of its slots (blocks
+# 256+ read "."), and no LSB row reaches them. They are finished presentations
+# the client can play that retail has never shipped a name for, so the viewer
+# gets them as a category of their own, labelled by animation number — the
+# number `!injectaction 3 N` takes — rather than by a guessed skill name.
+WS_UNRELEASED_GROUP = "WS (Unreleased)"
+
+# Viewer race id → row in xi_motion_tables.RACE_NAMES. The bank tables have eight
+# rows and the motion loader rejects race indices >= 9, so the Chocobo and child
+# races of characters.json are deliberately absent. Tarutaru is one race in the
+# viewer and the table's two Taru rows are identical, so either index resolves
+# to the same DATs.
+WS_RACE_ROW = {
+    "HumeM": 0, "HumeF": 1, "ElvaanM": 2, "ElvaanF": 3,
+    "Tarutaru": 4, "Mithra": 6, "Galka": 7,
+}
+
+
+@lru_cache(maxsize=None)
+def _is_placeholder_dat(spec: str) -> bool:
+    """True when a resolved DAT is the race's ``dumm`` stand-in.
+
+    An unused bank slot is not a missing file — it resolves to a real DAT whose
+    only directory is ``dumm``, and which still carries a ``main`` routine. So
+    the placeholder has to be recognised by that directory; ``main`` alone says
+    nothing. A DAT that is missing or will not parse counts as a placeholder
+    too: a row the viewer cannot load is worse than no row.
+    """
+    from xi.entity.mesh.xi_export import parse_sections
+    from xi.xi_config import read_path_for
+
+    p = Path(FFXI_DIR) / spec
+    if not p.is_file():
+        return True
+    try:
+        secs = parse_sections(read_path_for(p).read_bytes())
+    except Exception:  # noqa: BLE001 - a DAT we cannot parse is not a listable action
+        return True
+    return any(s.name == "dumm" for s in secs if s.type_code == 0x01)
+
+
+def update_ws_unreleased(
+    lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
+    notify: Notify = _noop,
+) -> Report:
+    """Append the extended weapon-skill bank (animations 256-271) to each PC race.
+
+    Append-only in the usual sense: every action a race already has survives,
+    including the handful of these same DATs that older curated rows named by
+    guess under another group (ROM/204/17 is "Warden Of Terror" under "NPC WS").
+    A slot is matched by DAT path *within this group*, so a rerun adds only what
+    the bank has gained, and the duplicate under the curated group is left for a
+    human to retire.
+    """
+    from xi.entity.anim.xi_motion_tables import (
+        _FileIdResolver, load_maindll, weapon_skill_banks, weapon_skill_slot)
+
+    p = lists_dir / "characters.json"
+    if not p.is_file():
+        if base_dir is None or not (base_dir / "characters.json").is_file():
+            return {"target": "ws-unreleased", "wrote": False,
+                    "error": "characters.json not found"}
+        p = base_dir / "characters.json"
+
+    notify("reading weapon-skill banks")
+    try:
+        banks = weapon_skill_banks(load_maindll())
+    except FileNotFoundError as e:
+        return {"target": "ws-unreleased", "error": str(e), "wrote": False}
+    bank = banks.get("extended")
+    if bank is None:
+        return {"target": "ws-unreleased", "wrote": False,
+                "error": "no extended weapon-skill bank in FFXiMain.dll"}
+
+    notify("resolving extended slots")
+    resolver = _FileIdResolver()
+    data = _load_json(p)
+    added = 0
+    placeholders = 0
+    by_cat: dict[str, int] = {}
+    samples: list[str] = []
+    group_key = _norm_group(WS_UNRELEASED_GROUP)
+
+    for race in data.get("races") or []:
+        row = WS_RACE_ROW.get(race.get("id"))
+        if row is None:
+            continue
+        actions = race.setdefault("actions", [])
+        used_ids = {a.get("id") for a in actions}
+        listed = {
+            _norm_dat(q)
+            for a in actions if _norm_group(a.get("group")) == group_key
+            for q in (a.get("paths") or [])
+        }
+        for anim in range(bank.first_animation, bank.last_animation + 1):
+            spec = resolver.rom_spec(weapon_skill_slot(banks, row, anim).file_id)
+            if not spec:
+                continue
+            dat = _path_out(_display_dat(spec))
+            if _norm_dat(dat) in listed:
+                continue
+            if _is_placeholder_dat(spec):
+                placeholders += 1
+                continue
+            # Ids are opaque keys, but they must not collide: `syn:` rows mean
+            # len(actions) is not a free index on its own.
+            n = len(actions)
+            while f"{n}:{_dat_id_suffix(dat)}" in used_ids:
+                n += 1
+            entry_id = f"{n}:{_dat_id_suffix(dat)}"
+            actions.append({
+                "id": entry_id,
+                "label": f"WS {anim}",
+                "group": WS_UNRELEASED_GROUP,
+                "paths": [dat],
+                "motionPaths": [],
+            })
+            used_ids.add(entry_id)
+            listed.add(_norm_dat(dat))
+            added += 1
+            by_cat[race["id"]] = by_cat.get(race["id"], 0) + 1
+            if len(samples) < 10:
+                samples.append(f'{race["id"]} WS {anim} → {dat}')
+
+    if added and not dry_run:
+        _write_json(lists_dir / "characters.json", data, dry_run=False)
+
+    return {
+        "target": "ws-unreleased",
+        "file": str(lists_dir / "characters.json"),
+        "added": added,
+        "placeholders": placeholders,
+        "by_cat": by_cat,
+        "samples": samples,
+        "wrote": bool(added) and not dry_run,
+    }
+
+
 # ── images.json ──────────────────────────────────────────────────────────────
 
 # Where auto-detected images land. Curated groups are never touched.
@@ -1822,8 +1965,9 @@ def update_file_ids(
 # suffix that encodes it is rewritten away (gear-labels also stamps it itself,
 # so running them the other way round is safe too).
 ALL_TARGETS = (
-    "gear", "gear-sets", "gear-labels", "music", "sfx", "zone-music", "effects",
-    "images", "npcs", "npc-anims", "zone-names", "file-ids",
+    "gear", "gear-sets", "gear-labels", "ws-unreleased", "music", "sfx",
+    "zone-music", "effects", "images", "npcs", "npc-anims", "zone-names",
+    "file-ids",
 )
 
 Updater = Callable[..., Report]
@@ -1861,6 +2005,9 @@ def run_updates(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t in ("gear-labels", "gear_labels"):
             report = update_gear_labels(
+                lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
+        elif t in ("ws-unreleased", "ws_unreleased"):
+            report = update_ws_unreleased(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t == "music":
             report = update_music(
