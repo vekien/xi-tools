@@ -109,6 +109,7 @@ xi gear search
 xi gear list
 xi gear json
 xi gear export
+xi gear pose
 xi gear import
 xi gear edit
 xi gear character

@@ -1,9 +1,13 @@
-"""Run *inside* Blender (``blender -b --python xi_glb_to_fbx.py -- <in.glb> <out.fbx> <tex_dir>``).
+"""Run *inside* Blender
+(``blender -b --python xi_glb_to_fbx.py -- <in.glb> <out.fbx> <tex_dir> [bake_anim]``).
 
 Imports a glTF/GLB, rewires every packed image to a file-backed PNG and connects
 it directly to the Principled BSDF Base Color input (the GLB importer routes
 through a vertex-color MIX node that Blender's FBX exporter can't trace),
 then re-exports geometry + materials as FBX with absolute texture paths.
+
+A 4th argument of ``1`` also bakes the GLB's skeletal animation into the FBX. Off by
+default because a mesh export carries no clips, and baking none still costs a pass.
 """
 
 import os
@@ -25,6 +29,7 @@ def _png_for_mat(mat_name: str, tex_dir: str):
 def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1:]
     glb_in, fbx_out, tex_dir = argv[0], argv[1], argv[2]
+    bake_anim = len(argv) > 3 and argv[3] == "1"
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
@@ -80,7 +85,7 @@ def main() -> None:
         path_mode="ABSOLUTE",
         embed_textures=False,
         add_leaf_bones=False,
-        bake_anim=False,
+        bake_anim=bake_anim,
         use_custom_props=True,
     )
 

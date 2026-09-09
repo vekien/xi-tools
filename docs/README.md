@@ -202,6 +202,7 @@ from `FFXiMain.dll`.
 |-----|---------|
 | [gear/json.md](gear/json.md) | All gear model entries across races and slots |
 | [gear/export.md](gear/export.md) | Gear mesh export |
+| [gear/pose.md](gear/pose.md) | `xi gear pose`: a whole dressed character (every slot + weapons) as one GLB/FBX, with the geometry the worn set hides removed |
 | [gear/import.md](gear/import.md) | Gear mesh import |
 | [gear/inject-legacy.md](gear/inject-legacy.md) | Legacy injection path |
 | [gear/edit.md](gear/edit.md) | Editing gear records |

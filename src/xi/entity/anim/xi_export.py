@@ -126,6 +126,15 @@ class JointRef:
 
 
 @dataclass
+class JointReference:
+    """One entry of the skeleton's joint-reference table (xim ``JointReference``):
+    a named attach point into the skeleton. Index 127 is the right hand, 126 the
+    left; a weapon's ``info.standardJointIndex`` names its grip."""
+    joint_index: int
+    offset: Tuple[float, float, float]
+
+
+@dataclass
 class VertexSource:
     joint_ref0: JointRef
     joint_ref1: JointRef
@@ -153,6 +162,10 @@ class Corner:
 class Primitive:
     material_name: str
     corners: List[Corner]
+    # Render displayType (render-properties byte 13) of the piece this primitive
+    # came from — the half of FFXI's equipment-occlusion pair. See
+    # occludes_display_type() for what hides what.
+    display_type: int = 0
 
 
 @dataclass
@@ -208,6 +221,74 @@ def parse_skeleton(data: bytes, section: Section) -> List[Joint]:
     return joints
 
 
+def parse_skeleton_references(data: bytes, section: Section) -> List[JointReference]:
+    """The joint-reference table that follows the joints in a 0x29 skeleton section.
+
+    Named attach points into the skeleton (xim ``JointReference``): entry 127 is the
+    right hand, 126 the left, and a weapon DAT's ``info.standardJointIndex`` names the
+    reference of its grip joint. Layout after the joint array: ``u16 count``, ``u16``
+    (usually -1), then per entry ``u16 jointIndex``, an unused vec3, and a vec3 offset.
+    Returns ``[]`` for a skeleton that carries no table."""
+    reader = Reader(data, section.data_start + 0x02)
+    num_joints = reader.u8()
+    reader.seek(section.data_start + 0x04)
+    for _ in range(num_joints):
+        reader.u8()
+        reader.u8()
+        for _ in range(7):                   # rotation quat + translation vec3
+            reader.f32()
+
+    end = section.start + section.size
+    references: List[JointReference] = []
+    try:
+        count = reader.u16()
+        reader.u16()                         # usually -1
+    except Exception:
+        return references
+    for _ in range(count):
+        if reader.tell() + 26 > end:
+            break
+        joint_index = reader.u16()
+        reader.f32(); reader.f32(); reader.f32()          # unused vec3
+        references.append(JointReference(
+            joint_index=joint_index,
+            offset=(reader.f32(), reader.f32(), reader.f32()),
+        ))
+    return references
+
+
+def mesh_occlude_type(data: bytes, section: Section) -> int:
+    """The 0x2A mesh header's ``occludeType`` (flags4, byte 3) — what this mesh hides
+    on OTHER equipped pieces. A helmet declares 0x04 to drop hair, a sleeve 0x12 to
+    drop the wrist skin. Read on its own so callers can ask without re-parsing geometry."""
+    return data[section.data_start + 3]
+
+
+def occludes_display_type(display_type: int, occlude_types) -> bool:
+    """Whether a piece with this ``displayType`` is hidden by the ``occludeTypes``
+    declared across every equipped mesh (xim ``ActorModel.isOccluded``).
+
+    This is how FFXI stops base skin and hair poking through worn gear: the body
+    keeps its bare arms and the hair its full mane, and the client drops whichever
+    pieces the equipped set says to cover. displayType 1/2/3 = hair, 4 = face,
+    5 = wrist, 6 = pants, 7 = shins; 0x11/0x21/0x31 are body/legs/feet self-markers
+    that hide nothing."""
+    occl = occlude_types if isinstance(occlude_types, (set, frozenset)) else set(occlude_types)
+    if display_type == 1:
+        return bool(occl & {0x02, 0x03, 0x04, 0x05, 0x06})
+    if display_type in (2, 3):
+        return bool(occl & {0x04, 0x05, 0x06})
+    if display_type == 4:
+        return 0x05 in occl
+    if display_type == 5:
+        return 0x12 in occl
+    if display_type == 6:
+        return 0x32 in occl
+    if display_type == 7:
+        return 0x22 in occl
+    return False
+
+
 def unpack_joint_ref(value: int) -> JointRef:
     return JointRef(index=value & 0x7F, flipped_index=(value >> 7) & 0x7F, flip_axis=(value >> 14) & 0x3)
 
@@ -223,25 +304,33 @@ def flip_vec3(vec: Tuple[float, float, float], flip_axis: int) -> Tuple[float, f
     return vec
 
 
-def read_render_properties(reader: Reader) -> None:
-    reader.u8()
-    reader.u8()
-    reader.u8()
-    reader.u8()
-    reader.f32()
-    reader.f32()
-    reader.u8()
-    reader.u8()
-    reader.u8()
-    reader.u8()
-    reader.f32()
+def read_render_properties(reader: Reader) -> int:
+    """Consume a 0x8010 render-properties block, returning its ``displayType``.
+
+    Only displayType is kept: it is the piece half of the equipment-occlusion
+    pair (the mesh half is the section header's occludeType), and decides
+    whether a piece of base skin / hair survives under worn gear. Everything
+    else here — tFactor, ambient multiplier, specular — is already baked into
+    the exported material or unused, so it stays skipped."""
+    reader.u8()                              # tFactor B
+    reader.u8()                              # tFactor G
+    reader.u8()                              # tFactor R
+    reader.u8()                              # tFactor A
+    reader.f32()                             # f0
+    reader.f32()                             # f1
+    reader.u8()                              # flag0
+    display_type = reader.u8()
+    reader.u8()                              # flag2
+    reader.u8()                              # flag3
+    reader.f32()                             # ambient multiplier
     reader.u32()
     reader.u32()
     reader.u16()
     reader.f32()
     reader.u16()
-    reader.f32()
-    reader.f32()
+    reader.f32()                             # specular power
+    reader.f32()                             # specular enabled
+    return display_type
 
 
 def parse_cloth_header(reader: Reader) -> None:
@@ -410,6 +499,9 @@ def parse_mesh(data: bytes, section: Section) -> Tuple[List[VertexSource], List[
 
     reader.seek(section.data_start + instruction_offset)
     current_texture = "untextured"
+    # displayType is state carried by the instruction stream: a 0x8010 block sets
+    # it and every piece emitted afterwards inherits it, until the next block.
+    display_type = 0
     primitives: List[Primitive] = []
 
     while True:
@@ -417,7 +509,7 @@ def parse_mesh(data: bytes, section: Section) -> Tuple[List[VertexSource], List[
         if opcode == 0xFFFF:
             break
         if opcode == 0x8010:
-            read_render_properties(reader)
+            display_type = read_render_properties(reader)
             continue
         if opcode == 0x8000:
             current_texture = reader.string(0x10) or "untextured"
@@ -433,9 +525,9 @@ def parse_mesh(data: bytes, section: Section) -> Tuple[List[VertexSource], List[
             for _ in range(1, num_triangles):
                 strip.append(Corner(vertex_index=reader.u16(), uv=(reader.f32(), reader.f32())))
             corners = tri_strip_to_corners(strip)
-            primitives.append(Primitive(material_name=current_texture, corners=reverse_winding(corners)))
+            primitives.append(Primitive(material_name=current_texture, corners=reverse_winding(corners), display_type=display_type))
             if symmetric:
-                primitives.append(Primitive(material_name=current_texture, corners=mirror_corners(corners)))
+                primitives.append(Primitive(material_name=current_texture, corners=mirror_corners(corners), display_type=display_type))
             continue
         if opcode == 0x0054:
             num_triangles = reader.u16()
@@ -448,9 +540,9 @@ def parse_mesh(data: bytes, section: Section) -> Tuple[List[VertexSource], List[
                 uv1 = (reader.f32(), reader.f32())
                 uv2 = (reader.f32(), reader.f32())
                 corners.extend((Corner(v0, uv0), Corner(v1, uv1), Corner(v2, uv2)))
-            primitives.append(Primitive(material_name=current_texture, corners=reverse_winding(corners)))
+            primitives.append(Primitive(material_name=current_texture, corners=reverse_winding(corners), display_type=display_type))
             if symmetric:
-                primitives.append(Primitive(material_name=current_texture, corners=mirror_corners(corners)))
+                primitives.append(Primitive(material_name=current_texture, corners=mirror_corners(corners), display_type=display_type))
             continue
         if opcode == 0x0043:
             num_triangles = reader.u16()
@@ -462,9 +554,9 @@ def parse_mesh(data: bytes, section: Section) -> Tuple[List[VertexSource], List[
                 b, g, r, a = reader.u8(), reader.u8(), reader.u8(), reader.u8()
                 color = (r / 255.0, g / 255.0, b / 255.0, a / 255.0)
                 corners.extend((Corner(v0, (0.0, 0.0), color), Corner(v1, (0.0, 0.0), color), Corner(v2, (0.0, 0.0), color)))
-            primitives.append(Primitive(material_name="vertex_color", corners=reverse_winding(corners)))
+            primitives.append(Primitive(material_name="vertex_color", corners=reverse_winding(corners), display_type=display_type))
             if symmetric:
-                primitives.append(Primitive(material_name="vertex_color", corners=mirror_corners(corners)))
+                primitives.append(Primitive(material_name="vertex_color", corners=mirror_corners(corners), display_type=display_type))
             continue
         if opcode == 0x4353:
             num_triangles = reader.u16()
@@ -476,9 +568,9 @@ def parse_mesh(data: bytes, section: Section) -> Tuple[List[VertexSource], List[
             for _ in range(1, num_triangles):
                 strip.append(Corner(vertex_index=reader.u16(), uv=(0.0, 0.0), color=color))
             corners = tri_strip_to_corners(strip)
-            primitives.append(Primitive(material_name="vertex_color", corners=reverse_winding(corners)))
+            primitives.append(Primitive(material_name="vertex_color", corners=reverse_winding(corners), display_type=display_type))
             if symmetric:
-                primitives.append(Primitive(material_name="vertex_color", corners=mirror_corners(corners)))
+                primitives.append(Primitive(material_name="vertex_color", corners=mirror_corners(corners), display_type=display_type))
             continue
         raise ValueError(f"Unknown mesh opcode 0x{opcode:04X} in section {section.name}")
 
@@ -675,19 +767,101 @@ def normalize_vec3(v: Tuple[float, float, float]) -> Tuple[float, float, float]:
     return (v[0] * inv, v[1] * inv, v[2] * inv)
 
 
-def compute_global_transforms(joints: Sequence[Joint]) -> List[JointGlobal]:
-    globals_out: List[JointGlobal] = [JointGlobal(rotation=(0.0, 0.0, 0.0, 1.0), translation=(0.0, 0.0, 0.0)) for _ in joints]
+def apply_parent_overrides(joints: Sequence[Joint], parent_overrides) -> List[Joint]:
+    """Re-parent joints per ``{joint_index: new_parent_index}``, giving each an identity
+    local transform — the client's "adopt the new parent wholesale".
+
+    Rewriting the HIERARCHY, not just the world transforms, is what makes the change
+    survive export. A glTF file stores the node tree and the inverse-bind matrices
+    separately, and the renderer recomputes every joint from the tree: an override that
+    lived only in ``globals_by_joint`` would show correct baked vertex positions in the
+    file and then be undone the instant anything opened it, sliding the weapon back off
+    the hand. Overrides that would make a joint its own ancestor are dropped.
+    """
+    if not parent_overrides:
+        return list(joints)
+
+    def descends_from(node: int, ancestor: int) -> bool:
+        seen = set()
+        while 0 <= node < len(joints) and node not in seen:
+            if node == ancestor:
+                return True
+            seen.add(node)
+            node = joints[node].parent_index
+        return False
+
+    out: List[Joint] = []
     for joint in joints:
+        new_parent = parent_overrides.get(joint.index)
+        if new_parent is None or descends_from(new_parent, joint.index):
+            out.append(joint)
+            continue
+        out.append(Joint(index=joint.index, parent_index=new_parent,
+                         rotation=(0.0, 0.0, 0.0, 1.0), translation=(0.0, 0.0, 0.0)))
+    return out
+
+
+def compute_global_transforms(joints: Sequence[Joint], parent_overrides=None) -> List[JointGlobal]:
+    """Bind/posed local joints -> world transforms.
+
+    ``parent_overrides`` (``{joint_index: new_parent_index}``) re-parents a joint onto
+    another, which is how a drawn weapon gets into the hand: the client re-parents the
+    weapon's grip joint onto the hand attach joint and the grip adopts that transform
+    *wholesale* — its own bind local is dropped (xim
+    ``updateCurrentJointTransformWithParentOverride``). Everything below the grip then
+    chains off the hand as usual. Prefer :func:`apply_parent_overrides` when the result is
+    going to be EXPORTED — that rewrites the hierarchy, so the node tree in the file agrees
+    with these transforms; this argument only bends the world transforms.
+
+    Resolution falls back from a single ordered pass to an iterative one whenever a joint's
+    parent comes later in the list (which an override, or a hierarchy rewritten by
+    ``apply_parent_overrides``, can easily produce). A cycle stops making progress and is
+    left on the plain hierarchy rather than looping forever."""
+    globals_out: List[JointGlobal] = [JointGlobal(rotation=(0.0, 0.0, 0.0, 1.0), translation=(0.0, 0.0, 0.0)) for _ in joints]
+    forward_parent = any(0 <= j.parent_index for j in joints if j.parent_index >= j.index)
+
+    def place(joint: Joint, parent: Optional[JointGlobal]) -> None:
         local_rot = quat_normalize(joint.rotation)
-        local_trans = joint.translation
-        if joint.parent_index < 0:
-            globals_out[joint.index] = JointGlobal(rotation=local_rot, translation=local_trans)
+        if parent is None:
+            globals_out[joint.index] = JointGlobal(rotation=local_rot, translation=joint.translation)
         else:
-            parent = globals_out[joint.parent_index]
             globals_out[joint.index] = JointGlobal(
                 rotation=quat_normalize(quat_mul(parent.rotation, local_rot)),
-                translation=add_vec3(parent.translation, rotate_vec3(parent.rotation, local_trans)),
+                translation=add_vec3(parent.translation, rotate_vec3(parent.rotation, joint.translation)),
             )
+
+    if not parent_overrides and not forward_parent:
+        for joint in joints:
+            place(joint, None if joint.parent_index < 0 else globals_out[joint.parent_index])
+        return globals_out
+
+    done = [False] * len(joints)
+    pending = list(joints)
+    while pending:
+        progressed = False
+        deferred: List[Joint] = []
+        for joint in pending:
+            override = parent_overrides.get(joint.index) if parent_overrides else None
+            if override is not None:
+                if done[override]:
+                    globals_out[joint.index] = globals_out[override]   # adopt the hand wholesale
+                    done[joint.index] = True
+                    progressed = True
+                else:
+                    deferred.append(joint)
+                continue
+            if joint.parent_index < 0 or done[joint.parent_index]:
+                place(joint, None if joint.parent_index < 0 else globals_out[joint.parent_index])
+                done[joint.index] = True
+                progressed = True
+            else:
+                deferred.append(joint)
+        if not progressed:
+            # Cycle or unreachable parent: fall back to the plain hierarchy for the rest.
+            for joint in deferred:
+                place(joint, None if joint.parent_index < 0 else globals_out[joint.parent_index])
+            break
+        pending = deferred
     return globals_out
 
 
@@ -735,6 +909,42 @@ def rigid_inverse_matrix(q: Tuple[float, float, float, float], t: Tuple[float, f
         r20, r21, r22, 0.0,
         itx, ity, itz, 1.0,
     ]
+
+
+def animation_playback_frames(animation: "AnimationSection") -> int:
+    """How many 30 fps playback frames a clip runs for — the timeline a viewer scrubs and
+    the one :func:`build_animation_arrays` samples onto.
+
+    NOT the same as ``num_frames``, which counts the clip's stored KEYFRAMES: a 15-keyframe
+    idle with a keyframe_duration of ~0.25 plays for 56 frames. Mixing the two silently
+    exports a different pose from the one on screen."""
+    length = max(1.0, (animation.num_frames - 1) / animation.keyframe_duration)
+    return int(math.ceil(length)) + 1
+
+
+def pose_joints_at_playback_frame(joints: List[Joint], animation: "AnimationSection",
+                                  frame: float) -> List[Joint]:
+    """Re-pose the joints to a 30 fps PLAYBACK frame, interpolating between keyframes.
+
+    :func:`pose_joints_at_frame` indexes stored keyframes; this indexes the played
+    timeline, so frame N here is the same pose a viewer shows at frame N and the same one
+    frame N of an embedded clip plays. Composition matches ``build_animation_arrays``
+    exactly (``trackRotation ⊗ bindRotation``, bind translation plus the track's delta),
+    so a frozen frame and an animated export of the same clip agree."""
+    if animation.num_frames <= 0:
+        return list(joints)
+    f = max(0.0, min(float(frame), float(animation_playback_frames(animation) - 1)))
+    posed: List[Joint] = []
+    for joint in joints:
+        track = animation.tracks.get(joint.index)
+        if track is None or not track.rotations:
+            posed.append(joint)
+            continue
+        rotation, translation, _scale = sample_track(track, animation.keyframe_duration, f)
+        posed.append(Joint(index=joint.index, parent_index=joint.parent_index,
+                           rotation=quat_normalize(quat_mul(rotation, joint.rotation)),
+                           translation=add_vec3(joint.translation, translation)))
+    return posed
 
 
 def sample_track(track: AnimationTrack, keyframe_duration: float, sample_frame: float) -> Tuple[Tuple[float, float, float, float], Tuple[float, float, float], Tuple[float, float, float]]:

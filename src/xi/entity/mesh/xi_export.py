@@ -822,13 +822,16 @@ def _inject_fbx_textures(fbx_path: Path, tex_dir: Path) -> None:
     fbx_path.write_bytes(bytes(data))
 
 
-def convert_glb_to_fbx(glb_path: Path) -> Path:
+def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False) -> Path:
     """Convert a .glb to an FBX via headless Blender.
 
     The Blender script rewires packed GLB images to the loose PNG files that
     build_glb already wrote to the same directory.  With file-backed images
     Blender writes proper Video/Texture FBX nodes and DiffuseColor OP
     connections natively, so no post-processing injection is needed.
+
+    ``bake_anim`` carries a GLB that embeds skeletal clips (a full-animation pose export)
+    through to the FBX; a plain mesh export has none, so it stays off by default.
     """
     blender = Path(BLENDER_PATH)
     if not blender.is_file():
@@ -840,7 +843,7 @@ def convert_glb_to_fbx(glb_path: Path) -> Path:
     tex_dir = str(glb_path.parent.resolve())
     completed = subprocess.run(
         [str(blender), "-b", "--python", str(_GLB_TO_FBX_SCRIPT),
-         "--", str(glb_path), str(fbx_path), tex_dir],
+         "--", str(glb_path), str(fbx_path), tex_dir, "1" if bake_anim else "0"],
         capture_output=True,
         text=True,
     )

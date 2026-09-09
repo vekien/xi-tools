@@ -173,7 +173,7 @@ Resolution order for any question about a command:
 | `xi mesh` | `src/xi/entity/mesh/` | `docs/mesh/{export,import,format}.md` |
 | `xi anim` | `src/xi/entity/anim/` | `docs/anim/quickref.md` first, then `export/import/schedule/emotes/format.md`; weapon-skill animation numbers / banks: `docs/anim/weapon-skills.md` |
 | `xi entity`, `xi model` | `src/xi/entity/` | `docs/entity/`, `docs/model/{json,free}.md` |
-| `xi gear` | `src/xi/gear/` | `docs/gear/*.md`, `docs/reference/model-file-ids.md` |
+| `xi gear` | `src/xi/gear/` | `docs/gear/*.md` (whole-character export: `docs/gear/pose.md`), `docs/reference/model-file-ids.md` |
 | `xi mount` | `src/xi/mount/` | `docs/mounts/{README,mechanism,data}.md` |
 | `xi zone` | `src/xi/zone/` | `docs/zone/README.md` → `format/export/import/import-json/collision/navmesh/templates/zones.md` |
 | `xi object` | `src/xi/zone/xi_object.py`, `xi_zonedef.py` | `docs/object/*.md` |
@@ -252,6 +252,9 @@ Animate with bone **rotations** only; translation/scale are ignored on import.
 xi gear export HumeMale body 0                    # races: HumeMale HumeFemale ElvaanMale ElvaanFemale TaruMale TaruFemale Mithra Galka
 xi gear import HumeMale body 0 edited.glb         # slots: face head body hands legs feet main sub ranged
 xi gear character …                               # assemble a character from a look blob
+xi gear pose ROM/27/82 ROM/27/88 … --main ROM/29/29 --fbx   # WHOLE dressed character in one file,
+xi gear pose --race HumeMale --slots face=1,head=22,body=3  # with occluded skin/hair dropped and
+                                                  # weapons re-parented into the hands (docs/gear/pose.md)
 ```
 
 ### Zone / objects / FX

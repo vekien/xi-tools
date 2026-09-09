@@ -36,6 +36,7 @@ from xi.gear     import xi_list    as gear_list
 from xi.gear     import xi_export  as gear_export
 from xi.gear     import xi_import  as gear_import
 from xi.gear     import xi_character as gear_character
+from xi.gear     import xi_pose    as gear_pose
 from xi.launcher import xi_ui_themes as launcher_ui_themes
 from xi.mount    import xi_list   as mount_list
 from xi.mount    import xi_export as mount_export
@@ -300,6 +301,7 @@ gear.add_command(xi_simplified.gear_search_cmd, 'search')
 gear.add_command(xi_simplified.gear_json_cmd,   'json')
 gear.add_command(gear_export.cmd,        'export')
 gear.add_command(gear_character.character_cmd, 'character')   # assemble a full NPC model from its 'look'
+gear.add_command(gear_pose.pose_cmd, 'pose')   # whole dressed character, occlusion applied
 
 import copy as _copy
 from xi.gear import xi_edit as gear_edit
