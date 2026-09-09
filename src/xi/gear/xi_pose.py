@@ -40,11 +40,14 @@ from xi.xi_config import FFXI_DIR, read_path_for
 from xi.gear.xi_core import LOOK_RACE_NAMES, SLOTS, parse_look
 from xi.gear.xi_export import race_skeleton_dat, resolve_gear_dat
 from xi.entity.anim.xi_export import (
+    GAME_FPS,
     SECTION_TYPE_SKELETON,
     SECTION_TYPE_SKELETON_ANIMATION,
     SECTION_TYPE_SKELETON_MESH,
     AnimationSection,
     AnimationTrack,
+    Joint,
+    JointGlobal,
     Section,
     animation_playback_frames,
     animation_variants,
@@ -60,6 +63,10 @@ from xi.entity.anim.xi_export import (
     parse_skeleton,
     parse_skeleton_references,
     pose_joints_at_playback_frame,
+    quat_conjugate,
+    quat_mul,
+    quat_normalize,
+    rotate_vec3,
 )
 from xi.entity.mesh.xi_export import (
     DEFAULT_ALPHA_SCALE,
@@ -232,10 +239,101 @@ def merge_pose_clip(anim: str, clip_sources, num_joints: int):
     return merged, [sec.name.rstrip("\x00 ") for _d, sec in layers]
 
 
+def read_pose_file(path) -> dict:
+    """Load a baked pose: the world transform of every joint, per frame, as a viewer has
+    already evaluated it.
+
+    ``{"name", "fps", "space": "world", "frames": [[qx,qy,qz,qw,tx,ty,tz, …per joint], …]}``
+
+    This exists because a viewer's pose is often not reproducible from a clip name and a
+    frame number. A weapon-skill schedule lays several clips on a timeline, blends them
+    back out to an underlaid base idle and re-parents the weapon grips — the result is a
+    composition, not a clip. Handing over the evaluated joints instead makes the export
+    match the viewport exactly, whatever produced it.
+
+    Rotations are ``(x, y, z, w)``. Scale is not carried: the rest of the exporter bakes
+    rigid transforms only, and FFXI clips use unit scale."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    frames = data.get("frames") or []
+    if not frames:
+        raise ValueError(f"pose file {path} has no frames")
+    stride = 7
+    for i, flat in enumerate(frames):
+        if len(flat) % stride:
+            raise ValueError(f"pose file {path} frame {i}: {len(flat)} values is not a "
+                             f"multiple of {stride} (quat xyzw + vec3 per joint)")
+    unpacked = [[(tuple(flat[i:i + 4]), tuple(flat[i + 4:i + 7]))
+                 for i in range(0, len(flat), stride)] for flat in frames]
+    return {"name": data.get("name") or "pose",
+            "fps": float(data.get("fps") or GAME_FPS),
+            "frames": unpacked}
+
+
+def _globals_from_frame(frame, joint_count: int) -> List[JointGlobal]:
+    """One baked frame -> ``globals_by_joint``, padded/trimmed to the skeleton."""
+    out: List[JointGlobal] = []
+    for i in range(joint_count):
+        if i < len(frame):
+            rotation, translation = frame[i]
+            out.append(JointGlobal(rotation=quat_normalize(tuple(rotation)),
+                                   translation=tuple(translation)))
+        else:
+            out.append(JointGlobal(rotation=(0.0, 0.0, 0.0, 1.0), translation=(0.0, 0.0, 0.0)))
+    return out
+
+
+def locals_from_globals(joints: List[Joint], globals_by_joint: List[JointGlobal]) -> List[Joint]:
+    """World transforms -> the LOCAL transforms that reproduce them on the DAT's hierarchy.
+
+    ``build_gltf`` writes the node tree from ``parent_index`` and a renderer recomputes
+    every joint from that tree, so the locals have to agree with the globals used to bake
+    the vertices or the skin pulls the mesh apart. Solving ``local = inv(parentGlobal) ∘
+    global`` keeps the original hierarchy while absorbing anything the viewer did to the
+    pose — including a weapon grip it re-parented onto a hand."""
+    out: List[Joint] = []
+    for joint in joints:
+        g = globals_by_joint[joint.index]
+        if joint.parent_index < 0:
+            out.append(Joint(index=joint.index, parent_index=joint.parent_index,
+                             rotation=g.rotation, translation=g.translation))
+            continue
+        p = globals_by_joint[joint.parent_index]
+        inv = quat_conjugate(p.rotation)
+        delta = tuple(g.translation[i] - p.translation[i] for i in range(3))
+        out.append(Joint(index=joint.index, parent_index=joint.parent_index,
+                         rotation=quat_normalize(quat_mul(inv, g.rotation)),
+                         translation=rotate_vec3(inv, delta)))
+    return out
+
+
+def _baked_animation(joints: List[Joint], frames, name: str) -> AnimationSection:
+    """Baked world frames -> an AnimationSection whose tracks are DELTAS from ``joints``.
+
+    ``build_animation_arrays`` composes each sample as ``trackRotation ⊗ bindRotation``
+    and ``bindTranslation + trackTranslation``, so the deltas here are what makes the
+    embedded clip land back on the locals we solved for. keyframe_duration 1.0 keeps one
+    stored keyframe per played frame, so frame N of the export is frame N of the source."""
+    tracks: Dict[int, AnimationTrack] = {}
+    per_frame_locals = [locals_from_globals(joints, _globals_from_frame(f, len(joints)))
+                        for f in frames]
+    for joint in joints:
+        rotations, translations, scales = [], [], []
+        for locals_at in per_frame_locals:
+            local = locals_at[joint.index]
+            rotations.append(quat_normalize(quat_mul(local.rotation, quat_conjugate(joint.rotation))))
+            translations.append(tuple(local.translation[i] - joint.translation[i] for i in range(3)))
+            scales.append((1.0, 1.0, 1.0))
+        tracks[joint.index] = AnimationTrack(joint_index=joint.index, rotations=rotations,
+                                             translations=translations, scales=scales)
+    return AnimationSection(name=name, num_joints=len(joints), num_frames=len(frames),
+                            keyframe_duration=1.0, tracks=tracks)
+
+
 def build_pose(sources: List[PoseSource], output_dir: Path, name: str = "pose",
                skeleton_dat: Optional[Path] = None,
                clip_sources: Optional[List[PoseSource]] = None,
                anim: Optional[str] = "idl", frame: int = 0, all_frames: bool = False,
+               pose_file: Optional[Path] = None,
                occlusion: bool = True, draw_ranged: bool = False,
                fbx: bool = False, alpha_scale: float = DEFAULT_ALPHA_SCALE,
                mesh_merge_dp: int = 4, weld: bool = True,
@@ -275,11 +373,27 @@ def build_pose(sources: List[PoseSource], output_dir: Path, name: str = "pose",
     references = parse_skeleton_references(skeleton_source.data, skel_section)
 
     # ── Pose ────────────────────────────────────────────────────────────────
-    # A character's clip is split by body region across the companion motion packs, so
-    # every source is searched and every layer merged (see merge_pose_clip).
     pose_info: Optional[dict] = None
     animation = None
-    if anim:
+    baked = read_pose_file(pose_file) if pose_file else None
+    if baked:
+        # A viewer handed over the joints it had already evaluated, so there is nothing to
+        # resolve: no clip to look up, no frame to sample, and no weapon re-parenting to
+        # redo — the pose it sent has all of that in it. Solve the locals that reproduce
+        # those worlds on the DAT hierarchy and the node tree agrees with the skin.
+        # --frame still selects, so a pose file holding a whole clip can be exported at
+        # one frame of it. A single-frame file simply clamps to the one frame it has.
+        at = 0 if all_frames else max(0, min(int(frame), len(baked["frames"]) - 1))
+        wanted = baked["frames"] if all_frames else [baked["frames"][at]]
+        globals_by_joint = _globals_from_frame(wanted[0], len(joints))
+        joints = locals_from_globals(joints, globals_by_joint)
+        if all_frames and len(wanted) > 1:
+            animation = _baked_animation(joints, wanted, baked["name"])
+        overrides, weapon_notes = {}, []
+        pose_info = {"anim": baked["name"], "layers": ["baked"], "source": "pose-file",
+                     "frame": None if all_frames else at,
+                     "frame_count": len(baked["frames"]), "all_frames": all_frames}
+    elif anim:
         clip_pool = ([(skeleton_source.data, skeleton_source.sections)]
                      + [(s.data, s.sections) for s in sources if s is not skeleton_source]
                      + [(s.data, s.sections) for s in (clip_sources or [])])
@@ -301,14 +415,15 @@ def build_pose(sources: List[PoseSource], output_dir: Path, name: str = "pose",
         if not all_frames:
             joints = pose_joints_at_playback_frame(joints, animation, frame)
 
-    # Re-parent the drawn weapons' grip joints onto the hands. This rewrites the joint
-    # HIERARCHY rather than just the world transforms, because build_gltf writes the node
-    # tree from parent_index and a renderer recomputes every joint from that tree — an
-    # override applied only to the globals looks right in the baked vertex positions and
-    # then slides the weapon back off the hand the moment the file is opened.
-    overrides, weapon_notes = _weapon_overrides(sources, references, draw_ranged)
-    joints = apply_parent_overrides(joints, overrides)
-    globals_by_joint = compute_global_transforms(joints)
+    if not baked:
+        # Re-parent the drawn weapons' grip joints onto the hands. This rewrites the joint
+        # HIERARCHY rather than just the world transforms, because build_gltf writes the
+        # node tree from parent_index and a renderer recomputes every joint from that
+        # tree — an override applied only to the globals looks right in the baked vertex
+        # positions and then slides the weapon back off the hand once the file is opened.
+        overrides, weapon_notes = _weapon_overrides(sources, references, draw_ranged)
+        joints = apply_parent_overrides(joints, overrides)
+        globals_by_joint = compute_global_transforms(joints)
 
     # ── Occlusion: what the worn set hides ──────────────────────────────────
     parts: List[_MeshPart] = []
@@ -492,6 +607,10 @@ def _resolve_dat(spec: str) -> Path:
 @click.option("--frame", type=int, default=0, show_default=True,
               help="Frame of --anim to pose at, on the 30 fps playback timeline (the same "
                    "frame number a viewer shows), clamped to the clip's length.")
+@click.option("--pose-file", "pose_file", type=click.Path(dir_okay=False), default=None,
+              help="JSON of joint world transforms a viewer has already evaluated, used "
+                   "instead of --anim/--frame. The way to export a pose no clip name can "
+                   "name — a weapon-skill schedule, a battle stance, anything blended.")
 @click.option("--all-frames", is_flag=True, default=False,
               help="Embed the WHOLE clip as an animation instead of freezing one frame, so the "
                    "export plays in a DCC. With --fbx the motion is baked into the FBX too.")
@@ -513,8 +632,8 @@ def _resolve_dat(spec: str) -> Path:
               help="Unmirror the skin into a stacked 2-up texture atlas and remap the UVs.")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Emit the summary as JSON.")
 def pose_cmd(dats, look_hex, race, slots_spec, main_dats, sub_dats, ranged_dats, skeleton_dat,
-             anim_dats, output, name, anim, frame, all_frames, fbx, keep_hidden, draw_ranged,
-             alpha_scale, mesh_merge_dp, weld, split_tex, as_json):
+             anim_dats, output, name, anim, frame, pose_file, all_frames, fbx, keep_hidden,
+             draw_ranged, alpha_scale, mesh_merge_dp, weld, split_tex, as_json):
     """Export a fully dressed character — every slot and the weapons — as one GLB/FBX.
 
     Unlike merging the DATs by hand, this drops the pieces the worn set hides: the
@@ -578,6 +697,7 @@ def pose_cmd(dats, look_hex, race, slots_spec, main_dats, sub_dats, ranged_dats,
         result = build_pose(
             sources, out_dir, name=label, skeleton_dat=skel, clip_sources=clips,
             anim=(anim or None), frame=frame, all_frames=all_frames,
+            pose_file=(Path(pose_file) if pose_file else None),
             occlusion=not keep_hidden, draw_ranged=draw_ranged, fbx=fbx, alpha_scale=alpha_scale,
             mesh_merge_dp=mesh_merge_dp, weld=weld, split_tex=split_tex)
     except (ValueError, FileNotFoundError) as exc:
@@ -593,8 +713,9 @@ def pose_cmd(dats, look_hex, race, slots_spec, main_dats, sub_dats, ranged_dats,
     if result["pose"]:
         p = result["pose"]
         where = ("all %d frames" % p["frame_count"]) if p["all_frames"]             else f"frame {p['frame']}/{max(p['frame_count'] - 1, 0)}"
-        click.echo(f"  {'embedded' if p['all_frames'] else 'posed to'} {p['anim']} {where}"
-                   f"  ({len(p['layers'])} layer(s): {', '.join(p['layers'])})")
+        how = ("from the supplied pose file" if p.get("source") == "pose-file"
+               else f"({len(p['layers'])} layer(s): {', '.join(p['layers'])})")
+        click.echo(f"  {'embedded' if p['all_frames'] else 'posed to'} {p['anim']} {where}  {how}")
     for part in result["parts"]:
         click.echo(f"    {part['slot']:7} {part['mesh']:7} {part['pieces']:>3} piece(s)  {part['dat']}")
     for stow in result["stowed"]:

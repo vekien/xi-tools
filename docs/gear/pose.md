@@ -103,6 +103,7 @@ Three ways to say who the character is — pick whichever you already have:
 | `--anim TAG` | pose to this clip; `--anim ''` for the neutral bind pose (default `idl`) |
 | `--frame N` | frame of `--anim` to freeze, on the **30 fps playback timeline** — the same frame number a viewer's own counter shows (default 0) |
 | `--all-frames` | embed the whole clip as an animation instead of freezing one frame, so the export plays in a DCC. With `--fbx` the motion is baked into the FBX too |
+| `--pose-file F` | bake joint world transforms a viewer has already evaluated, instead of resolving `--anim`. See **Baked poses** below |
 | `--fbx` | also write a texture-embedded `.fbx` via Blender |
 | `--keep-hidden` | **skip** occlusion culling — merge every piece, covered skin and all |
 | `-o DIR` / `--name` | output directory (default `exports/gear/pose/<name>/`) and file stem |
@@ -173,12 +174,47 @@ welded to the hand for the whole clip instead of animating back off it.
 
 ---
 
+## Baked poses
+
+`--anim`/`--frame` can only reach a pose that a clip name and a frame number describe.
+Plenty of what a viewer shows is not that. A weapon-skill schedule lays several clips on
+a timeline, blends each back out to an underlaid base idle, merges the waist pack and
+re-parents the weapon grips — the result is a composition, and the viewer's own "current
+animation" is empty for the whole of it.
+
+`--pose-file` takes the answer instead of the question: the world transform of every
+joint, as the viewer already evaluated it.
+
+```json
+{
+  "name": "main",
+  "fps": 30,
+  "space": "world",
+  "frames": [[qx, qy, qz, qw, tx, ty, tz,  … 7 more per joint …]]
+}
+```
+
+One flat array per frame, seven floats per joint in skeleton order — rotation as a
+quaternion `(x, y, z, w)`, then translation. Give it one frame to freeze that pose, or
+many with `--all-frames` to embed the lot; `--frame N` selects within a multi-frame file.
+Scale is ignored, as everywhere else in the exporter.
+
+The locals that reproduce those worlds on the DAT's own hierarchy are solved for, so the
+node tree the file carries agrees with the baked vertices. Anything the viewer did to the
+pose — including a weapon grip it re-parented onto a hand — comes through in the solve,
+which is why `--pose-file` skips the weapon re-parenting rather than redoing it.
+
+This is how the model viewer's Full Pose export works: it writes `<name>.pose.json` beside
+the model and passes it, so what lands in the DCC is the frame that was on screen. The
+file stays behind as a record of the exact pose.
+
+---
+
 ## Limits
 
-- The pose is **static** — one frame of one clip, with every body-region layer of that
-  clip merged. Schedule-driven stances (the battle idle, the weapon-skill waist packs)
-  are the model viewer's own composition and are not reimplemented here; pass the DAT
-  that holds the clip with `--anim-dat` and name it with `--anim` to reach it directly.
+- Schedule-driven stances (the battle idle, a weapon skill, the waist packs) are the
+  model viewer's composition and are not reimplemented here. `--anim` reaches raw clips
+  only; for anything else, hand over the evaluated joints with `--pose-file`.
 - Textures merge by name across DATs, last one wins. Distinct gear rarely collides
   (FFXI texture names are per-model), but a clash would silently pick one.
 - The `info` render scale (`scale/100`, which the client applies to a character actor)
