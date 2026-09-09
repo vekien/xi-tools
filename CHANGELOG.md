@@ -8,20 +8,42 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ## Unreleased
 
-[Compare v1.6.4...main](https://github.com/vekien/xi-tools/compare/v1.6.4...main)
+[Compare v1.6.7...main](https://github.com/vekien/xi-tools/compare/v1.6.7...main)
+
+_Nothing yet._
+
+---
+
+## v1.6.7 — 2026-09-09
+
+[Compare v1.6.6...v1.6.7](https://github.com/vekien/xi-tools/compare/v1.6.6...v1.6.7)
+
+- `xi gear pose --pose-file` bakes joint world transforms a viewer has already evaluated, instead of resolving a clip name. `--anim` can only reach a pose that a clip and a frame number describe, and plenty of what a viewer shows is not that: a weapon-skill schedule lays several clips on a timeline, blends each back out to an underlaid base idle, merges the waist pack and re-parents the weapon grips, and the viewer's own "current animation" is empty for all of it. The locals that reproduce those worlds on the DAT hierarchy are solved for, so the node tree in the file agrees with the baked vertices; one frame freezes, many with `--all-frames` embed. Format and rationale: `docs/gear/pose.md`
+
+---
+
+## v1.6.6 — 2026-09-09
+
+[Compare v1.6.5...v1.6.6](https://github.com/vekien/xi-tools/compare/v1.6.5...v1.6.6)
 
 - New `xi gear pose` exports a whole dressed character — every armour slot plus the weapons — as one rigged GLB/FBX, with the geometry the game hides actually removed. FFXI gear is authored to overlap (the body keeps its bare wrists, shins and full head of hair) and the client drops whichever pieces the worn set covers, keyed on the `occludeType` byte in each mesh header against each piece's `displayType`; merging the DATs by hand leaves all of that sealed inside the armour, where it pokes through the moment anything is posed. Weapons are re-parented into the hands the way the client draws them, a stowed ranged weapon is left out as the game leaves it out, and every body-region layer of the pose clip is merged so the upper body is posed too, not just the legs. Takes DAT paths, `--race` + `--slots`, or an NPC `look` blob. Docs: `docs/gear/pose.md`
 - `xi gear pose` freezes the frame you name (`--frame N`, counted on the 30 fps played timeline so N is the frame a viewer's own counter shows, not an index into the clip's stored keyframes) or embeds the whole clip with `--all-frames`, which with `--fbx` bakes the motion into the FBX too
-- `xi gear pose --pose-file` bakes joint world transforms a viewer has already evaluated, instead of resolving a clip name. `--anim` can only reach a pose that a clip and a frame number describe, and plenty of what a viewer shows is not that: a weapon-skill schedule lays several clips on a timeline, blends each back out to an underlaid base idle, merges the waist pack and re-parents the weapon grips, and the viewer's own "current animation" is empty for all of it. The locals that reproduce those worlds on the DAT hierarchy are solved for, so the node tree in the file agrees with the baked vertices; one frame freezes, many with `--all-frames` embed. Format and rationale: `docs/gear/pose.md`
 - The mesh parser now keeps the two equipment-occlusion bytes it used to read past — a section's `occludeType` and each piece's `displayType` — and `compute_global_transforms` accepts joint parent overrides, which is what puts a drawn weapon in the hand. The model viewer's Full Pose export runs through all of this
-- Fixed the two "Dev / XI Modified" rows in the model viewer's zone list (403 Dev Castle Town, 404 Dev Town) pointing at the wrong ROM10 DATs; they now carry the right paths and file ids.
-- Docs: new model-viewer reference (`xi mv update` targets including `npc-anims` and `zone-names`, `xi mv database`), a `xi zone package` guide, `xi zone import-collision` and `--compact-buckets` in the collision doc, the zone-export filter flags, and the command lists brought up to date with `xi run`, the title, event and zone commands added since v1.5.12.
-- New `xi anim ws N` resolves a weapon-skill animation number to the motion DAT each race plays. The client uses two per-race banks in `FFXiMain.dll`: numbers 0–255 go through the primary bank and 256–271 through a separate extended bank, so adding 259 to the primary base (which gave a waist-clip DAT with no `main` routine) was wrong. `xi anim list` and bulk `xi anim export` now enumerate the extended bank as `weaponSkillExt`.
-- `xi ui layout mnc2-pos --records` now undoes the per-record byte rotation of the `comm` (ability) and `mgc_` (magic) tables in `ROM/118/114.DAT`, names each ability row from `ROM/181/72.DAT`, and lists all 2,816 rows; `--raw` shows the on-disk bytes.
-- Docs: `docs/anim/weapon-skills.md` — the three unrelated weapon-skill id spaces (name id, server animation number, per-race file id), the bank tables and their companion blocks, the decoded ability table, the effect-directory naming pattern with its counterexamples, and what remains unproven.
 - New `xi mv update --only ws-unreleased` adds the extended weapon-skill bank to `characters.json` as its own **WS (Unreleased)** category: 55 clips across the seven PC races (animations 256–271) that the client can play and retail has never named — `ROM/181/72` holds no name for a single one of those slots. Labelled by animation number, the number `!injectaction 3 N` takes, rather than by a guessed skill name. Placeholder (`dumm`) slots are skipped, so each race lists only what it actually has — thirteen for Hume Female, three for Elvaan Female.
 - `xi mv update` now writes `mv/lists/manifest.json` at the end of every run — a sha256 and byte count for each list beside it. That file is what publishes a list: the model viewer fetches it from `main` at boot and pulls any list whose contents no longer match the copy it holds, so a list refreshed here and pushed reaches every install without a new .exe. It indexes whatever JSON is in the directory, so a list this tool does not generate (the viewer's `zone_npcs.json`) is covered as soon as it sits beside the rest. Content-addressed, with no version counter to bump or get out of step.
 - `mv/lists` brought up to date with the copies the model viewer had been shipping: characters gains the 105 fishing-rod rows added there, floors goes from 34 to 73 rows with the viewer's clearer zone labels, and `zone_npcs.json` joins the set. These lists are now the published set, so shipping the older copies would have taken those rows back off everyone.
+
+---
+
+## v1.6.5 — 2026-09-07
+
+[Compare v1.6.4...v1.6.5](https://github.com/vekien/xi-tools/compare/v1.6.4...v1.6.5)
+
+- New `xi anim ws N` resolves a weapon-skill animation number to the motion DAT each race plays. The client uses two per-race banks in `FFXiMain.dll`: numbers 0–255 go through the primary bank and 256–271 through a separate extended bank, so adding 259 to the primary base (which gave a waist-clip DAT with no `main` routine) was wrong. `xi anim list` and bulk `xi anim export` now enumerate the extended bank as `weaponSkillExt`.
+- `xi ui layout mnc2-pos --records` now undoes the per-record byte rotation of the `comm` (ability) and `mgc_` (magic) tables in `ROM/118/114.DAT`, names each ability row from `ROM/181/72.DAT`, and lists all 2,816 rows; `--raw` shows the on-disk bytes.
+- Docs: `docs/anim/weapon-skills.md` — the three unrelated weapon-skill id spaces (name id, server animation number, per-race file id), the bank tables and their companion blocks, the decoded ability table, the effect-directory naming pattern with its counterexamples, and what remains unproven.
+- Fixed the two "Dev / XI Modified" rows in the model viewer's zone list (403 Dev Castle Town, 404 Dev Town) pointing at the wrong ROM10 DATs; they now carry the right paths and file ids.
+- Docs: new model-viewer reference (`xi mv update` targets including `npc-anims` and `zone-names`, `xi mv database`), a `xi zone package` guide, `xi zone import-collision` and `--compact-buckets` in the collision doc, the zone-export filter flags, and the command lists brought up to date with `xi run`, the title, event and zone commands added since v1.5.12.
 
 ---
 
