@@ -8,7 +8,15 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ## Unreleased
 
-[Compare v1.6.7...main](https://github.com/vekien/xi-tools/compare/v1.6.7...main)
+[Compare v1.7.0...main](https://github.com/vekien/xi-tools/compare/v1.7.0...main)
+
+_Nothing yet._
+
+---
+
+## v1.7.0 — 2026-09-11
+
+[Compare v1.6.7...v1.7.0](https://github.com/vekien/xi-tools/compare/v1.6.7...v1.7.0)
 
 - The `0x1F` ParticleMesh and `0x21` SpriteSheetMesh formats are decoded, so `xi fx` can finally see the geometry that spell, ability and NPC effects actually draw. `xi fx` only ever counted `0x2E` ZoneMesh as a mesh, which is the type *zone* effects use — the fountain splash quad. Everything else in the game stores its triangles in a `0x1F`, so `xi fx json` reported `mesh: null` for every one of them and `xi fx export` quietly wrote a JSON file and no GLB. Layout taken from the client's own loader (`CMoD3m::Open` in the `xiclient` decompile) and verified against 51 sections across four retail DATs. The trap it documents is the alignment: the material table is placed by rounding the *entry count* down to a multiple of four and adding three, not by rounding the byte offset up to 16 — the two agree for one to three materials and then quietly read two bytes into every vertex. Format: `docs/fx/particle_mesh.md`
 - New `xi fx export <dat> --assemble` builds the whole object as one GLB instead of one generator at a time. An effect-only entity's appearance is spread over a dozen generators and none of them looks like anything alone; this places each mesh at its generator's own position and scale. By default it draws the object *at rest*: only generators with the `genFlags` autorun bit, which is what separates a Home Point's idle routine from its activation routine exactly, and no `0x21` sprite cards (those are the billboard for one emitted particle, so a static copy is a flat square through the model). `--all-layers` turns both filters off.
