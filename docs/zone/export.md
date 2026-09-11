@@ -4,7 +4,7 @@ Export an FFXI **zone** (static area geometry) to a self-contained `.glb` and a
 texture-embedded `.fbx`, with every object instanced and placed in world space.
 
 ```bash
-uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--alpha-scale N]
+uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--alpha-scale N] [--opaque]
                             [--with-collision-proxies] [--with-far-lod] [--no-subareas]
 uv run xi zone export ROM/1/41            # Lower Jeuno
 ```
@@ -46,6 +46,7 @@ Zones are a different format from entity models (no skeleton); see
 | `--with-far-lod` | Include **far copies** — `m_` / `lnd_` meshes that stand in for richer geometry the zone also places (Ru'Aun's `m_osid_*` islands, `m_bri_*` bridge). The client shows one or the other by region, so exporting both puts the cheap copy inside the detailed one. Only fires where a richer same-stem twin is actually placed, so ordinary `m_` props (`m_bed_02`, `m_pot`) are never affected. |
 | `--no-subareas` | Omit placements tagged with a sub-area id: shop and inn interiors in the towns, and in Ru'Aun Gardens a whole second low-detail copy of the sky. Included by default — they are real geometry, drawn inside their own volume. See [subareas.md](subareas.md). |
 | `--alpha-scale N` | Multiply texture alpha by `N` (clamped to 255) before writing the PNGs. **Default `2.0`** — see below. Pass `1.0` for the raw FFXI alpha, or higher to force more opacity. |
+| `--opaque` | Write non-blend materials as `alphaMode: OPAQUE` instead of `MASK`. Fixes the checkerboard/eaten floors and walls some zones show in Blender — see below. |
 
 ## Texture opacity (`--alpha-scale`)
 
@@ -58,6 +59,30 @@ would read as **~50% transparent** in Blender/C4D/etc.
 The exporter bakes the same ×2 into the PNG by default, so opaque texels come out
 opaque while real cutouts (alpha 0) and gradients scale proportionally — matching
 the in-game look. Pass `--alpha-scale 1.0` to keep the raw (faint) FFXI alpha.
+
+## Clipped floors and walls (`--opaque`)
+
+By default every non-blend material is written as `alphaMode: MASK` (0.5 cutoff), so real
+cutouts (foliage, fences, signs) stay cut out in a DCC tool. The client, however, **ignores
+texture alpha on non-blend submeshes** — they are solid whatever the alpha says — and many
+zone textures store junk in that channel. In ROM/1/34 `model_doors2` is alpha 0 everywhere,
+`model_sidestep` is 97% below the cutoff, `model_f2yuka` 71%, `model_yuka_h` and
+`model_kabe2_h` 67%. Under MASK Blender clips those texels, and whole floors, stairs and
+walls come out as a checkerboard of holes.
+
+`--opaque` writes those materials as `OPAQUE` instead, which is what the client draws, and
+uses the client's own rules for the rest: only the `0x8000` blend bit gives `BLEND` (water,
+glows), only a mesh name starting with `_` gives `MASK` (foliage cutout, see
+[format.md](format.md)), and the `0x2000` double-sided bit no longer implies transparency.
+Without the flag `0x2000` submeshes are still written as `BLEND` and everything else as
+`MASK`, because `xi object import` reads those modes back into the flags word. The icon
+batch (`xi batch icons`) always exports the `--opaque` way.
+
+With `--fbx`, every OPAQUE material in the `.fbx` points at a 24-bit `<texture>_opaque.png`
+twin written next to the normal PNGs. Blender's FBX importer wires a diffuse texture's alpha
+into the material whenever the PNG has an alpha channel, which would undo `--opaque` on the
+way back in; the alpha-free twin is the only thing it leaves alone. Blend and cutout
+materials keep using the original PNG.
 
 ## Skybox vs placed geometry
 

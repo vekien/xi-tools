@@ -578,23 +578,40 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
         tex_image_index[tex_key] = len(gltf_textures) - 1
         return tex_image_index[tex_key]
 
-    def material_for(tex_key: Optional[str], is_alpha: bool = False) -> int:
-        # Keyed by (tex_key, is_alpha) so the same texture can have separate opaque
+    def material_for(tex_key: Optional[str], mode: str) -> int:
+        # Keyed by (tex_key, mode) so the same texture can have separate opaque
         # and alpha variants (e.g. tree bark vs leaves sharing the same texture).
-        cache_key = (tex_key, is_alpha)
+        cache_key = (tex_key, mode)
         if cache_key in material_index:
             return material_index[cache_key]
         pbr = {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}
         if tex_key is not None and tex_key in textures:
             pbr["baseColorTexture"] = {"index": _ensure_texture(tex_key)}
         name = (tex_key or "untextured").strip() or "untextured"
-        if is_alpha:
-            name += "_alpha"
+        if mode == "BLEND":
+            name += "_alpha"     # xi_glb_to_fbx keys its Blender BLEND wiring on this suffix
+        elif mode == "MASK" and opaque_nonblend:
+            name += "_cutout"    # only foliage gets here under --opaque; keep it distinct
         material_index[cache_key] = len(materials)
-        mode = "BLEND" if is_alpha else ("OPAQUE" if opaque_nonblend else "MASK")
         materials.append({"name": name, "doubleSided": True,
                           "alphaMode": mode, "pbrMetallicRoughness": pbr})
         return material_index[cache_key]
+
+    def mode_for(mesh_name: str, prim: ZonePrimitive) -> str:
+        if not opaque_nonblend:
+            # Legacy mapping: 0x8000 and 0x2000 both BLEND, everything else MASK.
+            # `xi object import` reads these modes back into the flags word, so
+            # the default stays as it was.
+            return "BLEND" if (prim.alpha_blend or prim.alpha_test) else "MASK"
+        # What the client draws: 0x8000 is the only blend bit; 0x2000 is merely
+        # back-face-cull-disable (docs/zone/format.md) and says nothing about alpha;
+        # cutout is keyed on a leading '_' in the mesh name. Everything else is solid
+        # whatever the texture's alpha channel holds.
+        if prim.alpha_blend:
+            return "BLEND"
+        if mesh_name.startswith("_"):
+            return "MASK"
+        return "OPAQUE"
 
     # --- one glTF mesh per unique zone mesh (local geometry), built on demand ---
     meshes: List[dict] = []
@@ -603,14 +620,14 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
     def mesh_for(name: str) -> int:
         if name in mesh_index_by_name:
             return mesh_index_by_name[name]
-        # Group by (tex_key, alpha_blend) so bark and leaves sharing the same texture
+        # Group by (tex_key, mode) so bark and leaves sharing the same texture
         # each get their own material slot (opaque vs alpha variant).
-        by_tex: Dict[Tuple[Optional[str], bool], List[ZonePrimitive]] = {}
+        by_tex: Dict[Tuple[Optional[str], str], List[ZonePrimitive]] = {}
         for prim in meshes_by_name[name]:
-            key = (resolve_texture(prim.texture_name, textures), prim.alpha_blend or prim.alpha_test)
+            key = (resolve_texture(prim.texture_name, textures), mode_for(name, prim))
             by_tex.setdefault(key, []).append(prim)
         mesh_prims: List[dict] = []
-        for (tex_key, is_alpha), group in by_tex.items():
+        for (tex_key, mode), group in by_tex.items():
             positions: List[Tuple[float, float, float]] = []
             normals: List[Tuple[float, float, float]] = []
             uvs: List[Tuple[float, float]] = []
@@ -638,7 +655,7 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
                 col2x = [(min(1.0, r * 2.0), min(1.0, g * 2.0), min(1.0, b * 2.0), 1.0)
                          for (r, g, b, _a) in colors]
                 attrs["COLOR_0"] = builder.add_accessor(pack_vec4(col2x), 5126, "VEC4", len(col2x), target=34962)
-            mesh_prims.append({"attributes": attrs, "mode": 4, "material": material_for(tex_key, is_alpha)})
+            mesh_prims.append({"attributes": attrs, "mode": 4, "material": material_for(tex_key, mode)})
         mesh_index_by_name[name] = len(meshes)
         meshes.append({"name": name, "primitives": mesh_prims})
         return mesh_index_by_name[name]
@@ -1148,7 +1165,8 @@ def export_objects(dat_path: Path, output_dir: Path,
                    textures: Dict[str, TextureImage], fbx: bool = True,
                    raw: bool = False, right_handed: bool = False,
                    alpha_scale: float = DEFAULT_ALPHA_SCALE,
-                   skip_sky: bool = False, drop_names: Optional[set] = None) -> List[Path]:
+                   skip_sky: bool = False, drop_names: Optional[set] = None,
+                   opaque_nonblend: bool = False) -> List[Path]:
     """Export each unique zone mesh as its own ``<meshname>.glb`` (+ ``.fbx`` if
     ``fbx``) into ``output_dir``. Each object is emitted in local space at the
     origin (its raw geometry), oriented by the same ``ffxi_root_correction`` node
@@ -1171,7 +1189,8 @@ def export_objects(dat_path: Path, output_dir: Path,
                            rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0))]
         out = build_glb(dat_path, output_dir, {name: meshes_by_name[name]}, ident, textures,
                         raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
-                        write_loose_textures=fbx, out_stem=sanitize_filename(name))
+                        write_loose_textures=fbx, out_stem=sanitize_filename(name),
+                        opaque_nonblend=opaque_nonblend)
         paths.append(out[0])
         if fbx:
             print(f"  [{i}/{len(names)}] {name} -> fbx")
@@ -1184,7 +1203,7 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                 collision: bool = False, alpha_scale: float = DEFAULT_ALPHA_SCALE,
                 as_json: bool = False, no_vfx: bool = False, objects: bool = False,
                 collision_proxies: bool = False, far_lod: bool = False,
-                sub_areas: bool = True) -> List[Path]:
+                sub_areas: bool = True, opaque_nonblend: bool = False) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
     src = source or dat_path
@@ -1211,13 +1230,14 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
         # of loose .png textures in the folder so the per-object FBX materials resolve.
         paths = export_objects(dat_path, output_dir, meshes_by_name, textures, fbx=fbx,
                                raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
-                               skip_sky=skip_sky, drop_names=drop_names)
+                               skip_sky=skip_sky, drop_names=drop_names,
+                               opaque_nonblend=opaque_nonblend)
         if as_json:
             paths.append(export_zone_json(dat_path, output_dir, source=source))
         return paths
     paths = build_glb(dat_path, output_dir, meshes_by_name, placements, textures,
                       skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
-                      drop_names=drop_names)
+                      drop_names=drop_names, opaque_nonblend=opaque_nonblend)
     if fbx:
         fbx_path = convert_glb_to_fbx(paths[0])
         paths.append(fbx_path)
@@ -1342,8 +1362,16 @@ import click as _click  # noqa: E402
                     "alpha at half scale (0x80 = opaque), so the default 2.0 makes opaque texels fully "
                     "opaque (matching the game) while preserving real cutouts/gradients. Pass 1.0 for "
                     "the raw, faint FFXI alpha, or a higher value to force more opacity.")
+@_click.option("--opaque", "opaque_nonblend", is_flag=True, default=False,
+               help="Write non-blend materials as alphaMode OPAQUE instead of MASK. The client "
+                    "ignores texture alpha on non-blend submeshes, but many zone textures store "
+                    "junk alpha (doors2, sidestep, f2yuka, yuka_h...), so under MASK Blender clips "
+                    "whole floors and walls into a checkerboard. Only real alpha-blend "
+                    "submeshes (flag 0x8000) stay BLEND and '_'-named foliage stays MASK; "
+                    "the 0x2000 double-sided bit no longer implies transparency.")
 def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool, use_base: bool,
-        collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool, alpha_scale: float):
+        collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool, alpha_scale: float,
+        opaque_nonblend: bool):
     """Export a zone's static mesh + textures to a self-contained .glb.
 
     DAT_PATH may be a ROM-relative spec like ROM/1/41. Zone meshes are decrypted
@@ -1375,7 +1403,7 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
                             collision=collision, alpha_scale=alpha_scale, as_json=as_json,
                             no_vfx=no_vfx, objects=objects,
                             collision_proxies=collision_proxies, far_lod=far_lod,
-                            sub_areas=sub_areas)
+                            sub_areas=sub_areas, opaque_nonblend=opaque_nonblend)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:

@@ -20,10 +20,42 @@ import bpy
 def _png_for_mat(mat_name: str, tex_dir: str):
     """Return the absolute PNG path for a material, or None if not found."""
     key = re.sub(r"\s+", "_", mat_name.strip())
-    if key.endswith("_alpha"):
-        key = key[:-6]
+    for suffix in ("_alpha", "_cutout"):
+        if key.endswith(suffix):
+            key = key[: -len(suffix)]
     path = os.path.join(tex_dir, key + ".png")
     return path if os.path.exists(path) else None
+
+
+def _opaque_png(image, png_path: str, scene) -> str:
+    """Write an RGB-only twin of `png_path` and return its path.
+
+    Blender's FBX importer links a diffuse texture's alpha into the Principled
+    Alpha input whenever the PNG has an alpha channel (import_fbx.py: "if image
+    and image.depth == 32"), so an OPAQUE material would come back HASHED and
+    punch holes wherever the zone texture's alpha is junk. A 24-bit copy is the
+    only thing the importer will leave alone."""
+    out = png_path[:-4] + "_opaque.png"
+    if not os.path.exists(out):
+        # save_render composites the alpha into an RGB write (low-alpha texels go
+        # black), so flatten a throwaway copy to alpha 1 first. The original stays
+        # untouched for the _alpha / cutout materials that share it.
+        import numpy as np
+        flat = image.copy()
+        px = np.empty(len(flat.pixels), dtype=np.float32)
+        flat.pixels.foreach_get(px)
+        px[3::4] = 1.0
+        flat.pixels.foreach_set(px)
+        flat.alpha_mode = "NONE"
+        settings = scene.render.image_settings
+        fmt, mode, depth = settings.file_format, settings.color_mode, settings.color_depth
+        settings.file_format, settings.color_mode, settings.color_depth = "PNG", "RGB", "8"
+        try:
+            flat.save_render(out, scene=scene)
+        finally:
+            settings.file_format, settings.color_mode, settings.color_depth = fmt, mode, depth
+            bpy.data.images.remove(flat)
+    return out
 
 
 def main() -> None:
@@ -67,17 +99,27 @@ def main() -> None:
         bsdf_node = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
         if tex_node is None or bsdf_node is None:
             continue
-        tex_node.image = bpy.data.images.load(png_path, check_existing=True)
+        # The glTF importer only feeds the BSDF Alpha socket for MASK and BLEND
+        # materials; an OPAQUE one leaves it unlinked. Read that before rewiring —
+        # it is the one signal that survives every Blender version (blend_method
+        # stopped saying CLIP in 4.2).
+        alpha_wanted = bsdf_node.inputs["Alpha"].is_linked
+        key = re.sub(r"\s+", "_", mat.name.strip())
+        image = bpy.data.images.load(png_path, check_existing=True)
+        if not alpha_wanted and not key.endswith("_alpha"):
+            image = bpy.data.images.load(_opaque_png(image, png_path, bpy.context.scene),
+                                         check_existing=True)
+        tex_node.image = image
         # Replace intermediate (MIX+vertex-color) link with a direct connection
         links.new(tex_node.outputs["Color"], bsdf_node.inputs["Base Color"])
         # Wire the alpha channel so Blender's FBX exporter can trace it.
         # _alpha materials = FFXI softblend (0x8000): keep BLEND for smooth transparency.
-        # CLIP materials = alphaMode MASK from GLB (e.g. foliage cutout): keep threshold.
-        key = re.sub(r"\s+", "_", mat.name.strip())
+        # MASK materials (foliage cutout): direct texture alpha, keep the threshold.
+        # OPAQUE materials got the 24-bit PNG above, so nothing to wire.
         if key.endswith("_alpha"):
             links.new(tex_node.outputs["Alpha"], bsdf_node.inputs["Alpha"])
             mat.blend_method = "BLEND"
-        elif mat.blend_method == "CLIP":
+        elif alpha_wanted:
             links.new(tex_node.outputs["Alpha"], bsdf_node.inputs["Alpha"])
 
     bpy.ops.export_scene.fbx(
