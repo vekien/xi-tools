@@ -19,6 +19,12 @@ from xi.entity.mesh.xi_export import resolve_dat_path  # noqa: F401
 
 EFFECT_TYPE = 0x05
 MESH_TYPE = 0x2E
+# A generator draws EITHER a zone mesh (`0x2E` — the fountain splash quad, and only
+# in zone DATs) or stored particle geometry (`0x1F` ParticleMesh / `0x21`
+# SpriteSheetMesh). Spell, ability and NPC effects are all the latter, so treating
+# only `0x2E` as "mesh" made every one of them report mesh=None. See
+# xi_particle_mesh.py and docs/fx/particle_mesh.md.
+MESH_TYPES = (MESH_TYPE, 0x1F, 0x21)
 _LIBRARY_PATH = Path(__file__).with_name("fx_library.json")
 
 # Parameter locators (opcode tags; payload is +4 from the tag) and header offsets.
@@ -82,7 +88,7 @@ def _fourcc(data: bytes, start: int) -> str:
 
 
 def _mesh_fourccs(data: bytes, sections) -> set:
-    return {bytes(data[s.start:s.start + 4]) for s in sections if s.type_code == MESH_TYPE}
+    return {bytes(data[s.start:s.start + 4]) for s in sections if s.type_code in MESH_TYPES}
 
 
 def _texture_fourccs(data: bytes, sections) -> set:
@@ -100,18 +106,25 @@ def _effect_texture(body: bytes, tex_ccs: set) -> Optional[str]:
 
 def _effect_target(body: bytes, mesh_ccs: set) -> Tuple[Optional[str], Optional[Tuple[float, float, float]]]:
     """Best-effort: the mesh an effect places + its local position. Effects name a
-    mesh by its 4-byte FourCC, followed by a u32 then an xyz float-triple."""
+    mesh by its 4-byte FourCC, followed by a u32 then an xyz float-triple.
+
+    A generator whose position is (0,0,0) — common for particle meshes, which are
+    authored around their own origin — still NAMES its mesh, so remember the first
+    reference and return it with a null position rather than losing it."""
+    first: Optional[str] = None
     for off in range(0x10, len(body) - 19):
         cc = body[off:off + 4]
         if cc not in mesh_ccs:
             continue
+        if first is None:
+            first = cc.decode("latin1")
         try:
             p = struct.unpack("<3f", body[off + 8:off + 20])
         except struct.error:
             continue
         if all(v == v and abs(v) < 1e5 for v in p) and any(abs(v) > 0.01 for v in p):
             return cc.decode("latin1"), (round(p[0], 2), round(p[1], 2), round(p[2], 2))
-    return None, None
+    return first, None
 
 
 def _tag_payload(body: bytes, tag: bytes) -> Optional[int]:

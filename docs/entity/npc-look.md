@@ -88,6 +88,35 @@ Altair  → equipped HumeMale face=12
   legs 5 → ROM/28/89.DAT    feet 2 → ROM/28/118.DAT  …
 ```
 
+## Effect-only entities
+
+Not every `size = 0` model has a body. A **Home Point** (`modelid 51` →
+`ROM/3/25`) resolves to an entity DAT whose entire `0x2A` geometry is **one
+triangle about 3 mm across**, single-jointed, painted with a 2×1 black texture,
+on a skeleton named `toum` — *toumei* (透明), "transparent". The visible crystal
+is `0x05` generators drawing `0x1F` ParticleMesh layers.
+
+The proxy is not a mistake: the client's actor system needs a skeleton, a mesh
+and an idle clip to instantiate an actor with a position, a click target and an
+animation clock. Giving it an invisible one and putting the appearance in the
+effect layer is how FFXI builds anything that glows rather than stands there.
+
+**104 of the ~1,970 rows in `mv/lists/npcs.json` are built this way** — portals,
+telepoints, lightbeams, vortexes, fireworks, and every elemental. They are marked
+`effect: <layer count>` with an `(Effect)` name suffix by
+[`xi mv update --only effect-npcs`](../mv/README.md).
+
+Consequences worth knowing:
+
+- **A renderer that only reads `0x29`/`0x2A`/`0x2B` draws nothing** for these,
+  and looks like it failed rather than like it skipped something.
+- `xi mesh export` gives you the proxy triangle. For the visible object use
+  `xi fx export <dat> --assemble` ([../fx/particle_mesh.md](../fx/particle_mesh.md)).
+- To author one, the recipe is the same three parts: a minimal skeleton, a
+  degenerate skinned triangle, an idle clip — then the effect.
+
+Worked example: [../dats/ROM_3_25.md](../dats/ROM_3_25.md).
+
 ## Baking a costume into a standalone NPC DAT
 
 The `look` above is what the **client** assembles at runtime (a **Type-1 PC**: shared race

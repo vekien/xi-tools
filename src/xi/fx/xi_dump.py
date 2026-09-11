@@ -14,7 +14,7 @@ from xi.fx.xi_core import (parse_sections, resolve_dat_path, classify, _load_lib
                           _tag_payload, _TAG_COLOR, _TAG_SCALE, _TAG_CULL,
                           _OFF_INTERVAL, _OFF_COUNT, _OFF_GENFLAGS, _AUTORUN_BIT,
                           _OFF_EMIT_VARIANCE, _OFF_ATTACH, ATTACH_TYPES)
-from xi.fx.xi_opcodes import decode_subsections
+from xi.fx.xi_opcodes import decode_subsections, has_op, op_floats
 from xi.event.xi_event import _routine_sec2_commands
 from xi.xi_config import read_path_for
 
@@ -43,6 +43,23 @@ def _read_params(body: bytes) -> Dict:
         params["spawn_interval"] = struct.unpack("<H", body[_OFF_INTERVAL:_OFF_INTERVAL + 2])[0]
         params["count"] = body[_OFF_COUNT]
         params["autorun"] = bool(body[_OFF_GENFLAGS] & _AUTORUN_BIT)
+
+    # What MOVES this effect. All three are located by walking the opcode stream
+    # (see xi_opcodes.op_floats), not by byte-searching for a tag.
+    rot = op_floats(body, 2, 0x09)                 # sec2 0x09 Rotation — static, radians
+    if rot and any(rot):
+        params["rotation"] = [round(v, 4) for v in rot]
+    vel = op_floats(body, 2, 0x0B)                 # sec2 0x0B RotationVelocity
+    # The velocity only turns anything when the sec3 0x05 Rotation updater is
+    # there to integrate it — the generator carries the rate, the updater applies
+    # it. wa00/wa01/bnd0 have both; a generator with the rate and no updater
+    # would sit still.
+    if vel and any(vel) and has_op(body, 3, 0x05):
+        params["rotation_velocity"] = [round(v, 6) for v in vel]   # radians per 60 Hz frame
+    u = op_floats(body, 3, 0x27, 1)                # sec3 0x27/0x28 TexCoordU/V
+    v = op_floats(body, 3, 0x28, 1)
+    if (u and u[0]) or (v and v[0]):
+        params["uv_scroll"] = [round((u or [0.0])[0], 6), round((v or [0.0])[0], 6)]
     return params
 
 

@@ -125,3 +125,31 @@ def decode_subsections(body: bytes, max_ops: int = 256) -> Optional[Dict[str, Li
             pos += size * 4
         out[f"section{idx}"] = ops
     return out
+
+
+def op_floats(body: bytes, section: int, opcode: int, count: int = 3):
+    """The float payload of one opcode in one sub-section, or None.
+
+    Located by walking the stream rather than by byte-searching for a tag: a
+    two-byte tag pattern (``0f 04``) matches inside float payloads too, and the
+    animation opcodes sit deep enough in a stream for that to bite.
+    """
+    subs = decode_subsections(body)
+    if not subs:
+        return None
+    for entry in subs.get(f"section{section}") or []:
+        if entry["op"] != f"0x{opcode:02X}":
+            continue
+        fl = entry.get("floats")
+        if fl is None or len(fl) < count:
+            return None
+        return list(fl[:count])
+    return None
+
+
+def has_op(body: bytes, section: int, opcode: int) -> bool:
+    """Whether a sub-section runs a given opcode at all."""
+    subs = decode_subsections(body)
+    if not subs:
+        return False
+    return any(e["op"] == f"0x{opcode:02X}" for e in subs.get(f"section{section}") or [])

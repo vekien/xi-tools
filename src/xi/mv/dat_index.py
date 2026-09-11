@@ -352,3 +352,102 @@ def anim_clip_ids(dat: str) -> list[str]:
     except OSError:
         return []
     return out
+
+
+# --- Effect-only entities ---------------------------------------------------
+#
+# Some entity models have no body. A Home Point's SkeletonMesh is a single 3 mm
+# triangle painted with a 2x1 black texture, on a skeleton named `toum`
+# (toumei, "transparent") — an invisible proxy so the client's actor system has
+# something to place, click and pose. Everything visible is drawn by its 0x05
+# generators out of 0x1F ParticleMesh geometry. Portals, telepoints, lightbeams,
+# vortexes and the elementals are all built this way.
+#
+# The proxy is what identifies them, and it is tiny: 160 or 208 payload bytes
+# across every retail one measured, against tens of kilobytes for a real body.
+# The cap sits well above the proxies and well below any real mesh.
+T_PARTICLE_MESH = 0x1F
+T_SPRITE_MESH = 0x21
+_PROXY_MESH_CAP = 2048
+
+
+def _section_bytes(path: Path) -> dict[int, int]:
+    """{type code: total payload bytes} from a seek-walk of section headers."""
+    out: dict[int, int] = {}
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            pos = 0
+            n = 0
+            while pos + 16 <= size and n < _SECTION_CAP:
+                f.seek(pos)
+                hdr = f.read(16)
+                if len(hdr) < 16:
+                    break
+                meta = struct.unpack_from("<I", hdr, 4)[0]
+                sec_size = ((meta >> 7) & 0xFFFFF) * 0x10
+                if sec_size <= 0:
+                    break
+                kind = meta & 0x7F
+                out[kind] = out.get(kind, 0) + max(0, sec_size - 16)
+                n += 1
+                pos = (pos + sec_size + 15) & ~15
+    except OSError:
+        return {}
+    return out
+
+
+def effect_layer_count(dat: str) -> int:
+    """How many drawable effect layers an entity model has, or 0.
+
+    Two passes, because the cheap one is wrong on its own: plenty of ordinary
+    monsters carry a 0x1F mesh for an attack flourish while having a real body,
+    and a handful of DATs hold a 0x1F that no generator ever draws. The header
+    seek-walk rejects anything with real SkeletonMesh geometry without opening
+    the file; only survivors get parsed.
+
+    Returns the number of DISTINCT 0x1F meshes autorun generators draw, so
+    callers can tell "renders as an effect" from "has an effect in it". That is
+    a floor on what :func:`xi.fx.xi_export.assemble_effect` emits, which counts
+    generators — a Home Point draws 4 meshes across 6 generator layers, two of
+    them the same mesh at a second scale.
+    """
+    path = Path(FFXI_DIR) / norm(dat)
+    types = _section_bytes(path)
+    if not types:
+        return 0
+    if T_PARTICLE_MESH not in types and T_SPRITE_MESH not in types:
+        return 0
+    if T_PARTICLE_GEN not in types:
+        return 0
+    if types.get(T_SKELETON_MESH, 0) >= _PROXY_MESH_CAP:
+        return 0
+
+    from xi.entity.anim.xi_export import parse_sections
+    from xi.fx.xi_core import _effect_target, _fourcc, _mesh_fourccs
+    from xi.fx.xi_core import _OFF_GENFLAGS, _AUTORUN_BIT, EFFECT_TYPE
+    from xi.fx.xi_particle_mesh import PARTICLE_MESH_TYPE, particle_meshes
+
+    try:
+        data = bytearray(path.read_bytes())
+        sections = parse_sections(data)
+    except (OSError, ValueError):
+        return 0
+
+    meshes = particle_meshes(data, sections)
+    if not meshes:
+        return 0
+    mesh_ccs = _mesh_fourccs(data, sections)
+
+    drawn: set[str] = set()
+    for s in sections:
+        if s.type_code != EFFECT_TYPE or s.size <= _OFF_GENFLAGS:
+            continue
+        body = bytes(data[s.start:s.start + s.size])
+        if not (body[_OFF_GENFLAGS] & _AUTORUN_BIT):
+            continue
+        ref, _pos = _effect_target(body, mesh_ccs)
+        mesh = meshes.get(ref) if ref else None
+        if mesh is not None and mesh.section_type == PARTICLE_MESH_TYPE:
+            drawn.add(ref)
+    return len(drawn)

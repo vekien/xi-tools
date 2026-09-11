@@ -26,6 +26,15 @@ section (type 0x3D)
   data_start + 0x08 : u32 sound_id
 ```
 
+> ⚠️ **The section's DatId is not the sound id.** They match often enough to look
+> like a rule (`"5048"` → 5048) and then don't: the Home Point's activation sound
+> sits in a section named **`6023`** whose embedded `u32` is **16023**. Both
+> `se006023.spw` and `se016023.spw` exist on disk, so reading the name instead of
+> the payload plays a real but wrong sound, silently. `xi audio refs` reads the
+> `u32`; the `section` field in its JSON is the DatId and is there for locating
+> the record, not for resolving it. (`ROM/3/25` — see
+> [../dats/ROM_3_25.md](../dats/ROM_3_25.md).)
+
 The sound id resolves to a file the same way the header `id` does
 (see [format.md](format.md#id--file)):
 

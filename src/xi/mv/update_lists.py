@@ -1786,6 +1786,93 @@ def update_npc_anims(
     }
 
 
+_EFFECT_SUFFIX = " (Effect)"
+
+
+def update_effect_npcs(
+    lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
+    notify: Notify = _noop,
+) -> Report:
+    """Mark the NPC models whose visible form is an effect, not a mesh.
+
+    A Home Point, a telepoint, a portal, an elemental: the SkeletonMesh in these
+    DATs is an invisible proxy (160-208 bytes — one sub-millimetre triangle on a
+    ``toum``/transparent skeleton) that exists so the client has something to
+    place and click. Everything you see is `0x05` generators drawing `0x1F`
+    ParticleMesh geometry. See :func:`xi.mv.dat_index.effect_layer_count` for the
+    test and ``docs/fx/particle_mesh.md`` for the format.
+
+    Each qualifying entry gets ``effect: <layer count>`` and a ``(Effect)``
+    suffix on its name, so the list says why a row that used to render as an
+    empty stage now renders as a crystal. Both are idempotent, and an entry that
+    stops qualifying loses both — a model whose DAT is replaced corrects itself.
+    """
+    from xi.mv.dat_index import effect_layer_count
+
+    path = lists_dir / "npcs.json"
+    src = path if path.is_file() else None
+    if src is None and base_dir is not None and (base_dir / "npcs.json").is_file():
+        src = base_dir / "npcs.json"
+    if src is None:
+        return {
+            "target": "effect-npcs",
+            "file": str(path),
+            "error": f"npcs.json not found in {lists_dir}",
+            "added": 0,
+            "wrote": False,
+        }
+
+    notify("checking every NPC model for effect-only geometry")
+    data = _load_json(src)
+
+    added = 0
+    changed = 0
+    dropped = 0
+    samples: list[str] = []
+
+    for cat in data.get("categories") or []:
+        for entry in cat.get("entries") or []:
+            layers = 0
+            for variant in entry.get("variants") or []:
+                layers = max(layers, effect_layer_count(variant))
+
+            name = str(entry.get("name") or "")
+            base_name = name[:-len(_EFFECT_SUFFIX)] if name.endswith(_EFFECT_SUFFIX) else name
+
+            if not layers:
+                if "effect" in entry:
+                    del entry["effect"]
+                    dropped += 1
+                if name != base_name:
+                    entry["name"] = base_name
+                continue
+
+            was = entry.get("effect")
+            entry["effect"] = layers
+            entry["name"] = base_name + _EFFECT_SUFFIX
+            if was is None:
+                added += 1
+                if len(samples) < 12:
+                    samples.append(f"{entry['name']} → {layers} layer(s)")
+            elif was != layers:
+                changed += 1
+
+    if (added or changed or dropped) and not dry_run:
+        _write_json(path, data, dry_run=False)
+
+    if dropped:
+        samples.append(f"cleared {dropped} entries that no longer render as effects")
+
+    return {
+        "target": "effect-npcs",
+        "file": str(path),
+        "added": added,
+        "changed": changed,
+        "wrote": bool((added or changed or dropped) and not dry_run),
+        "samples": samples,
+    }
+
+
 def update_zone_names(
     lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
     notify: Notify = _noop,
@@ -2052,8 +2139,8 @@ def write_manifest(
 # so running them the other way round is safe too).
 ALL_TARGETS = (
     "gear", "gear-sets", "gear-labels", "ws-unreleased", "music", "sfx",
-    "zone-music", "effects", "images", "npcs", "npc-anims", "zone-names",
-    "file-ids",
+    "zone-music", "effects", "images", "npcs", "npc-anims", "effect-npcs",
+    "zone-names", "file-ids",
 )
 
 Updater = Callable[..., Report]
@@ -2117,6 +2204,9 @@ def run_updates(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t in ("npc-anims", "npc_anims"):
             report = update_npc_anims(
+                lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
+        elif t in ("effect-npcs", "effect_npcs", "effectnpcs"):
+            report = update_effect_npcs(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t in ("zone-names", "zone_names"):
             report = update_zone_names(

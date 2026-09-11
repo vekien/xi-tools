@@ -22,13 +22,13 @@ See [effect_system.md](../fx/effect_system.md) for how the effect-related sectio
 | **`0x07`** | **EffectRoutine** | the **routine/scheduler that triggers & sequences effects** (e.g. WarCry's `main`/`ssub`) — and the **camera timeline** (same scheduler) |
 | **`0x19`** | **ParticleKeyFrameData** | keyframe curves an effect references (e.g. fountain `tkus`, fire `hiaa`, lamp `lirr/lirg/lirb`) |
 | `0x1C` | ZoneDef | object placement table (positions/TRS) |
-| `0x1F` | ParticleMesh | a particle's mesh (e.g. WarCry `wor0`–`wor3`) |
+| **`0x1F`** | **ParticleMesh** | stored effect geometry — 36-byte vertices behind a material table (e.g. WarCry `wor0`–`wor3`). Format: [../fx/particle_mesh.md](../fx/particle_mesh.md) |
 | `0x20` | Texture | DXT / palettized texture |
-| **`0x21`** | **SpriteSheetMesh** | sprite-sheet geometry companion to a texture (e.g. `fire`, `tare`, `wor4`) |
+| **`0x21`** | **SpriteSheetMesh** | the billboard card a sprite-sheet particle draws (e.g. `fire`, `tare`, `wor4`). Format: [../fx/particle_mesh.md](../fx/particle_mesh.md) |
 | `0x25` | WeightedMesh | skinned/weighted mesh |
-| `0x29` | Skeleton | |
+| `0x29` | Skeleton | joints + attach-point references ([../mesh/format.md](../mesh/format.md)) |
 | `0x2A` | SkeletonMesh | skinned entity mesh |
-| `0x2B` | SkeletonAnimation | |
+| `0x2B` | SkeletonAnimation | one animation clip ([../anim/format.md](../anim/format.md)) |
 | `0x2E` | ZoneMesh | static zone geometry (local space) |
 | `0x2F` | Environment | fog/lighting/atmosphere |
 | `0x30` | UiMenu | |

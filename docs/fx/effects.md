@@ -274,6 +274,45 @@ tki1..tki5 (0x05 generator)
 (The mesh's own texture-name field is how the splash quad picks up `funsui_sib1`,
 etc. — same texname matching the rest of the zone uses.)
 
+## What MOVES an effect
+
+An effect's motion is not in a `0x2B` animation clip — an effect-only entity's
+clip is a placeholder (a Home Point's `idl0` is 99 frames of identity transforms
+on a 2-joint skeleton, and moves the invisible proxy triangle, nothing else).
+The motion is in the generator's opcode streams, and it is three separate things:
+
+| Where | Opcode | Payload | Does |
+|---|---|---|---|
+| sec2 | `0x09` Rotation | 3× f32 radians | **static** placement rotation |
+| sec2 | `0x0B` RotationVelocity | 3× f32 radians **per 60 Hz frame** | the spin *rate* |
+| sec3 | `0x05` Rotation | — | the **updater** that integrates the rate each frame |
+| sec3 | `0x27`/`0x28` TexCoordU/V | f32 each, per 60 Hz frame | UV scroll |
+
+Two rules that are easy to get wrong:
+
+1. **The rate and the updater are separate opcodes.** `0x0B` in sec2 carries the
+   radians per frame; the sec3 `0x05` updater is what adds it to the current
+   rotation. A generator with the rate and no updater does not turn. Read one
+   without the other and you either miss the spin or invent one.
+2. **`0x09` is not decoration.** Two generators frequently differ in *nothing but*
+   this value — a Home Point's `nak0`/`nak1` are one mesh at 30° and 150°, the
+   crossed planes inside the crystal. Deduplicate placements on mesh + position +
+   scale and you silently delete half the object.
+
+The tick is **60 frames per second** — the rate the FFXI effect engine runs at.
+So `bnd0`'s `−0.0157 rad/frame` is −0.94 rad/s: the Home Point crystal turns once
+every ~6.7 seconds.
+
+`xi fx json` reports all three per effect as `rotation`, `rotation_velocity` and
+`uv_scroll` (the velocity only when its updater is present). They are located by
+walking the opcode stream — `xi.fx.xi_opcodes.op_floats` / `has_op` — not by
+byte-searching for a tag, which matches inside float payloads.
+
+> **Direction is unverified.** The rotation is applied in the same handedness as
+> `xi.zone.xi_export.trs_matrix`, so the GLB export and the model viewer agree
+> with each other. Whether that sign matches the retail client has not been
+> checked against a live capture; the magnitude and the relative angles have.
+
 ## How effects render (engine subsystem)
 
 From the fan decompile `thirdparty/xiclient` (a reverse-engineering effort — a
@@ -291,6 +330,42 @@ From the fan decompile `thirdparty/xiclient` (a reverse-engineering effort — a
   `0x30` scale, `0x2E` distance fade, `0x45/0x3C/0x3F/0x44/0x01` parent/child
   attach, `0x53/0x6A` billboard. These overlap the tags we see in the `tki` stream
   and are the next reference for full param decode.
+
+### Which element class a generator gets
+
+`CYyGenerator.cpp:150` picks the `CMoD3mElem` subclass from the **StandardSetup
+flags** — the dword at sec2 opcode `0x01` + 4, immediately before the mesh
+reference. Bits, tested in this order:
+
+| Flag bit | Element class |
+|---|---|
+| `0x00200000` | `CMoD3mSpecialElem` |
+| `0x00100000` | `CMoDistModelElem` |
+| `0x01000000` | `CMoD3mSpecularElem` |
+| (none) | `CMoD3mElem` |
+
+So a generator whose StandardSetup flags are `0x01010000` renders through the
+**specular** path. `ROM/3/25`'s `bnd0` (the Home Point crystal) is the worked
+example, and it is the only generator in that file with the bit set — see
+[../dats/ROM_3_25.md](../dats/ROM_3_25.md).
+
+### `0x55` SpecularParams
+
+The sec2 entry that goes with the specular branch. From `bnd0`:
+
+```
+55 0a 00 00                      config: opcode 0x55, 10 words
+23 f9 0e 3d 57 81 0a bf 7b 60 1c 3f    3x f32   0.0349, -0.5410, 0.6108
+6e 61 6d 69                            DatId    "nami" — the environment/reflection map
+00 00 00 00 00 00 20 41 00 00 f0 41    u32 0, f32 10.0, f32 30.0
+aa aa 8c 80                            BGRA
+03 00 00 00                            u32 3
+```
+
+The DatId is the useful part: it names a `0x20` the generator **does not draw
+with**, which is how a generator ends up referencing two textures. Everything
+else here is undecoded — the leading triple is not a unit vector (‖v‖ ≈ 0.82), so
+it is not a plain direction.
 
 ### Events vs Sequences (clarification)
 

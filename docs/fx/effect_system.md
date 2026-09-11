@@ -10,6 +10,7 @@ them together.
 > against real DAT bytes where noted. xim is a *guide*, not ground truth — confirm
 > against bytes before relying on a detail. Companion docs:
 > [effects.md](effects.md) (the `0x05` deep-dive + the `xi fx` toolchain),
+> [particle_mesh.md](particle_mesh.md) (the `0x1F`/`0x21` geometry binary format),
 > [dat_sections.md](../reference/dat_sections.md) (section type codes),
 > [../zone/zones.md](../zone/zones.md) (zone→DAT map + FileTable method).
 

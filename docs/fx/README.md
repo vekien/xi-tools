@@ -22,7 +22,7 @@ operations — no cipher, no reimport step.
 | `fx set` | [set.md](set.md) | Edit params in place — position / scale / color / draw-distance / spawn / count / autorun |
 | `fx copy` | [copy.md](copy.md) | Duplicate an effect — same-DAT, or cross-DAT (brings its deps) |
 | `fx delete` | [delete.md](delete.md) | Remove effect(s) by exact name or name-prefix |
-| `fx export` | [export.md](export.md) | Export an effect's 3D mesh + material/texture + decoded params as a bundle |
+| `fx export` | [export.md](export.md) | Export an effect's 3D mesh + material/texture + decoded params as a bundle, or `--assemble` the whole object as one GLB |
 
 `xi zone json --fx` provides the same effect dump from the zone command group.
 

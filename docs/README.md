@@ -60,6 +60,7 @@ loads at boot, and deep dives into specific well-known DATs.
 | `ROM/0/24–26.DAT` | [dats/ROM_0_24.md](dats/ROM_0_24.md) | Character-select scene controllers (`sel_`) |
 | `ROM/0/27.DAT` | [dats/ROM_0_27.md](dats/ROM_0_27.md) | UI animation / value curves (`damv`) |
 | `ROM/1/41.DAT` | [dats/ROM_1_41.md](dats/ROM_1_41.md) | |
+| `ROM/3/25.DAT` | [dats/ROM_3_25.md](dats/ROM_3_25.md) | Home Point — the reference **effect-only entity** (invisible proxy mesh + `0x1F` layers) |
 | `ROM/97/*.DAT` | [dats/ROM_97_menu_strings.md](dats/ROM_97_menu_strings.md) | Menu label string tables (`XISTRING`, plain ASCII) |
 | `ROM/118/114.DAT` | [dats/ROM_118_114.md](dats/ROM_118_114.md) | Boot-loaded numeric tables (`menu`): `mnc2`, `mon_`, `levc`, the rotated `mgc_` (magic) and `comm` (ability) records |
 | `ROM/118/115.DAT` | [dats/ROM_118_115.md](dats/ROM_118_115.md) | Live mission/quest text DB (`menu`, ROR-1 encoded) |

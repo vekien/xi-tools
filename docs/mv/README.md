@@ -66,6 +66,7 @@ indexes whatever JSON is in the directory, so a list this tool does not generate
 | `images` | DAT section scan (textures only) | Missing map, UI and cutscene art |
 | `npcs` | modelid → file_id → DAT, named from `mob_pools` / `npc_list` | Missing entity models |
 | `npc-anims` | `Directory (0x01)` sections in each model DAT | `anims` on NPC rows whose model borrows animation packs from other DATs (trusts, multi-form monsters) |
+| `effect-npcs` | proxy-mesh size + `0x05` generators drawing `0x1F` meshes | `effect: <layers>` and an `(Effect)` name suffix on models whose visible form is an effect, not a mesh — Home Points, portals, telepoints, elementals (104 rows). See [../entity/npc-look.md](../entity/npc-look.md#effect-only-entities) |
 | `zone-names` | `MOG_HOUSE_NAMES` in `xi.zone.xi_list` | Hand-verified names on mog-house rows in `zones.json`, matched by path; ids, fileIds and custom zones are left alone |
 | `file-ids` | reverse FTABLE/VTABLE | `fileId` on every row in every list |
 | _(always, last)_ | the lists themselves | `manifest.json` — one sha256 + byte count per JSON beside it. Not opt-in: this is what publishes a list to the model viewer (see above) |
