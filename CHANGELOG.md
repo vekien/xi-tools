@@ -8,9 +8,18 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ## Unreleased
 
-[Compare v1.7.0...main](https://github.com/vekien/xi-tools/compare/v1.7.0...main)
+[Compare v1.8.0...main](https://github.com/vekien/xi-tools/compare/v1.8.0...main)
 
 _Nothing yet._
+
+---
+
+## v1.8.0 — 2026-09-12
+
+[Compare v1.7.0...v1.8.0](https://github.com/vekien/xi-tools/compare/v1.7.0...v1.8.0)
+
+- **`xi zone export --opaque`** — solid materials the way the client draws them
+- **Lists:** the Beasts > Rabbit row that pointed at an Elvaan Bishop (`ROM/3/108`, a typo for `ROM/4/108`) and the "Phanauet Channel - 1" map row that was an NPC model are gone, along with 170 effect rows that could never play — four-byte stubs, empty shells, zone files, and the four 2009 add-on categories whose effect index had been resolved as an absolute file id. `manifest.json` regenerated, so the viewer picks the lists up at boot
 
 ---
 
