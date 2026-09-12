@@ -84,9 +84,33 @@ Verified example (`ROM/25/39.DAT` entry #7663, the zone intro crawl):
 | `7F 31` | prompt | — | wait-for-key ▼ |
 | `7F 34 nn` | prompt_auto | 1 | auto-advance after `nn` seconds |
 
-Other codes appear as gauge-bar glyphs (`EF1F…EF26`), menu/list controls
-(`01 05 …`), and various unmapped control codes — all surfaced in the dump's
-`opcodes` list under a stable `ctrl_<hex>` id even when their meaning is unknown.
+Other codes appear as gauge-bar glyphs (`EF1F…EF26`), the inline substitution
+tags below (`01 05 …`), and various unmapped control codes — all surfaced in the
+dump's `opcodes` list under a stable `ctrl_<hex>` id even when their meaning is
+unknown.
+
+### Inline substitution tags (`01 <len> <kind> …`)
+
+`01` opens a variable-length **substitution tag**: `01 <len> <kind> <data…>`, where
+`len` is the whole tag's byte count (including the `01`) and `data` holds `82 (80|n)`
+parameter references — "the value in message-parameter slot *n*". The parameters
+come from whoever prints the string: the event VM's work registers, or the `Num[]`
+array of a chat-log message packet ([../events/chat-messages.md](../events/chat-messages.md)).
+`kind` says how to render the parameter; the kinds seen in retail zone tables and the
+system-message table (`ROM/27/76.DAT`):
+
+| kind | renders parameter as |
+|---|---|
+| `03` / `04` | a number (`04` is the count an adjacent `2A` tag pluralizes on) |
+| `23`, `24`, `25`, `26`, `27`, `28`, `29`, `2A` | an **item name** by id — bare / after "a" / plural / after "the" / after the a-an slot / after "any" / counted / counted-plural; all print the plain name, the article and count come from the surrounding slots |
+| `33` (also `36` in menu rows) | a **key item** name by id |
+| `37` / `38` | a **zone** name by id |
+
+Example: `01 05 25 82 81 80 80` = item name (plural form) from parameter 1. The event
+authoring tokens `{item:n}`, `{keyitem:n}`, `{qtyitem:c:i}` and `{name:0xKK:n}` emit
+exactly these bytes — see the token table in
+[../events/authoring.md](../events/authoring.md#text-tokens-what-a-client-must-resolve-for-executors-of-the-json-2026-09-04).
+These are **not** menu/list controls; the menu separator is the single byte `0B`.
 
 ### What the decoder renders
 

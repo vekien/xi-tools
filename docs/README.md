@@ -135,6 +135,7 @@ reference, camera handling, and a cutscene authoring guide.
 | [events/typed_opcodes.md](events/typed_opcodes.md) | The typed opcode table the decompiler and compiler share |
 | [events/cutscene-dev-guide.md](events/cutscene-dev-guide.md) | Browser editor + compile pipeline for custom cutscenes |
 | [events/dialogue.md](events/dialogue.md) | NPC dialogue: `EventMessage` + `d_msg` formats, codec, control codes |
+| [events/chat-messages.md](events/chat-messages.md) | Chat-log zone messages: the `0x036`/`0x02A`/`0x027`/`0x043` TALKNUM packet family, `MesNum` → dialog-DAT index, parameter substitution |
 | [events/event-data.md](events/event-data.md) | Extracted dataset: 277 zones, ~326k dialogue lines |
 | [events/weather.md](events/weather.md) | Weather id → in-game name table for weather opcodes |
 | [events/camera_scene_ids.md](events/camera_scene_ids.md) | Camera scene ID reference |

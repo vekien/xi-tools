@@ -96,6 +96,10 @@ full per-zone Model/Dialog/NPC/Event table (294 zones) is in
 - **[dialogue.md](dialogue.md)** — how NPC dialogue is stored and shown: the
   `EventMessage` and `d_msg` string formats, the (Shift-JIS-ish) event-string codec,
   control codes, and how the bytecode prints/branches text.
+- **[chat-messages.md](chat-messages.md)** — the **chat-log** path to the same strings:
+  the `0x036`/`0x02A`/`0x027`/`0x043` TALKNUM packets (`messageSpecial`), `MesNum` →
+  dialog-DAT index, the hide-name bit, parameter substitution, and the server-vs-client
+  text-id skew caveat.
 - **[cutscenes.md](cutscenes.md)** — how a cutscene actually plays end-to-end:
   triggering, the scene VM loop, camera/player/entity control, doors, menus.
 - **[camera_scene_ids.md](camera_scene_ids.md)** — ★ **`p` → file id → DAT** for custom
