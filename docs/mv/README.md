@@ -69,6 +69,7 @@ indexes whatever JSON is in the directory, so a list this tool does not generate
 | `effect-npcs` | proxy-mesh size + `0x05` generators drawing `0x1F` meshes | `effect: <layers>` and an `(Effect)` name suffix on models whose visible form is an effect, not a mesh — Home Points, portals, telepoints, elementals (104 rows). See [../entity/npc-look.md](../entity/npc-look.md#effect-only-entities) |
 | `zone-names` | `MOG_HOUSE_NAMES` in `xi.zone.xi_list` | Hand-verified names on mog-house rows in `zones.json`, matched by path; ids, fileIds and custom zones are left alone |
 | `file-ids` | reverse FTABLE/VTABLE | `fileId` on every row in every list |
+| `abilities` | every job-ability (4412+N), spell (`0xAF0`+anim) and weapon-skill (both banks, per race) DAT, named from `abilities.sql` / `weapon_skills.sql` / `mob_skills.sql` | Full rebuild of `abilities.json`, the Ability Mixer's pick list: per entry its DAT(s), generators, audio generators, sound pointers, clips and routine length. Real names from a previous run are kept when this machine has no server SQL. ~1 minute (see [../ability/mixer.md](../ability/mixer.md)) |
 | _(always, last)_ | the lists themselves | `manifest.json` — one sha256 + byte count per JSON beside it. Not opt-in: this is what publishes a list to the model viewer (see above) |
 
 Not covered: `floors.json`, and a full `zones.json` regeneration (new or renamed named

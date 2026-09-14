@@ -111,7 +111,10 @@ def _detect_indent(path: Path, default: int = 1) -> int:
 def _write_json(path: Path, data: Any, *, dry_run: bool, indent: int | None = None) -> None:
     if indent is None:
         indent = _detect_indent(path)
-    text = json.dumps(data, indent=indent, ensure_ascii=False) + "\n"
+    # indent=0 means one line: the big generated lists (abilities.json) are not
+    # hand-edited, and a compact file is a third the size the viewer downloads.
+    text = (json.dumps(data, ensure_ascii=False, separators=(",", ":")) if indent == 0
+            else json.dumps(data, indent=indent, ensure_ascii=False)) + "\n"
     if dry_run:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2063,6 +2066,63 @@ def update_file_ids(
 MANIFEST_NAME = "manifest.json"
 
 
+ABILITIES_LIST = "abilities.json"
+_ABILITY_PLACEHOLDER = re.compile(r"^(ability anim|ws anim) \d+$")
+
+
+def update_abilities(
+    lists_dir: Path, *, dry_run: bool = False, base_dir: Path | None = None,
+    notify: Notify = _noop,
+) -> Report:
+    """Rebuild ``abilities.json`` — the Ability Mixer's pick list: every job ability,
+    spell and weapon skill with its DAT(s), generators, audio generators, sound
+    pointers, clips and routine length (``xi.ability.xi_catalog.build_catalog``).
+
+    The DAT-derived facts are regenerated in full (they are retail's, not curated),
+    but a name is kept when the previous list had a real one and this run could only
+    produce a placeholder — the names come from the server SQL (`XI_SERVER_DIR`),
+    which not every machine has.
+    """
+    from xi.ability.xi_catalog import build_catalog
+    from xi.entity.anim.xi_motion_tables import RACE_NAMES
+
+    out = lists_dir / ABILITIES_LIST
+    prev_path = out if out.is_file() else (base_dir / ABILITIES_LIST if base_dir else None)
+    prev_entries: dict[str, dict] = {}
+    if prev_path and prev_path.is_file():
+        try:
+            prev_entries = {e["spec"]: e for e in (_load_json(prev_path).get("entries") or [])}
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+            prev_entries = {}
+
+    notify("reading every job ability, spell and weapon-skill DAT (about a minute)")
+    entries = build_catalog(echo=notify)
+    kept = 0
+    for e in entries:
+        p = prev_entries.get(e["spec"])
+        if (p and _ABILITY_PLACEHOLDER.match(e.get("name", ""))
+                and p.get("name") and not _ABILITY_PLACEHOLDER.match(p["name"])):
+            e["name"], e["names"] = p["name"], p.get("names") or [p["name"]]
+            kept += 1
+    added = [e["spec"] for e in entries if e["spec"] not in prev_entries]
+    removed = sorted(set(prev_entries) - {e["spec"] for e in entries})
+    data = {"races": list(RACE_NAMES), "entries": entries}
+    changed = not prev_entries or bool(added) or bool(removed) or (
+        prev_path == out and _load_json(out) != data)
+    if changed:
+        _write_json(out, data, dry_run=dry_run, indent=0)
+    by_kind: dict[str, int] = {}
+    for e in entries:
+        by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
+    return {
+        "target": "abilities", "file": str(out), "added": len(added),
+        "removed": len(removed), "names_kept": kept, "total": len(entries),
+        "by_cat": by_kind, "samples": [f"{s} {next(e['name'] for e in entries if e['spec'] == s)}"
+                                       for s in added[:10]],
+        "wrote": changed and not dry_run,
+    }
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -2140,7 +2200,7 @@ def write_manifest(
 ALL_TARGETS = (
     "gear", "gear-sets", "gear-labels", "ws-unreleased", "music", "sfx",
     "zone-music", "effects", "images", "npcs", "npc-anims", "effect-npcs",
-    "zone-names", "file-ids",
+    "zone-names", "file-ids", "abilities",
 )
 
 Updater = Callable[..., Report]
@@ -2213,6 +2273,9 @@ def run_updates(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         elif t in ("file-ids", "file_ids", "fileids"):
             report = update_file_ids(
+                lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
+        elif t == "abilities":
+            report = update_abilities(
                 lists_dir, dry_run=dry_run, base_dir=base_dir, notify=notify)
         else:
             report = {"target": t, "error": f"unknown target {t!r}", "wrote": False}

@@ -324,6 +324,10 @@ gear.add_command(_gear_recolor_alias,    'recolor')
 # ── dll (POL1 client modules: FFXiMain, polcore, app, …) ───────────────────
 
 cli.add_command(dll_group)
+
+
+# ── ability (job ability / spell / weapon-skill presentations: motion + VFX + sound) ──
+
 cli.add_command(ability_cli.group, "ability")
 
 

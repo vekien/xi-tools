@@ -479,6 +479,9 @@ def _detect_source_type(source: Path, explicit_type: str | None) -> tuple[str, d
         return explicit_type, data
     if source.name == "zone-changes.json" or "placements" in data or "vfx" in data or "zone" in data:
         return "zone", data
+    # An ability recipe (schema/ability_recipe.json): lanes of sources + routine events.
+    if isinstance(data.get("sources"), dict) and isinstance(data.get("events"), list):
+        return "ability", data
     kind = data.get("type") or data.get("schema", "").split(".")[-1]
     if kind:
         return str(kind), data
@@ -899,6 +902,169 @@ def _build_entity(action: dict, manifest_path: Path, manifest: dict, force: bool
     return placed
 
 
+# ── Ability (composed job ability / spell / weapon skill from a recipe) ────────
+# The recipe (schema/ability_recipe.json) is the source; `dats build` composes it
+# with xi.ability.xi_compose, decides the animation number against the live
+# tables, places the DAT(s) in ROM10 and registers the file ids with the same
+# verbatim-placement primitive the other types use. Library: xi.ability.xi_publish.
+
+ABILITY_DEFAULT_SUBDIR = 20
+
+
+def _ability_action_from_recipe(source: Path, resource_root: Path, *, action_id: str | None = None,
+                                kind: str | None = None, animation: int | None = None,
+                                subdir: int | None = None) -> dict:
+    """Validate a recipe, copy it under ``projects/resources/ability/`` and return the
+    manifest action for it (shared by `dats prepare` and the `dats new` wizard)."""
+    from xi.ability.xi_compose import load_recipe
+    recipe = load_recipe(source)
+    action_id = action_id or f"ability.{_slug(recipe['name'])}"
+    dest = resource_root / "ability" / f"{action_id.removeprefix('ability.')}.recipe.json"
+    if source.resolve() != dest.resolve():
+        _copy_file(source, dest)
+    target: dict = {"animation": animation if animation is not None else "auto",
+                    "subdir": subdir if subdir is not None else ABILITY_DEFAULT_SUBDIR}
+    return {
+        "id": action_id, "type": "ability",
+        "kind": kind or (recipe.get("target") or {}).get("kind") or "auto",
+        "target": target,
+        "resources": {"recipe": _relative_to_resources(dest, resource_root)},
+        "server": {"emit": True},
+    }
+
+
+def _ability_result(built: dict | None) -> dict:
+    """The inline ``result`` recorded for an ability action, from its build result."""
+    b = built or {}
+    return {"kind": b.get("kind"), "animation": b.get("animation"),
+            "placements": [{"race": p.get("race"), "role": p.get("role"),
+                            "file_id": p.get("file_id"), "dat": p.get("dat")}
+                           for p in b.get("placements") or []],
+            "server": b.get("server")}
+
+
+def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                   dry_run: bool = False) -> dict:
+    """Compose the action's recipe and place the result in the active target: one DAT
+    for a job ability or spell, body + two companion DATs per race for a weapon skill.
+    A rebuild keeps the animation number and paths recorded on the action."""
+    from xi.ability import xi_publish as AP
+
+    resources = action.get("resources", {})
+    if not resources.get("recipe"):
+        raise click.ClickException(f"{action.get('id')}: ability action needs resources.recipe.")
+    recipe_path = _resolve_raw_source(resources["recipe"], manifest_path, manifest)
+    recipe = AP.load_recipe(recipe_path)
+    target = action.get("target") or {}
+    anim = target.get("animation", "auto")
+    wanted = None if anim in (None, "auto") else int(anim)
+    subdir = int(target.get("subdir", ABILITY_DEFAULT_SUBDIR))
+    force = force or bool((action.get("options") or {}).get("force"))
+    root = _active_build_root()
+    plan = AP.plan(recipe, root, kind=action.get("kind"), animation=wanted, subdir=subdir,
+                   force=force, previous=action.get("result"))
+    sources = AP.write_sources(recipe, plan)
+
+    placements = []
+    try:
+        for f, src in zip(plan["files"], sources):
+            # plan() already applied the slot policy (free job-ability / spell ids;
+            # weapon-skill slots only where every race's DAT is a retail dummy; a
+            # rebuild's own slots; or --force), so the placement's collision guard is
+            # answered here rather than raised again.
+            r = _place_raw_dat_in_build(src, f["place"], f["file_id"], force=True,
+                                        action_id=action["id"], dry_run=dry_run)
+            entry = {"race": f["race"], "role": f["role"], "file_id": f["file_id"],
+                     "dat": r["target_dat"], "source": r["source"], "bytes": r["bytes"]}
+            cur = f.get("current")
+            if cur and cur.upper() != r["target_dat"].upper() and not _is_own_previous(action, cur):
+                entry["occupied_by"] = cur
+            placements.append(entry)
+    except PermissionError as e:
+        raise click.ClickException(AP.permission_hint(root, e))
+
+    sql = AP.server_snippet(recipe, plan["kind"], plan["animation"])
+    server_path = None
+    if (action.get("server") or {}).get("emit", True):
+        server_path = Path("projects") / "server" / "abilities" / \
+            f"{action['id'].split('.')[-1]}_{plan['animation']}.sql"
+        if not dry_run:
+            server_path.parent.mkdir(parents=True, exist_ok=True)
+            server_path.write_text(sql + "\n", encoding="utf-8")
+    return {
+        "id": action["id"], "type": "ability", "kind": plan["kind"], "animation": plan["animation"],
+        "recipe": str(recipe_path), "placements": placements,
+        "server": str(server_path) if server_path else None, "sql": sql,
+        "registered": f"animation {plan['animation']} -> {len(placements)} DAT(s)",
+    }
+
+
+def _is_own_previous(action: dict, dat: str) -> bool:
+    """True when ``dat`` is a placement this action recorded on an earlier build."""
+    prev = (action.get("result") or {}).get("placements") or []
+    return any(str(p.get("dat", "")).upper() == dat.upper() for p in prev)
+
+
+def _wizard_ability(slug: str, prev: dict | None, manifest_path: Path, manifest: dict) -> dict:
+    """`dats new` → Ability: pick a recipe, how to publish it and (optionally) the
+    animation number; the build allocates the rest."""
+    from xi.ability.xi_compose import load_recipe
+    from xi.ability.xi_publish import KINDS, infer_kind
+    p = prev or {}
+    resource_root = _resource_root(manifest_path, manifest)
+    # Recipes the mixer and `xi ability recipe --out` leave under exports/ability.
+    found = sorted({*Path("exports/ability").glob("*.recipe.json"),
+                    *Path("exports/ability").glob("*/*.recipe.json")}) if Path("exports/ability").is_dir() else []
+    click.echo("\n>> Which recipe? (a .recipe.json from the Ability Mixer or `xi ability recipe --out`)")
+    if found:
+        click.echo("   Found:")
+        for i, f in enumerate(found[:20], 1):
+            click.echo(f"     {i}. {f}")
+        click.echo("   Enter a number, or type a path.")
+    click.echo()
+    default = (p.get("resources") or {}).get("recipe")
+    if default:
+        default = str(resource_root / default)
+    while True:
+        raw = click.prompt("Enter recipe", default=default or "", show_default=bool(default)).strip().strip('"')
+        if raw.isdigit() and found and 1 <= int(raw) <= len(found[:20]):
+            src = found[int(raw) - 1]
+        else:
+            src = Path(os.path.expanduser(raw)) if raw else None
+        if src and src.is_file():
+            try:
+                recipe = load_recipe(src)
+                break
+            except click.ClickException as e:
+                click.echo(f"  {e}")
+                continue
+        click.echo(f"  Not a file: {raw!r}")
+    lanes = ", ".join(f"{k}: {v.get('spec') if isinstance(v, dict) else v}" for k, v in recipe["sources"].items())
+    click.echo(f"\n   {recipe['name']}: {len(recipe['events'])} events — {lanes}")
+    try:
+        inferred = infer_kind(recipe)
+    except click.ClickException:
+        inferred = "ws"
+    labels = {"auto": f"Auto (the recipe says: {inferred})", "ja": "Job ability (file_id 4412 + animation)",
+              "spell": "Spell (file_id 0xAF0 + animation)", "ws": "Weapon skill (per-race extended slot)"}
+    prev_kind = p.get("kind") or "auto"
+    kind = next(k for k, lbl in labels.items()
+                if lbl == _choose("Publish as", list(labels.values()), default=labels.get(prev_kind)))
+    if kind != "auto" and kind not in KINDS:
+        kind = "auto"
+    prev_anim = (p.get("target") or {}).get("animation", "auto")
+    anim_raw = _ask("Animation number (the server row's `animation`; auto = the next free one)",
+                    "Enter number or auto", default=str(prev_anim)).strip().lower()
+    animation = None if anim_raw in ("", "auto") else int(anim_raw)
+    subdir = _ask("ROM10 folder to place the DAT(s) in", "Enter folder number", type=int,
+                  default=int((p.get("target") or {}).get("subdir", ABILITY_DEFAULT_SUBDIR)))
+    action = _ability_action_from_recipe(src, resource_root, action_id=f"ability.{slug}",
+                                         kind=kind, animation=animation, subdir=subdir)
+    if p.get("result"):
+        action["result"] = p["result"]   # keep the slot a previous build landed on
+    return action
+
+
 def _gear_expand_max() -> int | None:
     """The per-(race,slot) gear model_id window this install supports, or None if
     gear was never expanded (custom gear file_ids unaddressable). Read from
@@ -1006,9 +1172,24 @@ def json_cmd(manifest: Path, output: Path | None):
 @click.option("--target", default=None, help="Target ROM DAT path when the source does not contain one.")
 @click.option("--hd/--no-hd", default=True, show_default=True, help="For zone actions, also build dats/ffxi-hd output.")
 @click.option("--replace", is_flag=True, help="Replace an existing action with the same id.")
+@click.option("--kind", "ability_kind", type=click.Choice(["auto", "ja", "spell", "ws"]), default=None,
+              help="Ability recipes: publish as a job ability, spell or weapon skill (default auto = from the recipe).")
+@click.option("--animation", type=int, default=None,
+              help="Ability recipes: the animation number to take (default auto = next free).")
+@click.option("--subdir", type=int, default=None,
+              help=f"Ability recipes: ROM10 folder to place the DAT(s) in (default {ABILITY_DEFAULT_SUBDIR}).")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
-                target: str | None, hd: bool, replace: bool):
-    """Add an exported/import JSON or zone-changes.json to a dats package."""
+                target: str | None, hd: bool, replace: bool,
+                ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None):
+    """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
+
+    \b
+    An ability recipe (from `xi ability recipe` or the model viewer's Ability Mixer)
+    becomes an `ability` action — the recipe is copied under projects/resources/ability/
+    and `dats build` composes it, places the DAT(s) in ROM10 and registers the file ids:
+      xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace
+      xi dats build tiger_fury --dry-run
+    """
     manifest = _resolve_manifest_path(manifest, project)
     manifest_data = _read_manifest(manifest)
     if project:
@@ -1016,7 +1197,11 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     kind, data = _detect_source_type(source, action_type)
     resource_root = _resource_root(manifest, manifest_data)
 
-    if kind == "zone":
+    if kind == "ability":
+        action = _ability_action_from_recipe(source, resource_root, action_id=action_id,
+                                             kind=ability_kind, animation=animation, subdir=subdir)
+        action_id = action["id"]
+    elif kind == "zone":
         dat_target = _rom_rel(target or data.get("zone", ""))
         if not dat_target:
             raise click.ClickException("Zone prepare needs --target or a 'zone' field in zone-changes.json.")
@@ -1098,6 +1283,12 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     # explicit relocation requests.
     if interactive:
         preserve = ()
+    elif kind == "ability":
+        # The recorded allocation (animation number, placements) always survives a
+        # re-prepare so a rebuild lands on the same slot; the target block does too
+        # unless this run set part of it explicitly.
+        explicit = ability_kind is not None or animation is not None or subdir is not None
+        preserve = ("result",) + (() if explicit else ("target", "kind"))
     else:
         preserve = ("model",) + (() if target else ("target",))
     _add_or_replace_action(manifest_data, action, replace, preserve=preserve)
@@ -1126,9 +1317,11 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
         aid = action.get("id", "?")
         typ = action.get("type", "?")
         res = action.get("result") or {}
-        if typ == "gear":
+        if typ in ("gear", "ability"):
             placements = res.get("placements") or []
             model_id = res.get("model_id", (action.get("model") or {}).get("model_id"))
+            if typ == "ability":
+                model_id = res.get("animation", (action.get("target") or {}).get("animation", "auto"))
             for p in placements:
                 rows.append((aid, typ, p.get("dat", "-") or "-", str(model_id if model_id is not None else "-"),
                              str(p.get("file_id") if p.get("file_id") is not None else "-")))
@@ -1169,6 +1362,14 @@ def _action_summary(action: dict) -> str:
     if model_id is not None:
         parts.append(f"model {model_id}")
     line = " - ".join(parts)
+    if action.get("type") == "ability":
+        anim = (action.get("target") or {}).get("animation", "auto")
+        placements = (action.get("result") or {}).get("placements") or []
+        line += f" - {action.get('kind') or 'auto'} animation {anim}"
+        line += f": {(action.get('resources') or {}).get('recipe', '?')}"
+        if placements:
+            line += f" ({len(placements)} DAT{'s' if len(placements) != 1 else ''})"
+        return line
     # Gear expands to one DAT per race — make the count explicit so "Actions: 1"
     # doesn't read as "one DAT".
     targets = action.get("targets")
@@ -1275,7 +1476,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     # mesh + the verbatim-placement types write DATs + table patches directly into
     # the base install (the only target whose root FTABLE the client actually reads).
     pack_actions = [a for a in active_actions
-                    if a.get("type") in ("mesh", "entity", "gear", "mount")]
+                    if a.get("type") in ("mesh", "entity", "gear", "mount", "ability")]
     target_roots = [("dir", _target_root("dir"))]
     if pack_actions:
         n_with_tables = 0
@@ -1319,6 +1520,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_gear(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "mesh":
             return _build_mesh(action, manifest, manifest_data, force=force, dry_run=dry_run)
+        if kind == "ability":
+            return _build_ability(action, manifest, manifest_data, force=force, dry_run=dry_run)
         raise click.ClickException(
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
@@ -1344,7 +1547,10 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         if not dry_run and kind != "zone":
             prior = set((action.get("result") or {}).get("targets") or [])
             built = prior | {name for name, _ in target_roots}
-            res = _plan_result(action)
+            # An ability's allocation (animation number, per-race placements) is
+            # decided by the build against the live tables, not by the definition
+            # alone, so it is taken from the build result rather than re-planned.
+            res = _ability_result(result) if kind == "ability" else _plan_result(action)
             res["targets"] = [n for n in ("pivot", "dir", "hd") if n in built]
             action["result"] = res
 
@@ -1396,7 +1602,7 @@ def _action_placements(action: dict) -> list[tuple[int, str]]:
     inline result — one per race for gear, one otherwise."""
     res = action.get("result") or {}
     out: list[tuple[int, str]] = []
-    if action.get("type") == "gear":
+    if action.get("type") in ("gear", "ability"):
         for p in res.get("placements", []):
             if p.get("file_id") is not None and p.get("dat"):
                 out.append((int(p["file_id"]), _rom_rel(p["dat"])))
@@ -1440,7 +1646,7 @@ def _project_dat_rels(manifest_data: dict) -> tuple[list[str], bool]:
     for action in manifest_data.get("actions", []):
         typ = action.get("type")
         res = action.get("result") or {}
-        if typ == "gear":
+        if typ in ("gear", "ability"):
             rels += [_rom_rel(p["dat"]) for p in res.get("placements", []) if p.get("dat")]
         elif res.get("dat"):
             rels.append(_rom_rel(res["dat"]))
@@ -1681,6 +1887,23 @@ def _print_placements(results: list[dict], title: str) -> None:
                 click.echo(f"     - {mark}{line}")
                 if "occupied by" in line:
                     collisions += 1
+        elif kind == "ability":
+            files = r.get("placements", [])
+            click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "
+                       f"— {len(files)} DAT{'s' if len(files) != 1 else ''}")
+            for p in files:
+                who = f"{p.get('race') or 'all races'} {p['role']}"
+                occ = p.get("occupied_by")
+                mark = "⚠ " if occ else ""
+                click.echo(f"     - {mark}file_id {p['file_id']:>6}  {who:<26} -> {p['dat']}"
+                           + (f"   (occupied by {occ})" if occ else ""))
+                if occ:
+                    collisions += 1
+            if r.get("server"):
+                click.echo(f"     server: {r['server']}")
+            if r.get("sql"):
+                for line in r["sql"].splitlines():
+                    click.echo(f"       {line}")
         else:
             src = r.get("source")
             size = f", {r['bytes']:,} B" if r.get("bytes") else ""
@@ -2819,12 +3042,16 @@ def new_cmd(project: str | None):
         "Mounts": "mount",
         "Entity (NPC / Monster / Object)": "entity",
         "NPC (costume: race + gear + weapons)": "npc",
+        "Ability (recipe from the Ability Mixer / xi ability recipe)": "ability",
     }[_choose("What type of content is being added?",
               ["Gear", "Mounts", "Entity (NPC / Monster / Object)",
-               "NPC (costume: race + gear + weapons)"])]
+               "NPC (costume: race + gear + weapons)",
+               "Ability (recipe from the Ability Mixer / xi ability recipe)"])]
     # The baked NPC is placed at a custom entity model id, so it needs the entity tables.
+    # Abilities take retail-range ids (job-ability / spell bands, weapon-skill dummies),
+    # so the tables need no expansion.
     ready_key = "entity" if ctype == "npc" else ctype
-    if not ready.get(ready_key, True):
+    if ctype != "ability" and not ready.get(ready_key, True):
         hint = {"gear": "Run `xi ftable expand gear` (expands the FTABLE and patches "
                         "FFXiMain.dll)",
                 "entity": "Run `xi ftable expand entity`",
@@ -2854,11 +3081,15 @@ def new_cmd(project: str | None):
             new_actions = [_wizard_mount(slug, project, prev)]
         elif ctype == "npc":
             new_actions = [_wizard_npc(slug, prev)]
+        elif ctype == "ability":
+            new_actions = [_wizard_ability(slug, prev, manifest_path, manifest)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 
     by_id = {a.get("id"): a for a in manifest.get("actions", [])}
     for action in new_actions:
+        if action.get("type") == "ability":
+            continue   # allocated by the build (animation number + per-race placements)
         action["result"] = _plan_result(action)  # record the allocation inline (same as build)
         prior_targets = ((by_id.get(action["id"]) or {}).get("result") or {}).get("targets")
         if prior_targets:  # keep the record of where it was last built into

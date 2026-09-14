@@ -185,6 +185,7 @@ Resolution order for any question about a command:
 | `xi event` | `src/xi/event/`, `src/xi/dialog/` | `docs/events/README.md` → `authoring/dialogue/format/opcodes/cutscenes.md`, `docs/dialog/*.md`, `docs/cutscene_authoring.md` |
 | `xi ftable` | `src/xi/ftable/` | `docs/ftable/*.md`, `docs/reference/model-file-ids.md` |
 | `xi dats` | `src/xi/dats/` | `docs/dats/README.md`, `schema/*.json` |
+| `xi ability` | `src/xi/ability/` | `docs/ability/{inspect,mixer}.md`, `schema/ability_recipe.json` (recipe), `schema/ability.json` (the `dats` action publish uses) |
 | `xi dll` | `src/xi/dll/`, `src/xi/ffximain/` | `docs/dll/README.md`, `docs/ffximain/*.md` |
 | `xi mv` | `src/xi/mv/` (+ `gear_sets.json`, `npc_anims.json`) | `docs/mv/README.md`, `docs/anim/fishing.md` |
 | `xi batch`, `xi misc`, `xi server`, `xi bridge` | `src/xi/{batch,misc,server,zone/xi_bridge.py}/` | `QUICKY.md`, `docs/zone/navmesh.md` |

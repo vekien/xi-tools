@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/ability.json",
+  "title": "xi dats ability action",
+  "description": "Publish a composed ability presentation (job ability / spell / weapon skill built by `xi ability compose` from a recipe — schema ability_recipe.json) into ROM10 with a new animation number. `dats new` (Ability) and `dats prepare recipe.json --type ability` write it; `dats build` composes the recipe, places the DAT(s) and registers their file ids.",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "ability"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "kind": {
+      "type": "string",
+      "enum": ["auto", "ja", "spell", "ws"],
+      "default": "auto",
+      "description": "What the client looks the DAT up as. auto = from the recipe: a race-bound `ws:` lane publishes as a weapon skill (per-race extended slot), a `spell:` motion as a spell (file_id 0xAF0 + animation), anything else as a job ability (file_id 4412 + animation)."
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "animation": {
+          "$ref": "common.json#/$defs/autoOrInteger",
+          "default": "auto",
+          "description": "Animation number the server row will carry. auto = the first free one: job abilities from 339, spells the first unregistered from 1012, weapon skills the first extended slot (264–271) whose DAT is a retail dummy on every race."
+        },
+        "subdir": {"type": "integer", "minimum": 0, "maximum": 511, "default": 20, "description": "ROM10 folder the DAT(s) are placed in (first free file numbers)."}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recipe"],
+      "properties": {
+        "recipe": {"$ref": "common.json#/$defs/relativePath", "description": "The recipe (ability_recipe.json), relative to projects/resources."}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "force": {"type": "boolean", "default": false, "description": "Repoint an animation number that is already registered (never done on its own)."}
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emit": {"type": "boolean", "default": true, "description": "Write the server SQL snippet to projects/server/abilities/<id>_<animation>.sql."}
+      }
+    },
+    "result": {
+      "type": "object",
+      "description": "Recorded by dats build: the allocation the action landed on.",
+      "additionalProperties": true,
+      "properties": {
+        "kind": {"type": "string", "enum": ["ja", "spell", "ws"]},
+        "animation": {"type": "integer", "minimum": 0},
+        "placements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "race": {"type": ["string", "null"]},
+              "role": {"type": "string", "enum": ["body", "companion_a", "companion_b"]},
+              "file_id": {"type": "integer", "minimum": 0},
+              "dat": {"$ref": "common.json#/$defs/romPath"}
+            }
+          }
+        },
+        "server": {"type": ["string", "null"]},
+        "targets": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "ability.tiger_fury",
+      "type": "ability",
+      "kind": "auto",
+      "target": {"animation": "auto", "subdir": 20},
+      "resources": {"recipe": "ability/tiger_fury.recipe.json"},
+      "server": {"emit": true}
+    }
+  ]
+}

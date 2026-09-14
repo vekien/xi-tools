@@ -44,7 +44,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import click
 
 from xi.ability.xi_inspect import (
-    LINK_OPS, REF_OPS, SOUND_OPS, T_CLIP, T_DIR, T_END, T_GEN, T_ROUTINE, T_SOUND, T_TRACE,
+    LINK_OPS, REF_OPS, SOUND_OPS, T_CLIP, T_DIR, T_GEN, T_ROUTINE, T_SOUND, T_TRACE,
     Model, Target, _clean, flatten, resolve_targets)
 from xi.common.xi_section import encode_section_meta
 from xi.entity.anim.xi_motion_tables import RACE_NAMES
@@ -95,13 +95,111 @@ class Composed:
 
 # ── Recipe loading ───────────────────────────────────────────────────────────────
 
+RECIPE_SCHEMA = "xi.ability.v1"      # schema/ability_recipe.json
+_SPEC_RX = re.compile(r"^(ja:\d+|ability:\d+|spell:\d+|ws:\d+(:[A-Za-z]+)?|fid:\d+"
+                      r"|ROM[0-9]*/\d+/\d+(\.DAT)?|.+\.DAT)$", re.I)
+_RECIPE_KEYS = {"schema", "name", "description", "dir", "target", "total", "sources", "events"}
+_EVENT_KEYS = {"from", "op", "ref", "start", "dur", "order", "blend", "loops", "raw", "routine", "offset"}
+
+
+def _is_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def validate_recipe(r) -> List[str]:
+    """Problems with a recipe against ``schema/ability_recipe.json`` (empty when it
+    conforms). Hand-rolled — jsonschema is not a dependency — and kept in step with
+    the schema file, which is the specification."""
+    errs: List[str] = []
+    if not isinstance(r, dict):
+        return ["recipe must be a JSON object"]
+    for k in r:
+        if k not in _RECIPE_KEYS:
+            errs.append(f"unknown key {k!r}")
+    if r.get("schema") not in (None, RECIPE_SCHEMA):
+        errs.append(f"schema must be {RECIPE_SCHEMA!r}")
+    name = r.get("name")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+        errs.append("name must be letters, digits, _ or -")
+    if "dir" in r and not (isinstance(r["dir"], str) and 1 <= len(r["dir"]) <= 4):
+        errs.append("dir must be 1–4 characters")
+    if "total" in r and not (_is_int(r["total"]) and r["total"] >= 0):
+        errs.append("total must be a non-negative integer")
+    tgt = r.get("target")
+    if tgt is not None:
+        if not isinstance(tgt, dict):
+            errs.append("target must be an object")
+        else:
+            if tgt.get("kind") not in (None, "ja", "spell", "ws"):
+                errs.append("target.kind must be ja, spell or ws")
+            if tgt.get("animation") is not None and not (_is_int(tgt["animation"]) and tgt["animation"] >= 0):
+                errs.append("target.animation must be a non-negative integer or null")
+            for k in tgt:
+                if k not in ("kind", "animation"):
+                    errs.append(f"unknown target key {k!r}")
+    sources = r.get("sources")
+    if not isinstance(sources, dict) or not sources:
+        errs.append("sources must be an object with at least one lane")
+        sources = {}
+    for lane, src in sources.items():
+        spec = src if isinstance(src, str) else (src.get("spec") if isinstance(src, dict) else None)
+        if not isinstance(spec, str) or not _SPEC_RX.match(spec):
+            errs.append(f"sources.{lane}: spec must be ja:N, spell:N, ws:N[:Race], fid:N, ROM/x/y or a .DAT path")
+        if isinstance(src, dict):
+            for k in src:
+                if k not in ("spec", "routine", "name"):
+                    errs.append(f"sources.{lane}: unknown key {k!r}")
+    events = r.get("events")
+    if not isinstance(events, list):
+        errs.append("events must be a list")
+        events = []
+    for i, ev in enumerate(events):
+        where = f"events[{i}]"
+        if not isinstance(ev, dict):
+            errs.append(f"{where}: must be an object")
+            continue
+        for k in ev:
+            if k not in _EVENT_KEYS:
+                errs.append(f"{where}: unknown key {k!r}")
+        if not isinstance(ev.get("from"), str):
+            errs.append(f"{where}: 'from' (lane) is required")
+        elif sources and ev["from"] not in sources:
+            errs.append(f"{where}: lane {ev['from']!r} is not in sources")
+        op = ev.get("op")
+        if _is_int(op):
+            ok = 0 <= op <= 255
+        else:
+            ok = isinstance(op, str) and re.fullmatch(r"(0x)?[0-9A-Fa-f]{1,2}", op) is not None
+        if not ok:
+            errs.append(f"{where}: op must be an opcode 0–255 (or hex string)")
+        if not (_is_int(ev.get("start")) and ev["start"] >= 0):
+            errs.append(f"{where}: start must be a non-negative integer frame")
+        if ev.get("ref") is not None and not (isinstance(ev["ref"], str) and 1 <= len(ev["ref"]) <= 4):
+            errs.append(f"{where}: ref must be a 4-char section id")
+        if ev.get("dur") is not None and not (_is_int(ev["dur"]) and ev["dur"] >= 0):
+            errs.append(f"{where}: dur must be a non-negative integer")
+        if "blend" in ev and not (isinstance(ev["blend"], list) and len(ev["blend"]) == 2
+                                  and all(_is_int(b) and b >= 0 for b in ev["blend"])):
+            errs.append(f"{where}: blend must be [transIn, transOut]")
+        if "loops" in ev and not (_is_int(ev["loops"]) and ev["loops"] >= 0):
+            errs.append(f"{where}: loops must be a non-negative integer")
+        if "raw" in ev and not (isinstance(ev["raw"], str) and re.fullmatch(r"([0-9A-Fa-f]{2})+", ev["raw"])):
+            errs.append(f"{where}: raw must be hex bytes")
+        if "offset" in ev and not (_is_int(ev["offset"]) and ev["offset"] >= 0):
+            errs.append(f"{where}: offset must be a non-negative integer")
+    return errs
+
+
 def load_recipe(path: Path) -> dict:
-    r = json.loads(Path(path).read_text(encoding="utf-8"))
-    for key in ("name", "sources", "events"):
-        if key not in r:
-            raise click.ClickException(f"recipe is missing {key!r}")
-    if not re.fullmatch(r"[A-Za-z0-9_\-]+", r["name"]):
-        raise click.ClickException("recipe name must be letters, digits, _ or -")
+    """Read and validate a recipe file (schema/ability_recipe.json)."""
+    try:
+        r = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise click.ClickException(f"{path}: not valid JSON ({e})")
+    errs = validate_recipe(r)
+    if errs:
+        shown = "\n  ".join(errs[:12]) + (f"\n  … {len(errs) - 12} more" if len(errs) > 12 else "")
+        raise click.ClickException(f"{path} does not match schema/ability_recipe.json:\n  {shown}")
     return r
 
 
@@ -351,9 +449,7 @@ def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str]) -> C
         ref = ev.get("ref")
         cmd = _source_command(lane, ev)
         new_ref = _gather_for_command(bag, lane, op, ref, carried) if ref else None
-        if new_ref and new_ref != ref:
-            pass
-        elif ref and (lane.name, ref) in bag.renames:
+        if ref and new_ref == ref and (lane.name, ref) in bag.renames:
             new_ref = bag.renames[(lane.name, ref)]
         stamped.append((ev, cmd, new_ref))
     _apply_renames(bag)
@@ -425,7 +521,8 @@ def recipe_from(spec: str, lane: str = "motion", routine: str = "main") -> dict:
             ev["dur"] = e["dur"]
         events.append(ev)
     kind = "ws" if spec.startswith("ws:") else ("spell" if spec.startswith("spell:") else "ja")
-    return {"name": re.sub(r"[^A-Za-z0-9_]+", "_", spec).strip("_"),
+    return {"schema": RECIPE_SCHEMA,
+            "name": re.sub(r"[^A-Za-z0-9_]+", "_", spec).strip("_"),
             "target": {"kind": kind, "animation": None},
             "sources": {lane: {"spec": spec, "routine": routine}},
             # The source's own totalDelay (the routine's end, past the last command's

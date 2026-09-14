@@ -1,12 +1,18 @@
-"""``xi ability publish`` — put a composed ability into the custom ROM10 namespace.
+"""Publishing a composed ability into the custom ROM10 namespace — the library behind
+the ``ability`` action of ``xi dats`` (``src/xi/dats/xi_dats.py: _build_ability``) and
+the ``xi ability publish`` shortcut, which is that same action prepared and built in
+one go::
 
-    xi ability publish recipe.json [--target pivot|dir] [--animation N] [--subdir S] [--dry-run]
+    xi ability publish recipe.json [--project NAME] [--kind ja|spell|ws] [--animation N]
+                                   [--subdir S] [--force] [--dry-run]
 
-Steps: compose the recipe (one DAT, or one per race for a race-bound recipe), pick the
-animation number the server will send, place the DAT(s) under ``ROM10/<subdir>/<n>.DAT``
-in the target root, register the file id(s) in that root's FTABLE/VTABLE + ROM10 overlay
-tables (``xi dats`` placement, ``.base`` backups), save the recipe beside the output, and
-print the server row to add.
+is exactly::
+
+    xi dats prepare recipe.json --project NAME --type ability --replace [--kind …] […]
+    xi dats build NAME --only ability.<name> [--force] [--dry-run]
+
+so a published ability is a manifest action like any gear or mount placement: rebuilt
+from Git by ``dats build``, listed by ``dats changelog``, reverted by ``dats undo``.
 
 Kinds and where the client looks (docs/ability/inspect.md, docs/anim/weapon-skills.md):
 
@@ -22,12 +28,11 @@ same file-table lookup a job ability uses, so a new spell is a new registered id
 
 A recipe whose motion lane is a weapon skill (``ws:N``) carries per-race clips and must be
 published as ``ws``; a spell motion (``spell:N``) publishes as ``spell``; everything else is
-a job ability. ``target.kind`` in the recipe overrides the inference.
+a job ability. ``kind`` on the action (or ``target.kind`` in the recipe) overrides that.
 """
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -36,7 +41,7 @@ import click
 
 from xi.ability.xi_compose import Composed, _lanes, compose, load_recipe, output_name
 from xi.ability.xi_inspect import ABILITY_FILE_OFFSET
-from xi.entity.anim.xi_motion_tables import RACE_NAMES, race_index, resolve_weapon_skill
+from xi.entity.anim.xi_motion_tables import resolve_weapon_skill
 from xi.ftable.xi_core import resolve_dat
 
 JA_CUSTOM_FIRST = 339           # first animation number past the retail band
@@ -54,12 +59,9 @@ _SINGLE_DAT_KINDS = {
     "ja": (ABILITY_FILE_OFFSET, JA_CUSTOM_FIRST, JA_CUSTOM_LAST, "abilities.animation"),
     "spell": (SPELL_FILE_OFFSET, SPELL_CUSTOM_FIRST, SPELL_CUSTOM_LAST, "spell_list.animation"),
 }
+KINDS = ("ja", "spell", "ws")
 DEFAULT_SUBDIR = 20
-
-
-def _root(target: str) -> Path:
-    from xi.dats.xi_dats import _target_root
-    return _target_root(target)
+OUT_ROOT = Path("exports") / "ability"      # composed DATs + reports, per recipe name
 
 
 def _placement(root: Path, file_id: int) -> Optional[str]:
@@ -82,28 +84,38 @@ def _is_dummy(root: Path, rel: Optional[str]) -> bool:
     return True
 
 
-def _kind(recipe: dict) -> str:
-    kind = (recipe.get("target") or {}).get("kind")
+def infer_kind(recipe: dict, kind: Optional[str] = None) -> str:
+    """The kind a recipe publishes as: an explicit ``kind`` (an action's, then the
+    recipe's ``target.kind``), else inferred from the motion lane."""
+    if kind in (None, "", "auto"):
+        kind = (recipe.get("target") or {}).get("kind")
     race_bound = any(l.race_bound for l in _lanes(recipe).values())
-    motion_spec = str(((recipe.get("sources") or {}).get("motion") or {}).get("spec") or "")
+    motion = (recipe.get("sources") or {}).get("motion") or {}
+    motion_spec = str(motion.get("spec") if isinstance(motion, dict) else motion or "")
     if kind is None:
-        kind = "ws" if race_bound else ("spell" if motion_spec.startswith("spell:") else "ja")
+        kind = "ws" if race_bound else ("spell" if motion_spec.lower().startswith("spell:") else "ja")
     if race_bound and kind != "ws":
         raise click.ClickException(
             "this recipe carries per-race motion clips (a ws: lane), so it must be published "
             "as kind 'ws' — a job-ability or spell slot is one DAT for every skeleton")
-    if kind not in ("ja", "spell", "ws"):
-        raise click.ClickException(f"unsupported target kind {kind!r} (ja, spell or ws)")
+    if kind not in KINDS:
+        raise click.ClickException(f"unsupported ability kind {kind!r} (ja, spell or ws)")
     return kind
 
 
-def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool) -> int:
+def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool,
+                    ours: Optional[set] = None) -> int:
+    """First animation number the client would read as new, or ``wanted`` when it is
+    free. A slot registered to one of ``ours`` (a previous build of the same action)
+    counts as free, so rebuilds land on the same number."""
+    ours = ours or set()
     if kind in _SINGLE_DAT_KINDS:
         offset, first, last, _col = _SINGLE_DAT_KINDS[kind]
         cands = [wanted] if wanted is not None else range(first, last + 1)
         for n in cands:
             fid = offset + n
-            if _placement(root, fid) is None or force:
+            cur = _placement(root, fid)
+            if cur is None or force or cur.upper() in ours:
                 return n
         if wanted is not None:
             raise click.ClickException(
@@ -113,18 +125,28 @@ def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool) -
     cands = [wanted] if wanted is not None else range(WS_CUSTOM_FIRST, WS_CUSTOM_LAST + 1)
     for n in cands:
         slots = resolve_weapon_skill(n)
-        if force or all(_is_dummy(root, _placement(root, s.file_id)) for s in slots):
+        free = all(_is_dummy(root, _placement(root, s.file_id))
+                   or (_placement(root, s.file_id) or "").upper() in ours for s in slots)
+        if force or free:
             return n
+    if wanted is not None:
+        raise click.ClickException(
+            f"weapon-skill slot {wanted} is not free on every race (a slot is free when each "
+            "race's body DAT is a retail dummy); pass --force to overwrite it")
     raise click.ClickException(
         "no weapon-skill extended slot is free (a slot is free when every race's body DAT is "
         "a retail dummy); pass --animation N --force to overwrite one")
 
 
-def _free_files(root: Path, subdir: int, count: int) -> List[int]:
-    used = set()
-    d = root / "ROM10" / str(subdir)
-    if d.exists():
-        used = {int(p.stem) for p in d.glob("*.DAT") if p.stem.isdigit()}
+def _free_files(root: Path, subdir: int, count: int, reserved: Optional[set] = None) -> List[int]:
+    """First ``count`` unused file numbers in ``ROM10/<subdir>`` of ``root`` — unused
+    in the game folder too, since the overlay shadows the base install path for path."""
+    from xi.xi_config import FFXI_DIR
+    used: set = set(reserved or ())
+    for base in {root, Path(FFXI_DIR)}:
+        d = base / "ROM10" / str(subdir)
+        if d.exists():
+            used |= {int(p.stem) for p in d.glob("*.DAT") if p.stem.isdigit()}
     free = [i for i in range(128) if i not in used]
     if len(free) < count:
         raise click.ClickException(f"ROM10/{subdir} has only {len(free)} free file numbers, need {count}")
@@ -143,82 +165,86 @@ def _source_ws_animation(recipe: dict) -> Optional[int]:
     return None
 
 
-def plan(recipe: dict, target: str, animation: Optional[int], subdir: int, force: bool) -> dict:
-    root = _root(target)
-    kind = _kind(recipe)
+def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Optional[int] = None,
+         subdir: int = DEFAULT_SUBDIR, force: bool = False, previous: Optional[dict] = None) -> dict:
+    """Compose the recipe and decide where every DAT goes in ``root``: the animation
+    number, and per file its file id and ``ROM10/<subdir>/<n>.DAT`` placement.
+
+    ``previous`` is the action's last recorded result (``{animation, placements}``): a
+    rebuild keeps its animation number and DAT paths, so the manifest stays a stable
+    description of where the ability lives. Nothing is written here except the composed
+    DAT bytes, which are returned on each file (``composed``) or as ``copy_from``."""
+    kind = infer_kind(recipe, kind)
     composed = compose(recipe)
     if kind in _SINGLE_DAT_KINDS and any(s.endswith("(0x2B)") for c in composed for s in c.sections):
         raise click.ClickException(
             "this recipe carries skeleton clips, which are one race's; a job-ability or spell "
             "slot is one DAT for every race. Use a ws: lane (published per race) or motion the "
             "actor already has (cm0?, ma2?...)")
-    anim = _pick_animation(root, kind, animation, force)
+    prev_places = {(p.get("race"), p.get("role")): p for p in (previous or {}).get("placements") or []}
+    ours = {str(p.get("dat", "")).upper() for p in prev_places.values()}
+    prev_anim = (previous or {}).get("animation")
+    if animation is None and isinstance(prev_anim, int) and (previous or {}).get("kind", kind) == kind:
+        animation = prev_anim
+    anim = _pick_animation(root, kind, animation, force, ours)
+
+    def place_for(race, role, pool: List[int]) -> str:
+        prev = prev_places.get((race, role))
+        if prev and prev.get("dat"):
+            return prev["dat"]
+        return f"ROM10/{subdir}/{pool.pop(0)}.DAT"
+
     files: List[dict] = []
     if kind in _SINGLE_DAT_KINDS:
         offset = _SINGLE_DAT_KINDS[kind][0]
         (c,) = composed
-        (n,) = _free_files(root, subdir, 1)
+        pool = _free_files(root, subdir, 1)
         files.append({"race": None, "role": "body", "file_id": offset + anim,
-                      "place": f"ROM10/{subdir}/{n}.DAT", "composed": c})
+                      "place": place_for(None, "body", pool), "composed": c})
     else:
         src_anim = _source_ws_animation(recipe)
         from xi.xi_config import FFXI_DIR
         from xi.ftable.xi_core import scan_file_ids
-        nums = _free_files(root, subdir, 3 * len(composed))
+        pool = _free_files(root, subdir, 3 * len(composed))
         seen_ids: set = set()
         for c in composed:
             ids = _ws_file_ids(anim, c.race)
             if ids["body"] in seen_ids:          # Taru male/female share one bank row
                 continue
             seen_ids.add(ids["body"])
-            n_body, n_a, n_b = nums[:3]
-            nums = nums[3:]
             files.append({"race": c.race, "role": "body", "file_id": ids["body"],
-                          "place": f"ROM10/{subdir}/{n_body}.DAT", "composed": c})
+                          "place": place_for(c.race, "body", pool), "composed": c})
             # Companion (waist) DATs come from the motion source's slot for the same race.
             src_ids = _ws_file_ids(src_anim, c.race)
-            for role, n in (("companion_a", n_a), ("companion_b", n_b)):
+            for role in ("companion_a", "companion_b"):
                 hits = scan_file_ids([src_ids[role]])
                 if not hits:
                     raise click.ClickException(f"cannot resolve source companion {role} for {c.race}")
                 files.append({"race": c.race, "role": role, "file_id": ids[role],
-                              "place": f"ROM10/{subdir}/{n}.DAT",
+                              "place": place_for(c.race, role, pool),
                               "copy_from": Path(FFXI_DIR) / hits[0]["dat"]})
+    for f in files:
+        f["current"] = _placement(root, f["file_id"])
     return {"root": root, "kind": kind, "animation": anim, "subdir": subdir, "files": files}
 
 
-def apply(recipe: dict, p: dict, force: bool) -> List[dict]:
-    from xi.dats.xi_dats import _place_raw_dat_in_build, _set_target_root
-    out_dir = Path("exports") / "ability" / recipe["name"]
+def write_sources(recipe: dict, p: dict) -> List[Path]:
+    """Materialise the plan's DAT bytes under ``exports/ability/<name>/`` (the same
+    place ``xi ability compose`` writes) and return one path per planned file, in
+    order. The placement step copies from these."""
+    out_dir = OUT_ROOT / recipe["name"]
     out_dir.mkdir(parents=True, exist_ok=True)
-    results = []
-    _set_target_root(p["root"])
-    try:
-        for f in p["files"]:
-            if "composed" in f:
-                c: Composed = f["composed"]
-                src = out_dir / output_name(recipe, c)
-                src.write_bytes(c.data)
-            else:
-                src = out_dir / f"{recipe['name']}.{f['race']}.{f['role']}.DAT"
-                shutil.copy2(f["copy_from"], src)
-            # plan() already applied the slot policy (free job-ability ids; weapon-skill
-            # slots only where every race's DAT is a retail dummy, or --force), so the
-            # placement's own collision guard — which would refuse to repoint a dummy —
-            # is bypassed here.
-            r = _place_raw_dat_in_build(src, f["place"], f["file_id"], force=True,
-                                        action_id=f"ability:{recipe['name']}")
-            r.update({"race": f["race"], "role": f["role"]})
-            results.append(r)
-    finally:
-        _set_target_root(None)
-    recipe_out = dict(recipe)
-    recipe_out["target"] = {"kind": p["kind"], "animation": p["animation"]}
-    (out_dir / f"{recipe['name']}.recipe.json").write_text(json.dumps(recipe_out, indent=2), encoding="utf-8")
-    (out_dir / f"{recipe['name']}.published.json").write_text(
-        json.dumps({"kind": p["kind"], "animation": p["animation"], "root": str(p["root"]),
-                    "files": results}, indent=2), encoding="utf-8")
-    return results
+    paths: List[Path] = []
+    for f in p["files"]:
+        if "composed" in f:
+            c: Composed = f["composed"]
+            src = out_dir / output_name(recipe, c)
+            src.write_bytes(c.data)
+        else:
+            src = out_dir / f"{recipe['name']}.{f['race']}.{f['role']}.DAT"
+            shutil.copy2(f["copy_from"], src)
+        paths.append(src)
+    return paths
 
 
 def server_snippet(recipe: dict, kind: str, animation: int) -> str:
@@ -248,39 +274,43 @@ def server_snippet(recipe: dict, kind: str, animation: int) -> str:
             f"--   UPDATE weapon_skills SET animation = {animation} WHERE name = '{name}';")
 
 
+def permission_hint(root: Path, e: PermissionError) -> str:
+    return (f"cannot write {e.filename}: the target's file tables are owned by another account "
+            "(a launcher or updater that ran elevated). Either run this command from an "
+            "elevated terminal, or grant yourself modify rights on the install once:\n"
+            f'  icacls "{root}" /grant "%USERNAME%":(OI)(CI)M /T\n'
+            "Nothing was registered; any DAT already copied is unreferenced and harmless.")
+
+
+# ── `xi ability publish` — the dats action, prepared and built in one command ────────
+
 @click.command("publish")
 @click.argument("recipe_path", type=click.Path(exists=True, path_type=Path))
-@click.option("--target", type=click.Choice(["pivot", "dir"]), default="pivot", show_default=True,
-              help="pivot = FFXI_PIVOT_DIR overlay (custom content), dir = the game folder itself.")
+@click.option("--project", default=None,
+              help="dats project to record the action in (projects/<project>.json). Default: the recipe name.")
+@click.option("--kind", type=click.Choice(["auto", "ja", "spell", "ws"]), default="auto", show_default=True,
+              help="Publish as a job ability, spell or weapon skill (auto = from the recipe).")
 @click.option("--animation", type=int, default=None, help="Animation number to use (default: next free).")
 @click.option("--subdir", type=int, default=DEFAULT_SUBDIR, show_default=True, help="ROM10 folder to place DATs in.")
 @click.option("--force", is_flag=True, help="Repoint a file id that is already registered.")
 @click.option("--dry-run", is_flag=True, help="Show the plan; write nothing.")
-def publish_cmd(recipe_path: Path, target: str, animation: Optional[int], subdir: int,
-                force: bool, dry_run: bool):
-    """Compose RECIPE_PATH and install it into ROM10 with a new animation number."""
+def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation: Optional[int],
+                subdir: int, force: bool, dry_run: bool):
+    """Publish RECIPE_PATH through `xi dats`: prepare an ability action, then build it.
+
+    \b
+    Shorthand for
+      xi dats prepare RECIPE --project NAME --type ability --replace
+      xi dats build NAME --only ability.<name>
+    The action lands in projects/<NAME>.json beside any gear or mount actions, so the
+    ability is rebuilt, listed and undone with the rest of the project.
+    """
+    from xi.dats.xi_dats import _slug, build_cmd, prepare_cmd
     recipe = load_recipe(recipe_path)
-    p = plan(recipe, target, animation, subdir, force)
-    click.echo(f"target root : {p['root']}")
-    click.echo(f"kind        : {p['kind']}   animation {p['animation']}")
-    for f in p["files"]:
-        who = f"{f['race'] or 'all races'} {f['role']}"
-        cur = _placement(p["root"], f["file_id"])
-        click.echo(f"  file_id {f['file_id']:>6}  {who:<26} -> {f['place']}"
-                   + (f"   (was {cur})" if cur else ""))
-    if dry_run:
-        click.echo("\n[DRY RUN] nothing written.")
-        click.echo(server_snippet(recipe, p["kind"], p["animation"]))
-        return
-    try:
-        results = apply(recipe, p, force)
-    except PermissionError as e:
-        raise click.ClickException(
-            f"cannot write {e.filename}: the target's file tables are owned by another account "
-            "(a launcher or updater that ran elevated). Either run this command from an "
-            "elevated terminal, or grant yourself modify rights on the overlay once:\n"
-            f'  icacls "{p["root"]}" /grant "%USERNAME%":(OI)(CI)M /T\n'
-            "Nothing was registered; any DAT already copied is unreferenced and harmless.")
-    click.echo(f"\nwrote {len(results)} DAT(s) and registered them; recipe + report under exports/ability/{recipe['name']}/")
-    click.echo("restart the client (it caches the file tables at startup), then:")
-    click.echo(server_snippet(recipe, p["kind"], p["animation"]))
+    project = project or recipe["name"]
+    ctx = click.get_current_context()
+    ctx.invoke(prepare_cmd, source=recipe_path, project=project, action_type="ability", replace=True,
+               kind=kind, animation=animation, subdir=subdir)
+    click.echo()
+    ctx.invoke(build_cmd, project=project, only=(f"ability.{_slug(recipe['name'])}",),
+               force=force, dry_run=dry_run)

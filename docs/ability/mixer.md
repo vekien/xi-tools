@@ -1,4 +1,4 @@
-# Ability Mixer — recipe, compose, publish, catalog
+# Ability Mixer — recipe, compose, publish
 
 Build a new ability presentation from pieces of retail ones: the motion of one, the
 effects of another, the sound of a third. The xi-model-viewer's **Ability Mixer** mode
@@ -7,9 +7,13 @@ is the UI; these are the commands it drives, usable on their own.
 ```bash
 uv run xi ability recipe ws:1:HumeMale --out fb.json     # starter recipe from one source
 uv run xi ability compose recipe.json [--out DIR] [--race Mithra] [--json]
-uv run xi ability publish recipe.json [--target pivot|dir] [--animation N] [--subdir 20] [--dry-run]
-uv run xi ability catalog [--out exports/ability/catalog.json] [--kinds ja,spell,ws]
+uv run xi ability publish recipe.json [--project NAME] [--kind ja|spell|ws] [--animation N] [--subdir 20] [--dry-run]
+uv run xi mv update --only abilities                      # the viewer's pick list (mv/lists/abilities.json)
 ```
+
+A recipe is validated against [`schema/ability_recipe.json`](../../schema/ability_recipe.json)
+(`"schema": "xi.ability.v1"`); `compose`, `publish` and `dats prepare` refuse one that
+does not match, naming the field.
 
 ## Recipe
 
@@ -65,10 +69,45 @@ error, not a silent drop.
 
 ## Publish
 
-Puts the composed DAT(s) into the **ROM10** custom namespace of the target root
-(`--target pivot` = `FFXI_PIVOT_DIR`, the DAT override tree the loader layers over the
-game; `dir` = the game folder) and registers the file id(s) the client will look up — the same placement and
-table patching `xi dats build` uses, with `.base` backups.
+Publishing is an **`xi dats` action** (`type: "ability"`, schema
+[`schema/ability.json`](../../schema/ability.json)), so a published ability sits in a
+project manifest beside any gear, mount or entity actions, is rebuilt from Git by
+`dats build`, listed by `dats changelog` and reverted by `dats undo`. Three ways in:
+
+```bash
+# 1. the wizard — pick "Ability" as the content type
+uv run xi dats new
+
+# 2. straight arguments — every parameter has a default the build fills in
+uv run xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace \
+    [--kind ja|spell|ws] [--animation N] [--subdir 20]
+uv run xi dats build tiger_fury --dry-run          # the plan: slot, file ids, server SQL
+uv run xi dats build tiger_fury
+
+# 3. the shortcut — exactly 2., in one command
+uv run xi ability publish recipe.json [--project NAME] [--dry-run]
+```
+
+`prepare` copies the recipe to `projects/resources/ability/<name>.recipe.json` and writes:
+
+```jsonc
+{
+  "id": "ability.tiger_fury", "type": "ability",
+  "kind": "auto",                              // auto = from the recipe (table below)
+  "target": {"animation": "auto", "subdir": 20},
+  "resources": {"recipe": "ability/tiger_fury.recipe.json"},
+  "server": {"emit": true}                     // projects/server/abilities/<name>_<animation>.sql
+}
+```
+
+`build` composes the recipe (one DAT, or body + two companion DATs per race for a
+weapon skill), takes the animation number, places the DAT(s) under `ROM10/<subdir>/`
+in the base install and registers the file id(s) — the same verbatim placement and
+table patching every other action uses, `.base` backups included, then syncs the
+custom table region into the pivot overlay. The allocation is recorded on the action
+(`result`: kind, animation, placements), so a rebuild lands on the same slot and
+`dats undo` knows what to clear. A running client holds the file tables in memory:
+publish with it closed, or restart it afterwards.
 
 | Kind | When | Client lookup | Custom numbers | Server |
 |---|---|---|---|---|
@@ -80,8 +119,8 @@ For `ws`, the three DATs per race (body + companion A/B waist packs) are placed 
 registered; the companions are copied from the motion source's own slot for that race.
 Tarutaru male and female share one bank row and are registered once.
 
-`--dry-run` prints the plan: target root, kind, animation number, every file id with
-its current occupant, and the SQL to add. The mixer shows this plan before it asks to
+`dats build --dry-run` prints the plan: kind, animation number, every file id with its
+current occupant, and the SQL to add. The mixer shows this plan before it asks to
 confirm. **Restart the client** after publishing — it caches the file tables at
 startup.
 
@@ -95,14 +134,16 @@ line the command prints (it is hardcoded). Publish with the client closed, or re
 afterwards: a running client holds the overlay's file tables in memory and can write them
 back over a registration made while it runs.
 
-## Catalog
+## Catalog (the viewer's pick list)
 
-`xi ability catalog` writes `exports/ability/catalog.json`: every job ability (band
-0–338, named from `abilities.sql`), spell (`xi.spell`) and weapon skill (both banks,
-per-race paths, named from `weapon_skills.sql` and humanoid `mob_skills.sql`), each
-with its generators (audio ones separately), sound pointers, clips and total frames.
-Dummies and DATs without `main` are skipped. The viewer's picker reads this file; the
-mixer offers to build it when it is missing. ~1,500 entries, about a minute.
+`xi mv update --only abilities` rebuilds `mv/lists/abilities.json`: every job ability
+(band 0–338, named from `abilities.sql`), spell (`xi.spell`) and weapon skill (both
+banks, per-race paths, named from `weapon_skills.sql` and humanoid `mob_skills.sql`),
+each with its generators (audio ones separately), sound pointers, clips and total
+frames. Dummies and DATs without `main` are skipped. ~1,500 entries, about a minute.
+It ships with the viewer like every other list and reaches installs through the lists
+manifest (see [../mv/README.md](../mv/README.md)); the mixer's *Build catalog* button
+runs the same target into the viewer's own lists folder when the list is missing.
 
 ## In the viewer
 
@@ -112,8 +153,9 @@ NPC). Click or Enter takes a row for the lane. Right: the timeline (drag a block
 move it, drag a lane label to shift the lane, *snap to strike* aligns a lane's first
 generator with the motion's hit frame), the selected block's numbers, and the **Parts**
 of the previewed source with *solo* (play one generator alone) and *take*. **Play mix**
-composes for the actor's race under `exports/ability/mixer/` and plays it; **Publish…**
-shows the dry-run plan, then publishes. Recipes save next to the composed DATs.
+composes for the actor's race under `exports/ability/mixer/` and plays it; **Publish**
+prepares the `xi dats` action for the recipe, shows `dats build --dry-run`'s plan, then
+builds it. Recipes save next to the composed DATs.
 
 Weapon-skill motion carries its own clips; the viewer resolves a routine's clip refs
 against the loaded character, so picking a `ws:` motion source also sets the

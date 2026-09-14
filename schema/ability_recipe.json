@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/ability_recipe.json",
+  "title": "xi ability recipe",
+  "description": "What `xi ability compose` reads and the model viewer's Ability Mixer writes: lanes of retail sources plus the commands of the new `main` routine at absolute frames. See docs/ability/mixer.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "sources", "events"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.ability.v1"},
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Output stem: <name>[.<Race>].DAT, <name>.report.json."
+    },
+    "description": {"type": "string"},
+    "dir": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4,
+      "description": "4-char name of the effect directory written around the sections (default: the first four alphanumerics of name)."
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the recipe is meant to be published. `xi dats` records the numbers it allocated here on the published copy.",
+      "properties": {
+        "kind": {"$ref": "#/$defs/kind"},
+        "animation": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The routine's totalDelay (its end). A recipe from `xi ability recipe` carries the source's own so the header round-trips; otherwise the last event's start + duration is used."
+    },
+    "sources": {
+      "type": "object",
+      "description": "One lane per key (motion / vfx / sound are the mixer's; any name works). A `ws:N` spec without a race is race-bound: the recipe composes once per race.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "oneOf": [
+          {"$ref": "#/$defs/spec"},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["spec"],
+            "properties": {
+              "spec": {"$ref": "#/$defs/spec"},
+              "routine": {"type": "string", "default": "main", "description": "Routine tag the lane's events are read from."},
+              "name": {"type": "string", "description": "Display name (the mixer keeps the catalog entry's)."}
+            }
+          }
+        ]
+      }
+    },
+    "events": {
+      "type": "array",
+      "description": "One command each in the new `main` routine, in any order (sorted by start, then `order`).",
+      "items": {"$ref": "#/$defs/event"}
+    }
+  },
+  "$defs": {
+    "kind": {"type": "string", "enum": ["ja", "spell", "ws"]},
+    "spec": {
+      "type": "string",
+      "pattern": "^(ja:\\d+|ability:\\d+|spell:\\d+|ws:\\d+(:[A-Za-z]+)?|fid:\\d+|ROM[0-9]*/\\d+/\\d+(\\.DAT)?|.+\\.DAT)$",
+      "description": "Anything `xi ability inspect` accepts: ja:N, spell:N, ws:N[:Race], fid:N, ROM/x/y, or a path."
+    },
+    "datId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4,
+      "description": "4-char section id the command names (clip `b00?` with the client's `?` wildcard, generator `g004`, sound pointer `8050`, routine `mdam`)."
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "op", "start"],
+      "properties": {
+        "from": {"type": "string", "description": "Lane (a key of `sources`) the command and its sections come from."},
+        "op": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0, "maximum": 255},
+            {"type": "string", "pattern": "^(0x)?[0-9A-Fa-f]{1,2}$"}
+          ],
+          "description": "Routine opcode (docs/fx/effect_system.md §3): 0x05 clip, 0x02 generator, 0x0A/0x0B sound, 0x03 link, 0x2C trace, 0x1E dampen…"
+        },
+        "ref": {"anyOf": [{"$ref": "#/$defs/datId"}, {"type": "null"}]},
+        "start": {"type": "integer", "minimum": 0, "description": "Absolute frame (60/s routine ticks). The writer turns it back into the format's relative delays."},
+        "dur": {"type": ["integer", "null"], "minimum": 0, "description": "The command's duration field (emit window, lock length, clip window)."},
+        "order": {"type": "integer", "description": "Tie-break for events on the same start frame."},
+        "blend": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 0},
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Clip (0x05) only: [transIn, transOut] in ticks."
+        },
+        "loops": {"type": "integer", "minimum": 0, "description": "Clip (0x05) only: 0 = loop forever, N = play N times then hold."},
+        "raw": {"type": "string", "pattern": "^([0-9A-Fa-f]{2})+$", "description": "Exact source command bytes (from `inspect --json`). Wins over routine/offset and op/ref lookup."},
+        "routine": {"type": "string", "description": "With `offset`: the source routine the command is copied from."},
+        "offset": {"type": "integer", "minimum": 0, "description": "With `routine`: byte offset of the command inside that routine's sec2."}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.ability.v1",
+      "name": "tiger_fury",
+      "target": {"kind": "ja", "animation": null},
+      "sources": {
+        "motion": {"spec": "ja:33", "routine": "main"},
+        "vfx": {"spec": "spell:144", "routine": "main"},
+        "sound": {"spec": "ja:40", "routine": "main"}
+      },
+      "events": [
+        {"from": "motion", "op": 5, "ref": "cm0?", "start": 10, "dur": 35, "blend": [20, 0], "loops": 1},
+        {"from": "vfx", "op": 2, "ref": "g004", "start": 60, "dur": 100},
+        {"from": "sound", "op": 10, "ref": "5112", "start": 60},
+        {"from": "motion", "op": 3, "ref": "mdam", "start": 100}
+      ]
+    }
+  ]
+}

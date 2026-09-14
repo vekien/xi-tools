@@ -1,7 +1,7 @@
-"""``xi ability catalog`` — every ability presentation the mixer can pick from, with
-what the inspector knows about each, in one JSON.
-
-    xi ability catalog [--out exports/ability/catalog.json] [--kinds ja,spell,ws]
+"""The ability catalog — every job ability, spell and weapon skill the model viewer's
+Ability Mixer can pick from, with what the inspector knows about each. Baked into the
+viewer's lists by ``xi mv update --only abilities`` (``mv/lists/abilities.json``,
+``xi.mv.update_lists.update_abilities``); this module is the library that builds it.
 
 Entry shape::
 
@@ -15,12 +15,8 @@ Entry shape::
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import Dict, List, Optional
-
-import click
 
 from xi.ability.xi_inspect import ABILITY_FILE_OFFSET
 from xi.ability.xi_inspect import Model, _sql_rows, _title
@@ -129,18 +125,3 @@ def build_catalog(kinds=("ja", "spell", "ws"), echo=lambda s: None) -> List[dict
                                 "path": hm, "paths": paths, **d})
         echo(f"ws: {sum(1 for e in entries if e['kind'] == 'ws')}")
     return entries
-
-
-@click.command("catalog")
-@click.option("--out", "out_path", type=click.Path(path_type=Path),
-              default=Path("exports") / "ability" / "catalog.json", show_default=True)
-@click.option("--kinds", default="ja,spell,ws", show_default=True)
-def catalog_cmd(out_path: Path, kinds: str):
-    """Write the mixer's pick list: every job ability, spell and weapon skill with its
-    DAT(s), generators, sounds and clips."""
-    ks = tuple(k.strip() for k in kinds.split(",") if k.strip())
-    entries = build_catalog(ks, echo=click.echo)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({"races": list(RACE_NAMES), "entries": entries},
-                                   ensure_ascii=False), encoding="utf-8")
-    click.echo(f"wrote {out_path} ({len(entries)} entries)")

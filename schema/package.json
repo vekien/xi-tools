@@ -33,7 +33,8 @@
           {"$ref": "audio.json"},
           {"$ref": "tex.json"},
           {"$ref": "ui.json"},
-          {"$ref": "event.json"}
+          {"$ref": "event.json"},
+          {"$ref": "ability.json"}
         ]
       }
     }

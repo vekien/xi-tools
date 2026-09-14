@@ -53,8 +53,9 @@ It walks you through, in order:
    same type — slot, model id, source folder (saved as `source_dir`), destination — so re-running just
    tweaks it, and gear re-uses each slot's destination block (overwrite in place).
 
-3. **Content type** — `Gear`, `Mounts`, `Entity (NPC / Monster / Object)`, or
-   `NPC (costume: race + gear + weapons)`.
+3. **Content type** — `Gear`, `Mounts`, `Entity (NPC / Monster / Object)`,
+   `NPC (costume: race + gear + weapons)`, or `Ability` (a recipe from the model
+   viewer's Ability Mixer or `xi ability recipe`).
 
 4. **Type-specific questions** (see below), then it writes the manifest action and offers
    to build (with a dry-run preview first).
@@ -126,6 +127,24 @@ zone NPC is separate — use the editor's **Custom NPCs** browser or the `custom
 See [../entity/npc-look.md](../entity/npc-look.md).
 
 ---
+
+### Ability (a composed job ability / spell / weapon skill)
+
+Point it at a **recipe** (`*.recipe.json`, [schema](../../schema/ability_recipe.json))
+— the wizard lists the ones under `exports/ability/` — then choose what to publish it
+as (auto reads it off the recipe: a `ws:` motion lane is a weapon skill, a `spell:` one
+a spell, else a job ability), the animation number (auto = the next free one) and the
+ROM10 folder. The recipe is copied to `projects/resources/ability/` and the build
+composes it, places the DAT(s) and registers the file id(s); the number it took is
+recorded on the action and the server SQL lands in `projects/server/abilities/`. The
+same action from arguments, with every parameter defaulted:
+
+```bash
+uv run xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace
+uv run xi dats build tiger_fury --dry-run
+```
+
+Full detail: [../ability/mixer.md](../ability/mixer.md#publish).
 
 ## Building (`xi dats build`)
 

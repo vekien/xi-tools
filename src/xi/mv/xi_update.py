@@ -155,6 +155,12 @@ def echo_report(r: dict, *, dry_run: bool) -> None:
         parts.append(f"names +{r['names_added']}")
     if "zones" in r:
         parts.append(f"{r['zones']} zones")
+    if "total" in r:
+        parts.append(f"{r['total']} rows")
+    if r.get("removed"):
+        parts.append(f"-{r['removed']}")
+    if r.get("names_kept"):
+        parts.append(f"names kept {r['names_kept']}")
     if "by_race" in r and r["by_race"]:
         detail = ", ".join(f"{k}:{v}" for k, v in r["by_race"].items())
         parts.append(f"({detail})")
