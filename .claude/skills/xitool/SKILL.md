@@ -5,6 +5,10 @@ description: How to use the `xi` CLI in this repo (uv run xi …) for FFXI DAT m
 
 # xi-tools CLI skill
 
+(Changing the library rather than using it? `AGENTS.md` at the repo root has the rules:
+new content is an `xi dats` action type, every JSON format has a schema, viewer lists
+come from `xi mv update`.)
+
 `xi` is a Click CLI (`src/xi/xi_cli.py`) that reads and writes FFXI DAT files **in place**
 under `FFXI_DIR`. This skill tells you (1) the quirks of FFXI data that trip up every
 newcomer, (2) the common commands, and (3) where the authoritative information lives so

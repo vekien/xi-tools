@@ -283,13 +283,13 @@ resource files that live next to the source JSON into `projects/resources/<type>
 
 | Command | What it does |
 |---|---|
-| `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity) at new model ids and write a manifest action |
+| `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity/NPC) at new model ids, or publish an ability recipe, and write a manifest action |
 | `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--dry-run` previews (no separate `plan` command) |
 | `xi dats package <project>` | Zip the project's built DATs + F/V tables (`--from dir`/`pivot`/`hd`, default `dir`) into `projects/packages/<project>.zip` (ROM-relative, XIPivot-ready) |
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder). Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build: delete the placed DATs + clear their file_id entries, then remove the manifest (`--keep-json` keeps it) |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set into `projects/resources` and add an action |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe into `projects/resources` and add an action (`--type`, and for abilities `--kind` / `--animation` / `--subdir`) |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
@@ -307,6 +307,11 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   (`entity.xi_bake_npc`, source `projects/custom/<project>.dat`).
 - `mount`: places the model DAT at the chosen path, writes EN/JP name/help + optional
   key-item d_msg overrides, registers the file_id, and emits a server snippet.
+- `ability`: composes a recipe (`xi.ability.xi_compose`) into one DAT (job ability /
+  spell) or body + two companion DATs per race (weapon skill), takes the animation
+  number against the live tables, places them under `ROM10/<subdir>/` and registers the
+  file ids; records kind / animation / placements on the action and emits the server
+  SQL to `projects/server/abilities/`. Needs no table expansion.
 
 GLB-rebuild / package types:
 
