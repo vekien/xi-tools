@@ -296,7 +296,10 @@ def permission_hint(root: Path, e: PermissionError) -> str:
         # The ROM10 tables register from the pivot folder too, and building there
         # leaves the install alone — a better answer than taking ownership of it.
         hint += ("\nThe simplest fix is to build into the pivot folder instead: add --pivot "
-                 "(Use Pivot Folder in the model viewer's Manage panel).")
+                 "(Use Pivot Folder in the model viewer's Manage panel). That covers "
+                 "placement and registration only — the client's file_id ceiling comes from "
+                 "the base install's own tables, so an id past the retail range still needs "
+                 "`xi ftable expand` run there once.")
     hint += ("\nOr run this command from an elevated terminal, or grant yourself modify rights "
              "on the install once:\n"
              f'  icacls "{root}" /grant "%USERNAME%":(OI)(CI)M /T')
