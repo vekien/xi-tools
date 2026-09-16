@@ -479,6 +479,10 @@ def _detect_source_type(source: Path, explicit_type: str | None) -> tuple[str, d
         return explicit_type, data
     if source.name == "zone-changes.json" or "placements" in data or "vfx" in data or "zone" in data:
         return "zone", data
+    # A spell / command definition (schema/spell_definition.json, command_definition.json).
+    from xi.menu.xi_menu_table import DEFINITION_SCHEMAS
+    if data.get("schema") in DEFINITION_SCHEMAS:
+        return DEFINITION_SCHEMAS[data["schema"]], data
     # An ability recipe (schema/ability_recipe.json): lanes of sources + routine events.
     if isinstance(data.get("sources"), dict) and isinstance(data.get("events"), list):
         return "ability", data
@@ -1010,6 +1014,192 @@ def _is_own_previous(action: dict, dat: str) -> bool:
     return any(str(p.get("dat", "")).upper() == dat.upper() for p in prev)
 
 
+# ── Spell / command menu records (a new row of ROM/118/114.DAT + its names) ────
+# The definition (schema/spell_definition.json, command_definition.json) names a
+# retail record to clone and the fields/texts to change; `dats build` decides the
+# id against the live table (ids above the retail band only), writes the record
+# into the enlarged section, the names/help into the d_msg tables, and emits a
+# server row template. Library: xi.menu.xi_menu_table. The client only iterates
+# past the retail band with its ceilings raised (docs/menu/records.md).
+
+RECORD_TYPES = ("spell", "command")
+
+
+def _record_action_from_definition(source: Path, resource_root: Path, kind: str, *,
+                                   action_id: str | None = None, record_id: int | None = None,
+                                   menu_index: int | None = None) -> dict:
+    """Validate a definition, copy it under ``projects/resources/<kind>/`` and return
+    the manifest action for it (shared by `dats prepare` and the `dats new` wizard)."""
+    from xi.menu.xi_menu_table import MenuError, definition_kind, load_definition
+    try:
+        d = load_definition(source)
+    except MenuError as e:
+        raise click.ClickException(str(e))
+    if definition_kind(d) != kind:
+        raise click.ClickException(f"{source}: is a {definition_kind(d)} definition, not {kind}.")
+    action_id = action_id or f"{kind}.{_slug(d['name'])}"
+    dest = resource_root / kind / f"{action_id.removeprefix(kind + '.')}.{kind}.json"
+    if source.resolve() != dest.resolve():
+        _copy_file(source, dest)
+    target: dict = {"id": record_id if record_id is not None else d.get("id", "auto")}
+    if kind == "spell":
+        target["menu_index"] = menu_index if menu_index is not None else d.get("menu_index", "auto")
+    return {
+        "id": action_id, "type": kind,
+        "target": target,
+        "resources": {"definition": _relative_to_resources(dest, resource_root)},
+        "server": {"emit": True},
+    }
+
+
+def _record_result(built: dict | None) -> dict:
+    """The inline ``result`` recorded for a spell / command action."""
+    b = built or {}
+    res = {"record_id": b.get("record_id"), "like": b.get("like"),
+           "dat": b.get("dat"), "strings": b.get("strings") or [], "server": b.get("server")}
+    if b.get("menu_index") is not None:
+        res["menu_index"] = b["menu_index"]
+    return res
+
+
+def _next_record_id(kind: str, action: dict, menu) -> int:
+    """Reuse the id previously recorded on this action's ``result`` (stable across
+    rebuilds), else the highest free id above the retail band — top-down, so the
+    ids stay clear of anything retail could ever add below."""
+    from xi.menu.xi_menu_table import MenuError, pick_id
+    prev = (action.get("result") or {}).get("record_id")
+    if isinstance(prev, int):
+        return prev
+    try:
+        return pick_id(kind, menu)
+    except MenuError as e:
+        raise click.ClickException(str(e))
+
+
+def _build_record(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                  dry_run: bool = False) -> dict:
+    from xi.menu import xi_menu_table as MT
+    kind = action["type"]
+    resources = action.get("resources", {})
+    if not resources.get("definition"):
+        raise click.ClickException(f"{action.get('id')}: {kind} action needs resources.definition.")
+    def_path = _resolve_raw_source(resources["definition"], manifest_path, manifest)
+    try:
+        d = MT.load_definition(def_path)
+    except MT.MenuError as e:
+        raise click.ClickException(str(e))
+    target = action.get("target") or {}
+    root = _active_build_root()
+    with _package_config(root, root):
+        try:
+            menu = MT.load_menu(root)
+        except (OSError, MT.MenuError) as e:
+            raise click.ClickException(f"{action['id']}: cannot read {MT.MENU_DAT} under {root}: {e}")
+        wanted = target.get("id", "auto")
+        record_id = _next_record_id(kind, action, menu) if wanted in (None, "auto") else int(wanted)
+        k = MT.KINDS[kind]
+        if record_id < k.custom_first and not force:
+            raise click.ClickException(
+                f"{action['id']}: {kind} id {record_id} is inside the retail band (< {k.custom_first}); "
+                "a retail update could take it. Pass --force to use it anyway.")
+        if record_id >= k.ceiling:
+            raise click.ClickException(f"{action['id']}: {kind} id {record_id} is past the client ceiling {k.ceiling - 1}.")
+        recs = menu.records(kind)
+        occupied = record_id < len(recs) and not MT.is_empty(recs[record_id]) \
+            and (action.get("result") or {}).get("record_id") != record_id
+        if occupied and not force:
+            raise click.ClickException(
+                f"{action['id']}: {kind} id {record_id} already holds a record. Pass --force to overwrite it.")
+        mi = target.get("menu_index", "auto") if kind == "spell" else None
+        menu_index = None if mi in (None, "auto") else int(mi)
+        if menu_index is None and kind == "spell":
+            # A rebuild keeps the slot it took (else "next free" would count its own record).
+            prev_mi = (action.get("result") or {}).get("menu_index")
+            if isinstance(prev_mi, int) and (action.get("result") or {}).get("record_id") == record_id:
+                menu_index = prev_mi
+        try:
+            rec = MT.build_record(kind, menu, d, record_id, menu_index)
+        except MT.MenuError as e:
+            raise click.ClickException(f"{action['id']}: {e}")
+        fields = MT.read_fields(kind, rec)
+        menu.set_record(kind, record_id, rec)
+        dat_path = MT.save_menu(root, menu, dry_run=dry_run)
+        try:
+            strings = MT.set_texts(kind, root, record_id, d["text"], dry_run=dry_run)
+        except MT.MenuError as e:
+            raise click.ClickException(f"{action['id']}: {e}")
+
+    sql = MT.server_snippet(kind, d, record_id, d["like"])
+    server_path = None
+    if (action.get("server") or {}).get("emit", True):
+        server_path = Path("projects") / "server" / f"{kind}s" / f"{action['id'].split('.')[-1]}_{record_id}.sql"
+        if not dry_run:
+            server_path.parent.mkdir(parents=True, exist_ok=True)
+            server_path.write_text(sql + "\n", encoding="utf-8")
+    return {
+        "id": action["id"], "type": kind, "record_id": record_id, "like": d["like"],
+        "name": d["text"]["name_en"], "menu_index": fields.get("menu_index"),
+        "dat": MT.MENU_DAT, "output": str(dat_path),
+        "strings": sorted({_rom_rel_of(root, p) for p in strings}),
+        "server": str(server_path) if server_path else None, "sql": sql,
+        "registered": f"{kind} {record_id} ({d['text']['name_en']}) <- cloned from {d['like']}",
+    }
+
+
+def _rom_rel_of(root: Path, path: Path) -> str:
+    """``ROM/181/73.DAT`` for a path under the install root (or the mirrored
+    build root), falling back to the path's own tail."""
+    parts = Path(path).parts
+    for i, part in enumerate(parts):
+        if part.upper().startswith("ROM") and i + 2 < len(parts):
+            return "/".join(parts[i:i + 3])
+    return Path(path).name
+
+
+def _wizard_record(kind: str, slug: str, prev: dict | None, manifest_path: Path, manifest: dict) -> dict:
+    from xi.menu.xi_menu_table import KINDS, load_definition, MenuError
+    p = prev or {}
+    resource_root = _resource_root(manifest_path, manifest)
+    found = sorted(Path("exports").glob(f"**/*.{kind}.json")) if Path("exports").is_dir() else []
+    click.echo(f"\n>> Which definition? (a .{kind}.json — see schema/{kind}_definition.json; "
+               f"`like` names the retail {kind} to clone)")
+    if found:
+        click.echo("   Found:")
+        for i, f in enumerate(found[:20], 1):
+            click.echo(f"     {i}. {f}")
+        click.echo("   Enter a number, or type a path.")
+    click.echo()
+    default = (p.get("resources") or {}).get("definition")
+    if default:
+        default = str(resource_root / default)
+    while True:
+        raw = click.prompt("Enter definition", default=default or "", show_default=bool(default)).strip().strip('"')
+        if raw.isdigit() and found and 1 <= int(raw) <= len(found[:20]):
+            src = found[int(raw) - 1]
+        else:
+            src = Path(raw)
+        if not src.is_file():
+            click.echo(f"   ✗ not a file: {src}")
+            continue
+        try:
+            load_definition(src)
+            break
+        except MenuError as e:
+            click.echo(f"   ✗ {e}")
+    k = KINDS[kind]
+    prev_id = (p.get("target") or {}).get("id", "auto")
+    click.echo(f"\n>> Which {kind} id? (auto = the highest free id above the retail band "
+               f"{k.custom_first}..{k.ceiling - 1}; ids below need --force)")
+    click.echo()
+    raw = click.prompt("Enter id or auto", default=str(prev_id)).strip().lower()
+    record_id = None if raw in ("", "auto") else int(raw)
+    action = _record_action_from_definition(src, resource_root, kind, action_id=f"{kind}.{slug}",
+                                            record_id=record_id)
+    if p.get("result"):
+        action["result"] = p["result"]   # keep the id a previous build landed on
+    return action
+
+
 def _wizard_ability(slug: str, prev: dict | None, manifest_path: Path, manifest: dict) -> dict:
     """`dats new` → Ability: pick a recipe, how to publish it and (optionally) the
     animation number; the build allocates the rest."""
@@ -1183,9 +1373,14 @@ def json_cmd(manifest: Path, output: Path | None):
               help="Ability recipes: the animation number to take (default auto = next free).")
 @click.option("--subdir", type=int, default=None,
               help=f"Ability recipes: ROM10 folder to place the DAT(s) in (default {ABILITY_DEFAULT_SUBDIR}).")
+@click.option("--record-id", type=int, default=None,
+              help="Spell / command definitions: the record id to take (default auto = highest free above the retail band).")
+@click.option("--menu-index", type=int, default=None,
+              help="Spell definitions: the menu slot to sort into (default auto = next after retail's).")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
-                ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None):
+                ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
+                record_id: int | None = None, menu_index: int | None = None):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -1205,6 +1400,10 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     if kind == "ability":
         action = _ability_action_from_recipe(source, resource_root, action_id=action_id,
                                              kind=ability_kind, animation=animation, subdir=subdir)
+        action_id = action["id"]
+    elif kind in RECORD_TYPES:
+        action = _record_action_from_definition(source, resource_root, kind, action_id=action_id,
+                                                record_id=record_id, menu_index=menu_index)
         action_id = action["id"]
     elif kind == "zone":
         dat_target = _rom_rel(target or data.get("zone", ""))
@@ -1294,6 +1493,10 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         # unless this run set part of it explicitly.
         explicit = ability_kind is not None or animation is not None or subdir is not None
         preserve = ("result",) + (() if explicit else ("target", "kind"))
+    elif kind in RECORD_TYPES:
+        # Same rule: the recorded id survives a re-prepare; the target too unless set here.
+        explicit = record_id is not None or menu_index is not None
+        preserve = ("result",) + (() if explicit else ("target",))
     else:
         preserve = ("model",) + (() if target else ("target",))
     _add_or_replace_action(manifest_data, action, replace, preserve=preserve)
@@ -1322,6 +1525,10 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
         aid = action.get("id", "?")
         typ = action.get("type", "?")
         res = action.get("result") or {}
+        if typ in RECORD_TYPES:
+            rid = res.get("record_id", (action.get("target") or {}).get("id", "auto"))
+            rows.append((aid, typ, res.get("dat") or "ROM/118/114.DAT", str(rid), "-"))
+            continue
         if typ in ("gear", "ability"):
             placements = res.get("placements") or []
             model_id = res.get("model_id", (action.get("model") or {}).get("model_id"))
@@ -1367,6 +1574,10 @@ def _action_summary(action: dict) -> str:
     if model_id is not None:
         parts.append(f"model {model_id}")
     line = " - ".join(parts)
+    if action.get("type") in RECORD_TYPES:
+        rid = (action.get("result") or {}).get("record_id", (action.get("target") or {}).get("id", "auto"))
+        line += f" - id {rid}: {(action.get('resources') or {}).get('definition', '?')}"
+        return line
     if action.get("type") == "ability":
         anim = (action.get("target") or {}).get("animation", "auto")
         placements = (action.get("result") or {}).get("placements") or []
@@ -1527,6 +1738,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_mesh(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "ability":
             return _build_ability(action, manifest, manifest_data, force=force, dry_run=dry_run)
+        if kind in RECORD_TYPES:
+            return _build_record(action, manifest, manifest_data, force=force, dry_run=dry_run)
         raise click.ClickException(
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
@@ -1555,7 +1768,12 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             # An ability's allocation (animation number, per-race placements) is
             # decided by the build against the live tables, not by the definition
             # alone, so it is taken from the build result rather than re-planned.
-            res = _ability_result(result) if kind == "ability" else _plan_result(action)
+            if kind == "ability":
+                res = _ability_result(result)
+            elif kind in RECORD_TYPES:
+                res = _record_result(result)   # the id is decided against the live table too
+            else:
+                res = _plan_result(action)
             res["targets"] = [n for n in ("pivot", "dir", "hd") if n in built]
             action["result"] = res
 
@@ -1653,11 +1871,15 @@ def _project_dat_rels(manifest_data: dict) -> tuple[list[str], bool]:
         res = action.get("result") or {}
         if typ in ("gear", "ability"):
             rels += [_rom_rel(p["dat"]) for p in res.get("placements", []) if p.get("dat")]
+        elif typ in RECORD_TYPES:
+            # The shared menu table plus the name/help tables the build edited.
+            rels += [_rom_rel(res.get("dat") or "ROM/118/114.DAT")]
+            rels += [_rom_rel(s) for s in res.get("strings") or []]
         elif res.get("dat"):
             rels.append(_rom_rel(res["dat"]))
         if typ == "mount":
             has_mount = True
-    return rels, has_mount
+    return sorted(set(rels)), has_mount
 
 
 @group.command("package")
@@ -1864,6 +2086,13 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool):
                 if isinstance(mid, int):
                     with _package_config(root, root):
                         M.clear_mount_strings(mid)
+            if action.get("type") in RECORD_TYPES:
+                rid = (action.get("result") or {}).get("record_id")
+                if isinstance(rid, int):
+                    from xi.menu.xi_menu_table import clear_record
+                    with _package_config(root, root):
+                        clear_record(action["type"], root, rid)
+                    cleared += 1
         click.echo(f"  ✓ {name}: DATs deleted + table entries cleared")
 
     if not keep_json:
@@ -1892,6 +2121,17 @@ def _print_placements(results: list[dict], title: str) -> None:
                 click.echo(f"     - {mark}{line}")
                 if "occupied by" in line:
                     collisions += 1
+        elif kind in RECORD_TYPES:
+            mi = f", menu index {r['menu_index']}" if r.get("menu_index") is not None else ""
+            click.echo(f"{head}: {kind} {r.get('record_id')} \"{r.get('name')}\" "
+                       f"cloned from {r.get('like')}{mi} -> {r.get('dat')}")
+            for s in r.get("strings") or []:
+                click.echo(f"     - names/help: {s}")
+            if r.get("server"):
+                click.echo(f"     server: {r['server']}")
+            if r.get("sql"):
+                for line in r["sql"].splitlines():
+                    click.echo(f"       {line}")
         elif kind == "ability":
             files = r.get("placements", [])
             click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "
@@ -3050,15 +3290,19 @@ def new_cmd(project: str | None):
         "Entity (NPC / Monster / Object)": "entity",
         "NPC (costume: race + gear + weapons)": "npc",
         "Ability (recipe from the Ability Mixer / xi ability recipe)": "ability",
+        "Spell menu record (a new spell id: name, help, MP, levels)": "spell",
+        "Command menu record (a new job ability / weapon skill id)": "command",
     }[_choose("What type of content is being added?",
               ["Gear", "Mounts", "Entity (NPC / Monster / Object)",
                "NPC (costume: race + gear + weapons)",
-               "Ability (recipe from the Ability Mixer / xi ability recipe)"])]
+               "Ability (recipe from the Ability Mixer / xi ability recipe)",
+               "Spell menu record (a new spell id: name, help, MP, levels)",
+               "Command menu record (a new job ability / weapon skill id)"])]
     # The baked NPC is placed at a custom entity model id, so it needs the entity tables.
     # Abilities take retail-range ids (job-ability / spell bands, weapon-skill dummies),
     # so the tables need no expansion.
     ready_key = "entity" if ctype == "npc" else ctype
-    if ctype != "ability" and not ready.get(ready_key, True):
+    if ctype not in ("ability", *RECORD_TYPES) and not ready.get(ready_key, True):
         hint = {"gear": "Run `xi ftable expand gear` (expands the FTABLE and patches "
                         "FFXiMain.dll)",
                 "entity": "Run `xi ftable expand entity`",
@@ -3090,17 +3334,20 @@ def new_cmd(project: str | None):
             new_actions = [_wizard_npc(slug, prev)]
         elif ctype == "ability":
             new_actions = [_wizard_ability(slug, prev, manifest_path, manifest)]
+        elif ctype in RECORD_TYPES:
+            new_actions = [_wizard_record(ctype, slug, prev, manifest_path, manifest)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 
     by_id = {a.get("id"): a for a in manifest.get("actions", [])}
     for action in new_actions:
-        if action.get("type") == "ability":
-            continue   # allocated by the build (animation number + per-race placements)
-        action["result"] = _plan_result(action)  # record the allocation inline (same as build)
+        if action.get("type") not in ("ability", *RECORD_TYPES):
+            # Allocated deterministically from the definition; abilities and menu
+            # records are decided by the build against the live tables instead.
+            action["result"] = _plan_result(action)  # record the allocation inline (same as build)
         prior_targets = ((by_id.get(action["id"]) or {}).get("result") or {}).get("targets")
         if prior_targets:  # keep the record of where it was last built into
-            action["result"]["targets"] = prior_targets
+            action.setdefault("result", {})["targets"] = prior_targets
         _add_or_replace_action(manifest, action, replace=True)
     _write_manifest(manifest_path, manifest)
     _rule()

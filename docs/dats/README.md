@@ -54,8 +54,9 @@ It walks you through, in order:
    tweaks it, and gear re-uses each slot's destination block (overwrite in place).
 
 3. **Content type** — `Gear`, `Mounts`, `Entity (NPC / Monster / Object)`,
-   `NPC (costume: race + gear + weapons)`, or `Ability` (a recipe from the model
-   viewer's Ability Mixer or `xi ability recipe`).
+   `NPC (costume: race + gear + weapons)`, `Ability` (a recipe from the model
+   viewer's Ability Mixer or `xi ability recipe`), or a `Spell` / `Command` menu
+   record (a new spell or job-ability id with its name, help and stats).
 
 4. **Type-specific questions** (see below), then it writes the manifest action and offers
    to build (with a dry-run preview first).
@@ -145,6 +146,28 @@ uv run xi dats build tiger_fury --dry-run
 ```
 
 Full detail: [../ability/mixer.md](../ability/mixer.md#publish).
+
+### Spell / command menu record (a new spell or job-ability id)
+
+Point it at a **definition** (`*.spell.json` / `*.command.json`,
+[schema](../../schema/spell_definition.json), [schema](../../schema/command_definition.json)):
+the retail record to clone (`like`), the names and help, and the fields that differ
+(MP, cast/recast, element, learnable jobs and levels; level, TP, targets for commands).
+Then choose the id — auto takes the highest free one above the retail band (spells
+1024–4095, commands 2816–4095), top-down so retail can never reach it. The build grows
+the `mgc_` / `comm` section of `ROM/118/114.DAT`, writes the record and the EN/JP
+name/help blocks, records the id (and a spell's menu index) on the action and emits a
+server row template to `projects/server/spells/` or `commands/`. A retail client
+ignores the new band until its ceilings are patched — see
+[../menu/records.md](../menu/records.md). From arguments, with every parameter
+defaulted (the type is inferred from the definition's `schema`):
+
+```bash
+uv run xi dats prepare exports/menu/testspell.spell.json --project testspell --replace
+uv run xi dats build testspell --dry-run
+```
+
+Full detail: [../menu/records.md](../menu/records.md).
 
 ## Building (`xi dats build`)
 
@@ -289,7 +312,7 @@ resource files that live next to the source JSON into `projects/resources/<type>
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder). Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build: delete the placed DATs + clear their file_id entries, then remove the manifest (`--keep-json` keeps it) |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe into `projects/resources` and add an action (`--type`, and for abilities `--kind` / `--animation` / `--subdir`) |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`) |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
@@ -312,6 +335,12 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   number against the live tables, places them under `ROM10/<subdir>/` and registers the
   file ids; records kind / animation / placements on the action and emits the server
   SQL to `projects/server/abilities/`. Needs no table expansion.
+- `spell` / `command`: writes a definition (`xi.menu.xi_menu_table`) as a new record of
+  `ROM/118/114.DAT` (the `mgc_` / `comm` section grown to hold it) plus its EN/JP
+  name/help blocks in `ROM/181`, at an id above the retail band decided against the
+  live table; records `record_id` (+ `menu_index`) and the edited string tables on the
+  action, emits a server row template to `projects/server/spells|commands/`. No file
+  ids, no table expansion; the client needs its ceilings patched to show the band.
 
 GLB-rebuild / package types:
 

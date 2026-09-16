@@ -34,7 +34,9 @@
           {"$ref": "tex.json"},
           {"$ref": "ui.json"},
           {"$ref": "event.json"},
-          {"$ref": "ability.json"}
+          {"$ref": "ability.json"},
+          {"$ref": "spell.json"},
+          {"$ref": "command.json"}
         ]
       }
     }

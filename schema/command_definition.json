@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/command_definition.json",
+  "title": "xi command definition",
+  "description": "A new command menu record for ROM/118/114.DAT (comm: job abilities, pet commands, weapon skills…) and its names/help: a retail command to clone plus the fields and texts that differ. Read by `xi dats prepare --type command` / the `command` action; see docs/menu/records.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "like", "text"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.command.v1"},
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Slug: the action id (command.<name>), the resource file name and the server row name."
+    },
+    "description": {"type": "string"},
+    "like": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The retail command id whose record is cloned (type, icon, targets, TP come from it)."
+    },
+    "id": {
+      "$ref": "common.json#/$defs/autoOrInteger",
+      "default": "auto",
+      "description": "The command id to take. auto = the highest free id above the retail band (2816..4095); ids inside the retail band need --force."
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name_en"],
+      "properties": {
+        "name_en": {"type": "string", "minLength": 1},
+        "name_jp": {"type": "string"},
+        "help_en": {"type": "string"},
+        "help_jp": {"type": "string"}
+      }
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Record fields to change on the clone (anything not named keeps the donor's value).",
+      "properties": {
+        "type": {"type": "integer", "minimum": 0, "maximum": 255, "description": "1 ability, 2 pet ability, 3 weapon skill, 4 trait … (xi.common.xi_menu_records.COMM_TYPE_NAMES)."},
+        "icon": {"type": "integer", "minimum": 0, "maximum": 255},
+        "icon2": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "charges": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "targets": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "tp": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "level": {"type": "integer", "minimum": 0, "maximum": 255},
+        "range": {"type": "integer", "minimum": 0, "maximum": 255},
+        "radius": {"type": "integer", "minimum": 0, "maximum": 255},
+        "aoe": {"type": "integer", "minimum": 0, "maximum": 255},
+        "valid_targets": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "tp_modifier": {"type": "integer", "minimum": 0, "maximum": 255}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.command.v1",
+      "name": "war_cry",
+      "like": 547,
+      "id": "auto",
+      "text": {
+        "name_en": "War Cry",
+        "help_en": "Goads all enemies in range into attacking you."
+      },
+      "fields": {"level": 30}
+    }
+  ]
+}

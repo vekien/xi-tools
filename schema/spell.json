@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/spell.json",
+  "title": "xi dats spell action",
+  "description": "Writes a spell definition (spell_definition.json) as a new record of ROM/118/114.DAT plus its names/help. The id is decided by the build against the live table (above the retail band) and recorded in result.",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "spell"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "common.json#/$defs/autoOrInteger", "default": "auto"},
+        "menu_index": {"$ref": "common.json#/$defs/autoOrInteger", "default": "auto"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definition"],
+      "properties": {
+        "definition": {"$ref": "common.json#/$defs/relativePath"}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"force": {"type": "boolean"}}
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"emit": {"type": "boolean", "default": true}}
+    },
+    "result": {
+      "type": "object",
+      "description": "Recorded by dats build: the record the action landed on.",
+      "additionalProperties": true,
+      "properties": {
+        "record_id": {"type": "integer", "minimum": 0},
+        "menu_index": {"type": "integer", "minimum": 0},
+        "like": {"type": "integer", "minimum": 0},
+        "dat": {"$ref": "common.json#/$defs/romPath"},
+        "strings": {"type": "array", "items": {"$ref": "common.json#/$defs/romPath"}},
+        "server": {"type": ["string", "null"]},
+        "targets": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "spell.testspell",
+      "type": "spell",
+      "target": {"id": "auto", "menu_index": "auto"},
+      "resources": {"definition": "spell/testspell.spell.json"},
+      "server": {"emit": true}
+    }
+  ]
+}

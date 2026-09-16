@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/command.json",
+  "title": "xi dats command action",
+  "description": "Writes a command definition (command_definition.json) as a new record of ROM/118/114.DAT (comm) plus its names/help. The id is decided by the build against the live table (above the retail band) and recorded in result.",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "command"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "common.json#/$defs/autoOrInteger", "default": "auto"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definition"],
+      "properties": {
+        "definition": {"$ref": "common.json#/$defs/relativePath"}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"force": {"type": "boolean"}}
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"emit": {"type": "boolean", "default": true}}
+    },
+    "result": {
+      "type": "object",
+      "description": "Recorded by dats build: the record the action landed on.",
+      "additionalProperties": true,
+      "properties": {
+        "record_id": {"type": "integer", "minimum": 0},
+        "like": {"type": "integer", "minimum": 0},
+        "dat": {"$ref": "common.json#/$defs/romPath"},
+        "strings": {"type": "array", "items": {"$ref": "common.json#/$defs/romPath"}},
+        "server": {"type": ["string", "null"]},
+        "targets": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "examples": [
+    {
+      "id": "command.war_cry",
+      "type": "command",
+      "target": {"id": "auto"},
+      "resources": {"definition": "command/war_cry.command.json"},
+      "server": {"emit": true}
+    }
+  ]
+}

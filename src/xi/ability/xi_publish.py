@@ -317,7 +317,7 @@ def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation:
     project = project or recipe["name"]
     ctx = click.get_current_context()
     ctx.invoke(prepare_cmd, source=recipe_path, project=project, action_type="ability", replace=True,
-               kind=kind, animation=animation, subdir=subdir)
+               ability_kind=kind, animation=animation, subdir=subdir)
     click.echo()
     ctx.invoke(build_cmd, project=project, only=(f"ability.{_slug(recipe['name'])}",),
                force=force, dry_run=dry_run)
