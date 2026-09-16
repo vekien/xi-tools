@@ -54,11 +54,51 @@ SPELL_FILE_OFFSET = 0xAF0
 SPELL_CUSTOM_FIRST = 1012
 SPELL_CUSTOM_LAST = 1611
 
+# The action packet carries the animation number in 12 bits, so no number above
+# this can reach the client however the file tables are arranged.
+ANIMATION_MAX = 4095
+
 # (file-id offset, first custom number, last, what the server column is called)
 _SINGLE_DAT_KINDS = {
     "ja": (ABILITY_FILE_OFFSET, JA_CUSTOM_FIRST, JA_CUSTOM_LAST, "abilities.animation"),
     "spell": (SPELL_FILE_OFFSET, SPELL_CUSTOM_FIRST, SPELL_CUSTOM_LAST, "spell_list.animation"),
 }
+
+
+def custom_band(kind: str) -> tuple:
+    """``(first_animation, file_id_base)`` of the configured custom band for ``kind``,
+    or ``(0, 0)`` when none is set. See xi_config: a band exists only where a
+    client-side plugin has patched the animation-to-file-id arithmetic to reach it."""
+    import xi.xi_config as cfg
+    first, base = {
+        "spell": (cfg.FX_SPELL_BAND_FIRST, cfg.FX_SPELL_BAND_BASE),
+        "ja": (cfg.FX_JA_BAND_FIRST, cfg.FX_JA_BAND_BASE),
+        "ws": (cfg.FX_WS_BAND_FIRST, cfg.FX_WS_BAND_BASE),
+    }.get(kind, (0, 0))
+    return (first, base) if first and base else (0, 0)
+
+
+def file_id_for(kind: str, animation: int) -> int:
+    """Where the client looks for ``animation``'s DAT. Below the custom band (or with
+    none configured) that is the retail arithmetic, untouched.
+
+    Inside the band the number is added to the base whole. The threshold decides
+    which arithmetic applies and is not part of it; see xi_config for why each
+    base reserves the full 4096."""
+    offset = _SINGLE_DAT_KINDS[kind][0]
+    first, base = custom_band(kind)
+    return base + animation if first and animation >= first else offset + animation
+
+
+def _candidates(kind: str) -> range:
+    """Animation numbers to try, retail band first, then the custom one if configured.
+
+    A configured band runs to the end of the number space, not 4096 past its own
+    threshold: the action packet carries the animation in 12 bits, so 4095 is the
+    last number that can reach the client whatever the file tables allow."""
+    _, first, last, _col = _SINGLE_DAT_KINDS[kind]
+    band_first, _base = custom_band(kind)
+    return range(first, (ANIMATION_MAX + 1 if band_first else last + 1))
 KINDS = ("ja", "spell", "ws")
 DEFAULT_SUBDIR = 20
 OUT_ROOT = Path("exports") / "ability"      # composed DATs + reports, per recipe name
@@ -125,43 +165,52 @@ def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool,
     ours = ours or set()
     if kind in _SINGLE_DAT_KINDS:
         offset, first, last, _col = _SINGLE_DAT_KINDS[kind]
-        cands = [wanted] if wanted is not None else range(first, last + 1)
+        cands = [wanted] if wanted is not None else _candidates(kind)
         for n in cands:
-            fid = offset + n
+            if last < n < (custom_band(kind)[0] or n):
+                continue                     # the gap between the retail band and a custom one
+            fid = file_id_for(kind, n)
             cur = _placement(root, fid)
             if cur is None or force or cur.upper() in ours:
                 return n
         if wanted is not None:
             raise click.ClickException(
-                f"{kind} animation {wanted} (file id {offset + wanted}) is already "
-                f"registered to {_placement(root, offset + wanted)}; pass --force to repoint it")
-        raise click.ClickException(f"no free {kind} animation number between {first} and {last}")
-    cands = [wanted] if wanted is not None else range(WS_CUSTOM_FIRST, WS_CUSTOM_LAST + 1)
+                f"{kind} animation {wanted} (file id {file_id_for(kind, wanted)}) is already "
+                f"registered to {_placement(root, file_id_for(kind, wanted))}; pass --force to repoint it")
+        band_first, _b = custom_band(kind)
+        where = (f"between {first} and {band_first + 4095}" if band_first
+                 else f"between {first} and {last} (set a custom band in .env for more — "
+                      "needs a client-side ceiling plugin)")
+        raise click.ClickException(f"no free {kind} animation number {where}")
+    import xi.xi_config as cfg
+    ws_band_last = (cfg.FX_WS_BAND_FIRST + cfg.FX_WS_BAND_SLOTS - 1
+                    if cfg.FX_WS_BAND_FIRST and cfg.FX_WS_BAND_SLOTS else 0)
+    cands = ([wanted] if wanted is not None
+             else range(WS_CUSTOM_FIRST, (ws_band_last + 1) or (WS_CUSTOM_LAST + 1)))
     for n in cands:
         slots = resolve_weapon_skill(n)
         free = all(_is_dummy(root, _placement(root, s.file_id))
                    or (_placement(root, s.file_id) or "").upper() in ours for s in slots)
         if force or free:
             return n
+    last_tried = ws_band_last or WS_CUSTOM_LAST
     if wanted is not None:
         raise click.ClickException(
             f"Weapon-skill slot {wanted} isn't free — some race already has a real motion DAT "
             f"there (a slot is free only when every race's body DAT is a retail dummy). Pass "
-            f"--force to overwrite it, pick another slot in {WS_CUSTOM_FIRST}–{WS_CUSTOM_LAST}, "
+            f"--force to overwrite it, pick another slot in {WS_CUSTOM_FIRST}–{last_tried}, "
             f"or publish the mix as a job ability / spell instead.")
     raise click.ClickException(
-        f"All {WS_CUSTOM_LAST - WS_CUSTOM_FIRST + 1} custom weapon-skill animation slots "
-        f"({WS_CUSTOM_FIRST}–{WS_CUSTOM_LAST}) are taken on this install — none is a retail "
-        "dummy on every race, so there's nowhere free to bake a per-race weapon-skill motion. "
-        "Three ways forward:\n"
-        f"  1. --animation N --force  — overwrite one of {WS_CUSTOM_FIRST}–{WS_CUSTOM_LAST} "
-        "(clobbers whatever custom skill is on that slot);\n"
-        "  2. --pivot  — build into FFXI_PIVOT_DIR instead, if it has room;\n"
-        "  3. give the mix a motion that isn't race-bound (a magic cast, a Bard song, a base "
-        "ability motion) so it publishes as a job ability or spell — those have far more room "
-        "(and cexislots raises their id ceiling further). Note: cexislots lifts the spell / "
-        "job-ability id ceilings, but not this 16-slot weapon-skill motion bank — enlarging "
-        "that would need its own client patch.")
+        f"Every weapon-skill animation slot this install can reach ({WS_CUSTOM_FIRST}–{last_tried}) "
+        "is taken — none is a retail dummy on every race, so there's nowhere free to place a "
+        "per-race weapon-skill motion. Ways forward:\n"
+        + ("" if ws_band_last else
+           "  • set FX_WS_BAND_FIRST / _BASE / _SLOTS in .env — a client-side plugin (cexislots) "
+           "adds a third motion bank with hundreds more slots, and the publisher allocates there "
+           "once it knows where that band is;\n")
+        + "  • --animation N --force — overwrite one slot (clobbers the custom skill on it);\n"
+          "  • --pivot — build into FFXI_PIVOT_DIR instead, if it has room;\n"
+          "  • publish as a job ability or spell instead, which have far more room.")
 
 
 def _free_files(root: Path, subdir: int, count: int, reserved: Optional[set] = None) -> List[int]:
@@ -229,10 +278,9 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
 
     files: List[dict] = []
     if kind in _SINGLE_DAT_KINDS:
-        offset = _SINGLE_DAT_KINDS[kind][0]
         (c,) = composed
         pool = _free_files(root, subdir, 1)
-        files.append({"race": None, "role": "body", "file_id": offset + anim,
+        files.append({"race": None, "role": "body", "file_id": file_id_for(kind, anim),
                       "place": place_for(None, "body", pool), "composed": c})
     else:
         src_anim = _source_ws_animation(recipe)

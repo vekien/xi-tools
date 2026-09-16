@@ -315,6 +315,47 @@ TEXTURE_CLAMP = int(os.environ.get('XI_TEXTURE_CLAMP', '2048'))
 CUSTOM_ROM     = os.environ.get('CUSTOM_FTABLE', 'ROM10')
 CUSTOM_ROM_IDX = int(CUSTOM_ROM[3:])   # 'ROM10' -> 10
 
+# ── Custom animation bands ──────────────────────────────────────────────────
+# The client turns an animation number into a DAT file id with fixed arithmetic
+# per kind, and the file ids that arithmetic reaches run out long before the
+# 12-bit number space does: 92 spell animations are free, 161 job ability, and 8
+# weapon skill (`xi ability publish` reports which). A client-side plugin can
+# patch that arithmetic so numbers at or above a threshold resolve into a
+# reserved region instead, and these say where that region is so the publisher
+# can allocate into it.
+#
+#   file_id = BASE + animation                           spells, job abilities
+#   file_id = WS_BASE + (animation - WS_FIRST) * 24      weapon skills, then
+#             + block * 8 + race                         body / waist A / waist B
+#
+# For spells and job abilities the number is added whole: FIRST decides only
+# whether the custom band applies, and is never subtracted. Each base therefore
+# reserves 4096 file ids, one for every value the 12-bit animation field can
+# hold, and the numbers below FIRST simply address the unused front of the block.
+# Offsetting by FIRST instead allocates below where the client will look.
+#
+# Weapon-skill numbers cost 24 file ids each because the client resolves them
+# through per-race motion banks, and there the threshold *is* subtracted: the
+# reserved count is what bounds that band, not the number space. Grouping those
+# ids by number rather than by race keeps WS_SLOTS out of the arithmetic, so
+# raising it later moves nothing already published.
+#
+# Unset (the default) means retail bands only: the publisher behaves exactly as
+# it always has, and a client without such a plugin is unaffected either way.
+def _band(name: str) -> int:
+    try:
+        return max(0, int(os.environ.get(name, '0')))
+    except ValueError:
+        return 0
+
+FX_SPELL_BAND_FIRST = _band('FX_SPELL_BAND_FIRST')
+FX_SPELL_BAND_BASE  = _band('FX_SPELL_BAND_BASE')
+FX_JA_BAND_FIRST    = _band('FX_JA_BAND_FIRST')
+FX_JA_BAND_BASE     = _band('FX_JA_BAND_BASE')
+FX_WS_BAND_FIRST    = _band('FX_WS_BAND_FIRST')
+FX_WS_BAND_BASE     = _band('FX_WS_BAND_BASE')
+FX_WS_BAND_SLOTS    = _band('FX_WS_BAND_SLOTS')
+
 # ── Local dev server DB (LandSandBoat — xidb) ───────────────────────────────
 # Used by `xi zone new` to auto-apply the generated zone-migration.sql to the
 # running dev server's database. Defaults match a stock local LSB setup (MariaDB on

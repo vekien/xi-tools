@@ -69,6 +69,13 @@ error, not a silent drop.
 
 ## Publish
 
+> **Running out of numbers?** The counts above are what the *client* can reach:
+> the animation number becomes a DAT file id through fixed arithmetic per kind, and
+> the ids that arithmetic lands on are mostly taken by other content. A client-side
+> plugin can patch it so numbers at or above a threshold resolve into a reserved
+> region instead; set `FX_*_BAND_*` in `.env` (see `xi_config.py`) and the publisher
+> will allocate there once the retail band is full. Unset, nothing changes.
+
 Publishing is an **`xi dats` action** (`type: "ability"`, schema
 [`schema/ability.json`](../../schema/ability.json)), so a published ability sits in a
 project manifest beside any gear, mount or entity actions, is rebuilt from Git by
