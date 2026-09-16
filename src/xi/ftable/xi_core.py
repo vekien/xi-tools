@@ -1,3 +1,4 @@
+import functools
 import os
 import struct
 from xi.xi_config import FFXI_DIR, editable_dat, read_path_for
@@ -44,6 +45,58 @@ def resolve_dat(fdata, vdata, file_id: int):
     return dat, vt_val
 
 
+def root_table_pair(root, rom_idx: int):
+    """The (FTABLE, VTABLE) paths for ``rom_idx`` under a DAT root."""
+    root = str(root)
+    if rom_idx == 1:
+        return os.path.join(root, 'FTABLE.DAT'), os.path.join(root, 'VTABLE.DAT')
+    return (os.path.join(root, f'ROM{rom_idx}', f'FTABLE{rom_idx}.DAT'),
+            os.path.join(root, f'ROM{rom_idx}', f'VTABLE{rom_idx}.DAT'))
+
+
+@functools.lru_cache(maxsize=8)
+def _table_bytes(path: str, mtime_ns: int, size: int) -> bytes:
+    # A build asks where hundreds of file_ids resolve; the tables are read once per
+    # version. Writers call forget_tables(), since a coarse mtime can miss an edit.
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def forget_tables() -> None:
+    """Drop the cached table bytes after writing a table."""
+    _table_bytes.cache_clear()
+
+
+def resolve_dat_in_root(root, file_id: int, rom_idx: int = None):
+    """What the client loads for ``file_id`` when it reads DATs through ``root`` — the
+    base install, or an XIPivot folder such as FFXI_PIVOT_DIR — as (dat, rom).
+
+    The client resolves a file_id through the ROM{n} pair first and falls back to the
+    main FTABLE/VTABLE. XIPivot swaps in a folder's own copy of a ROM{n} pair, but the
+    main pair always comes from the base install: a folder's copy of it is never read
+    (tested in game with !injectaction, and XIPivot's debug log never shows FTABLE.DAT
+    being opened). So the ROM{n} pair is ``root``'s own, or the install's when ``root``
+    has none, and the main pair is always the install's. Reading a main pair alone
+    misses what a ROM{n} pair registers, and an allocator then hands a live slot out
+    again.
+    """
+    import xi.xi_config as cfg
+    if rom_idx is None:
+        rom_idx = cfg.CUSTOM_ROM_IDX
+    rom_pair = root_table_pair(root, rom_idx)
+    if not all(os.path.exists(p) for p in rom_pair):
+        rom_pair = root_table_pair(cfg.FFXI_DIR, rom_idx)
+    for ft, vt in (rom_pair, root_table_pair(cfg.FFXI_DIR, 1)):
+        if not (os.path.exists(ft) and os.path.exists(vt)):
+            continue
+        sf, sv = os.stat(ft), os.stat(vt)
+        dat, rom = resolve_dat(_table_bytes(ft, sf.st_mtime_ns, sf.st_size),
+                               _table_bytes(vt, sv.st_mtime_ns, sv.st_size), file_id)
+        if dat is not None:
+            return dat, rom
+    return None, None
+
+
 def patch_table(ft_path: str, vt_path: str,
                 file_id: int, ftable_val: int, vtable_val: int,
                 dry_run: bool = False):
@@ -62,6 +115,7 @@ def patch_table(ft_path: str, vt_path: str,
             f.write(fdata)
         with open(out_vt, 'wb') as f:
             f.write(vdata)
+        forget_tables()
 
 
 def all_tables():

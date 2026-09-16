@@ -81,9 +81,14 @@ def game(tmp_path: Path, monkeypatch):
     (root / "VTABLE.DAT").write_bytes(b"\0" * ENTRIES)
     (root / "ROM10" / "FTABLE10.DAT").write_bytes(b"\0" * (ENTRIES * 2))
     (root / "ROM10" / "VTABLE10.DAT").write_bytes(b"\0" * ENTRIES)
+    import xi.ftable.xi_expand as xe
     import xi.xi_config as cfg
     monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
     monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", None, raising=False)
+    # xi_expand keeps its own copies of the paths: without these the build's pivot table
+    # sync reads (and could write) the real install and FFXI_PIVOT_DIR from .env
+    monkeypatch.setattr(xe, "FFXI_DIR", str(root))
+    monkeypatch.setattr(xe, "FFXI_PIVOT_DIR", "")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "exports" / "ability" / "mixer").mkdir(parents=True)
     rp = tmp_path / "exports" / "ability" / "mixer" / "tiger_fury.recipe.json"
@@ -112,9 +117,11 @@ def _stub_compose(monkeypatch, animation=339):
     monkeypatch.setattr(ap, "write_sources", fake_write)
 
 
-def _resolve(root: Path, file_id: int):
-    from xi.ftable.xi_core import resolve_dat
-    return resolve_dat((root / "FTABLE.DAT").read_bytes(), (root / "VTABLE.DAT").read_bytes(), file_id)
+def _resolve(root: Path, file_id: int, rom: int = 1):
+    """What one table pair of ``root`` says for file_id: the main pair, or ROM{rom}'s."""
+    from xi.ftable.xi_core import resolve_dat, root_table_pair
+    ft, vt = (Path(p) for p in root_table_pair(root, rom))
+    return resolve_dat(ft.read_bytes(), vt.read_bytes(), file_id)
 
 
 def test_prepare_writes_ability_action(game):
@@ -175,6 +182,88 @@ def test_build_places_and_registers_then_undo(game, monkeypatch):
     r = runner.invoke(group, ["undo", "tf", "--yes"], catch_exceptions=False)
     assert r.exit_code == 0, r.output
     assert _resolve(root, 4412 + 339) == (None, None)
+
+
+def test_build_pivot_places_in_the_pivot_folder(game, tmp_path: Path, monkeypatch):
+    """--pivot places the DAT and registers its file id in FFXI_PIVOT_DIR's ROM10 tables
+    (never its main pair, which the client does not read), leaves the base install alone,
+    skips the base-to-pivot table sync, and undo clears it there."""
+    import xi.ftable.xi_expand as xe
+    import xi.xi_config as cfg
+    from xi.dats.xi_dats import _read_manifest, group
+    root, rp = game
+    pivot = tmp_path / "pivot"
+    for d in (pivot, pivot / "ROM10"):
+        d.mkdir(parents=True)
+    (pivot / "FTABLE.DAT").write_bytes(b"\0" * (ENTRIES * 2))
+    (pivot / "VTABLE.DAT").write_bytes(b"\0" * ENTRIES)
+    (pivot / "ROM10" / "FTABLE10.DAT").write_bytes(b"\0" * (ENTRIES * 2))
+    (pivot / "ROM10" / "VTABLE10.DAT").write_bytes(b"\0" * ENTRIES)
+    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot), raising=False)
+    monkeypatch.setattr(xe, "pivot_root", lambda: str(pivot))
+    monkeypatch.setattr(xe, "sync_pivot_from_base",
+                        lambda *a, **k: pytest.fail("a --pivot build must not copy the base tables over the pivot's"))
+    _stub_compose(monkeypatch)
+    runner = CliRunner()
+    assert runner.invoke(group, ["prepare", str(rp), "--project", "tf", "--replace"], catch_exceptions=False).exit_code == 0
+
+    r = runner.invoke(group, ["build", "tf", "--pivot"], catch_exceptions=False)
+    assert r.exit_code == 0, r.output
+    assert (pivot / "ROM10" / "20" / "0.DAT").read_bytes()[:4] == b"tigr"
+    assert _resolve(pivot, 4412 + 339, rom=10)[0] == "ROM10/20/0.DAT"
+    assert _resolve(pivot, 4412 + 339) == (None, None)                          # main pair untouched
+    assert not (root / "ROM10" / "20" / "0.DAT").exists()
+    assert _resolve(root, 4412 + 339) == (None, None) and _resolve(root, 4412 + 339, rom=10) == (None, None)
+    assert _read_manifest(Path("projects/tf.json"))["actions"][0]["result"]["targets"] == ["pivot"]
+
+    r = runner.invoke(group, ["undo", "tf", "--yes"], catch_exceptions=False)
+    assert r.exit_code == 0, r.output
+    assert not (pivot / "ROM10" / "20" / "0.DAT").exists()
+    assert _resolve(pivot, 4412 + 339, rom=10) == (None, None)
+
+
+def test_a_retail_sized_main_table_does_not_stop_a_rom10_build(game, monkeypatch):
+    """A main FTABLE too small for the id (retail size, or reset by a launcher) is left
+    alone: the ROM10 entry is the one the client resolves, and undo clears just that."""
+    from xi.dats.xi_dats import group
+    root, rp = game
+    small = 4412 + 339                     # one short of the job ability's file id
+    (root / "FTABLE.DAT").write_bytes(b"\0" * (small * 2))
+    (root / "VTABLE.DAT").write_bytes(b"\0" * small)
+    _stub_compose(monkeypatch)
+    runner = CliRunner()
+    assert runner.invoke(group, ["prepare", str(rp), "--project", "tf", "--replace"], catch_exceptions=False).exit_code == 0
+    r = runner.invoke(group, ["build", "tf"], catch_exceptions=False)
+    assert r.exit_code == 0, r.output
+    assert _resolve(root, 4412 + 339, rom=10)[0] == "ROM10/20/0.DAT"
+    assert (root / "FTABLE.DAT").read_bytes() == b"\0" * (small * 2)
+    r = runner.invoke(group, ["undo", "tf", "--yes"], catch_exceptions=False)
+    assert r.exit_code == 0, r.output
+    assert _resolve(root, 4412 + 339, rom=10) == (None, None)
+
+
+def test_pivot_refuses_a_rom_placement_that_needs_a_main_table_entry(game, tmp_path: Path, monkeypatch):
+    """A ROM/ placement registers in the main FTABLE, which the client reads only from the
+    base install: with --pivot the build refuses it before writing anything."""
+    import xi.xi_config as cfg
+    from xi.dats.xi_dats import group
+    root, rp = game
+    pivot = tmp_path / "pivot"
+    (pivot / "ROM10").mkdir(parents=True)
+    (pivot / "ROM10" / "FTABLE10.DAT").write_bytes(b"\0" * (ENTRIES * 2))
+    (pivot / "ROM10" / "VTABLE10.DAT").write_bytes(b"\0" * ENTRIES)
+    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot), raising=False)
+    raw = tmp_path / "npc.dat"
+    raw.write_bytes(b"npc0" + b"\0" * 60)
+    Path("projects").mkdir(exist_ok=True)
+    Path("projects/ent.json").write_text(json.dumps({"name": "ent", "actions": [{
+        "id": "entity.npc", "type": "entity", "target": {"dat": "ROM/300/1.DAT"},
+        "resources": {"raw_dat": str(raw)}, "model": {"kind": "entity", "model_id": 4000}}]}), encoding="utf-8")
+    runner = CliRunner()
+    for args in (["build", "ent", "--pivot", "--dry-run"], ["build", "ent", "--pivot"]):
+        r = runner.invoke(group, args)
+        assert r.exit_code != 0 and "never from the pivot folder" in r.output, r.output
+    assert not (pivot / "ROM" / "300" / "1.DAT").exists()
 
 
 # ── the viewer list ──────────────────────────────────────────────────────────────

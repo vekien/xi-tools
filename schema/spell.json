@@ -49,6 +49,14 @@
         "dat": {"$ref": "common.json#/$defs/romPath"},
         "strings": {"type": "array", "items": {"$ref": "common.json#/$defs/romPath"}},
         "server": {"type": ["string", "null"]},
+        "replaced": {
+          "type": "object",
+          "description": "What a --force build wrote over, for undo to put back: the decoded record and each name/help block as hex.",
+          "properties": {
+            "record": {"type": "string", "pattern": "^[0-9a-f]*$"},
+            "blocks": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]*$"}}
+          }
+        },
         "targets": {"type": "array", "items": {"type": "string"}}
       }
     },

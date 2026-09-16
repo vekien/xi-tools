@@ -5,6 +5,8 @@ Names come from the d_msg tables (ROM/181/73 spells, /72 commands; JP /69, /68)
 and the numeric metadata from the ``mgc_`` / ``comm`` records of ROM/118/114.DAT,
 decoded with ``xi.menu.xi_menu_table`` (record layout documented there and in
 docs/dats/ROM_118_114.md). ``import`` writes edited fields back into the records.
+Everything reads and writes the base install (FFXI_DIR); ``--pivot`` uses
+FFXI_PIVOT_DIR instead.
 
 New spells / commands are added through ``xi dats`` (``--type spell`` /
 ``--type command``; docs/menu/records.md) — this group only reads and edits what
@@ -17,24 +19,27 @@ from pathlib import Path
 import click
 
 from xi.menu import xi_menu_table as MT
-from xi.xi_config import FFXI_DIR
+
+_PIVOT_HELP = 'Use FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).'
 
 
-def _root() -> Path:
-    return Path(FFXI_DIR)
+def _root(pivot: bool = False) -> Path:
+    from xi.xi_config import FFXI_DIR, FFXI_PIVOT_DIR
+    if not pivot:
+        return Path(FFXI_DIR)
+    if not FFXI_PIVOT_DIR:
+        raise click.ClickException('FFXI_PIVOT_DIR is not configured.')
+    return Path(FFXI_PIVOT_DIR)
 
 
-def _names(kind: str, lang: str) -> list:
-    click.echo(f'Processing {MT.KINDS[kind].names[lang]}', err=True)
-    return MT.read_names(kind, _root(), lang)
-
-
-def _iter_records(kind: str, lang: str = 'en', named_only: bool = True):
+def _iter_records(kind: str, lang: str = 'en', named_only: bool = True, pivot: bool = False):
     """One dict per record: id, name (from the string table) and the decoded fields."""
-    names = _names(kind, lang)
+    root = _root(pivot)
+    click.echo(f'Processing {MT.KINDS[kind].names[lang]}', err=True)
+    names = MT.read_names(kind, root, lang)
     click.echo(f'Processing {MT.MENU_DAT}', err=True)
     try:
-        menu = MT.load_menu(_root())
+        menu = MT.load_menu(root)
     except (OSError, MT.MenuError) as e:
         raise click.ClickException(f'{MT.MENU_DAT}: {e}')
     for idx, rec in enumerate(menu.records(kind)):
@@ -67,7 +72,8 @@ def group():
 @click.option('--abilities', is_flag=True, help='Search commands (job abilities / weapon skills) instead of spells.')
 @click.option('--lang', default='en', show_default=True, type=click.Choice(['en', 'jp']))
 @click.option('--as-json', is_flag=True)
-def search_cmd(query, exact, abilities, lang, as_json):
+@click.option('--pivot', is_flag=True, help=_PIVOT_HELP)
+def search_cmd(query, exact, abilities, lang, as_json, pivot):
     """Search for a spell or command by name.
 
     \b
@@ -78,7 +84,7 @@ def search_cmd(query, exact, abilities, lang, as_json):
     """
     kind = 'command' if abilities else 'spell'
     results = []
-    for entry in _iter_records(kind, lang):
+    for entry in _iter_records(kind, lang, pivot=pivot):
         name = entry['name']
         match = (name.lower() == query.lower()) if exact else (query.lower() in name.lower())
         if match:
@@ -104,7 +110,8 @@ def search_cmd(query, exact, abilities, lang, as_json):
 @click.option('--abilities', is_flag=True, help='Export commands instead of spells.')
 @click.option('--lang', default='en', show_default=True, type=click.Choice(['en', 'jp']))
 @click.option('--all', 'everything', is_flag=True, help='Include unnamed records too.')
-def export_cmd(output, abilities, lang, everything):
+@click.option('--pivot', is_flag=True, help=_PIVOT_HELP)
+def export_cmd(output, abilities, lang, everything, pivot):
     """Export spell (or command) names and decoded record fields to JSON.
 
     \b
@@ -114,7 +121,7 @@ def export_cmd(output, abilities, lang, everything):
       xi ui spells export --lang jp
     """
     kind = 'command' if abilities else 'spell'
-    results = list(_iter_records(kind, lang, named_only=not everything))
+    results = list(_iter_records(kind, lang, named_only=not everything, pivot=pivot))
     out = json.dumps(results, ensure_ascii=False, indent=2)
     if output:
         Path(output).write_text(out, encoding='utf-8')
@@ -127,14 +134,16 @@ def export_cmd(output, abilities, lang, everything):
 @click.argument('json_file', type=click.Path(exists=True))
 @click.option('--abilities', is_flag=True, help='The file holds command records instead of spells.')
 @click.option('--dry-run', is_flag=True)
-def import_cmd(json_file, abilities, dry_run):
+@click.option('--pivot', is_flag=True, help=_PIVOT_HELP)
+def import_cmd(json_file, abilities, dry_run, pivot):
     """Write edited record fields from an `export` JSON back into ROM/118/114.DAT.
 
     Each entry needs an `id`; every other key that names a record field
     (spells: mp, cast, recast, element, skill, targets, icon, icon2, requirements, levels;
     commands: type, icon, charges, targets, tp, level, range, radius …) is
-    written, the rest of the record is kept. The first write backs the DAT up
-    to 114.DAT.base.
+    written, the rest of the record is kept. In the base install the first write
+    backs the DAT up to 114.DAT.base; with --pivot the edit goes to FFXI_PIVOT_DIR's
+    copy (copied in from the install when that folder has none).
 
     \b
     Examples:
@@ -142,11 +151,12 @@ def import_cmd(json_file, abilities, dry_run):
       xi ui spells import edits.json --dry-run
     """
     kind = 'command' if abilities else 'spell'
+    root = _root(pivot)
     fields = set(MT.KINDS[kind].fields) - {'id', 'menu_index'}
     if kind == 'spell':
         fields.add('levels')
     try:
-        menu = MT.load_menu(_root())
+        menu = MT.load_menu(root)
     except (OSError, MT.MenuError) as e:
         raise click.ClickException(f'{MT.MENU_DAT}: {e}')
     recs = menu.records(kind)
@@ -164,7 +174,7 @@ def import_cmd(json_file, abilities, dry_run):
         except MT.MenuError as e:
             raise click.ClickException(f'record {idx}: {e}')
         changed += 1
-    out = MT.save_menu(_root(), menu, dry_run=dry_run)
+    out = MT.save_menu(root, menu, dry_run=dry_run)
     if dry_run:
         click.echo(f'Dry run: would update {changed} {kind} records in {out}')
         return

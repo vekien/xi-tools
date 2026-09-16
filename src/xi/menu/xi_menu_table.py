@@ -8,9 +8,10 @@ file ends with an ``end\\0`` section of length 1. FFXiMain asks its resource lis
 type ``0x49`` (``mgc_``, spells: 0x64-byte records) and ``0x53`` (``comm``, commands:
 0x30-byte records) and reads fixed-size records straight from the payload, so a
 section may be any length; the client's loops decide how many records it *looks at*
-(0x400 spells, 0xB00 commands on the retail binary — the ceilings a client patch
-raises). Records are rotated per record (``xi.common.xi_menu_records``); the record
-id at ``+0`` equals the index, and an all-zero record is "empty".
+(0x400 spells, 0xB00 commands on the retail binary, and ``/ja`` resolves only commands
+below 0x700 — the ceilings a client plugin such as cexislots raises to 0x1000). Records
+are rotated per record (``xi.common.xi_menu_records``); the record id at ``+0`` equals
+the index, and an all-zero record is "empty".
 
 Decoded ``mgc_`` (spell) record, verified against a retail client and the server's
 ``spell_list``:
@@ -29,12 +30,14 @@ charges, target bits, TP cost, level, range, radius, AoE …).
 Names and help text are plain fixed-stride ``d_msg`` tables, block *i* ↔ record *i*:
 spells ``ROM/181/73`` (EN) / ``69`` (JP), help ``75`` / ``71``; commands ``72`` / ``68``,
 help ``74`` / ``70``. The spell tables have exactly 1024 blocks and grow here; the
-command tables already have 5888.
+command tables already have 5888. Each block holds one text in a fixed stride, which
+caps its length (``TEXT_LIMITS``).
 """
 from __future__ import annotations
 
 import re
 import struct
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -93,6 +96,9 @@ KINDS: Dict[str, Kind] = {
                     {'en': 'ROM/181/74.DAT', 'jp': 'ROM/181/70.DAT'}, COMMAND_FIELDS),
 }
 LANGS = ('en', 'jp')
+# `/ja` resolves only command ids below this on the retail binary, and the client treats
+# 0x700-0xAFF as the mount band (cexislots sites cmd.parser_ja_bound, cmd.band_filter_a).
+COMMAND_JA_LIMIT = 0x700
 
 
 class MenuError(Exception):
@@ -294,9 +300,28 @@ _DEF_KEYS = {'schema', 'name', 'description', 'like', 'id', 'menu_index', 'text'
 _TEXT_KEYS = {'name_en', 'name_jp', 'help_en', 'help_jp'}
 _NAME_RX = re.compile(r'[A-Za-z0-9_\-]+')
 
+# The longest text each name / help block holds, in cp932 bytes (a Japanese character
+# takes 2): the retail strides are 80 bytes for command names, 140 for spell names and
+# 256 for help, EN and JP alike, less the block's own header (``text_capacity``).
+TEXT_LIMITS = {'spell': {'name': 99, 'help': 215}, 'command': {'name': 39, 'help': 215}}
+
 
 def _is_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _text_problem(kind: str, key: str, value: str) -> Optional[str]:
+    what = 'name' if key.startswith('name') else 'help'
+    try:
+        n = len(value.encode('cp932'))
+    except UnicodeEncodeError:
+        return f'text.{key} has characters the client cannot show (it needs cp932 / Shift-JIS text)'
+    limit = TEXT_LIMITS[kind][what]
+    if n > limit:
+        label = 'name' if what == 'name' else 'help text'
+        return (f'text.{key} is {n} bytes; a {kind} {label} holds {limit} '
+                '(a Japanese character counts 2)')
+    return None
 
 
 def validate_definition(d) -> List[str]:
@@ -330,6 +355,8 @@ def validate_definition(d) -> List[str]:
                 errs.append(f'unknown text key {k!r}')
             elif not isinstance(v, str):
                 errs.append(f'text.{k} must be a string')
+            elif kind and (problem := _text_problem(kind, k, v)):
+                errs.append(problem)
     fields = d.get('fields', {})
     if not isinstance(fields, dict):
         errs.append('fields must be an object')
@@ -378,112 +405,216 @@ def build_record(kind: str, menu: MenuDat, d: dict, new_id: int, menu_index: Opt
     return write_fields(kind, recs[donor], fields)
 
 
-# ── files on an install ───────────────────────────────────────────────────────
+# ── the client's limits ───────────────────────────────────────────────────────
+
+def client_warning(kind: str, record_id: Optional[int] = None) -> Optional[str]:
+    """Why a client without a ceiling plugin will not handle ``record_id`` (None
+    when it will). ``None`` asks about ``auto``, which always takes a custom id."""
+    k = KINDS[kind]
+    reads = f'{kind}s 0-{k.custom_first - 1}'
+    if record_id is None or record_id >= k.custom_first:
+        which = 'auto takes an id' if record_id is None else f'{kind} id {record_id} is'
+        return (f'{which} past what the game reads ({reads}). It needs a client plugin such as '
+                f'cexislots to raise that limit; without it the {kind} will not show and things '
+                'might not work properly.')
+    if kind == 'command' and record_id >= COMMAND_JA_LIMIT:
+        return (f'command id {record_id} is in the band the game treats as mounts '
+                f'({COMMAND_JA_LIMIT}-{k.custom_first - 1}): /ja only takes ids below '
+                f'{COMMAND_JA_LIMIT} without a client plugin such as cexislots.')
+    return None
+
+
+# ── files in a DAT root ───────────────────────────────────────────────────────
 #
-# The client reads these tables through the XIPivot overlay when one is configured
-# (FFXI_PIVOT_DIR): an overlay copy shadows the base install's file, and a server that
-# ships edited 114.DAT and spell-name tables ships them there. So every read and
-# write goes to the copy the client will actually load — the overlay's when it has
-# one, else the install's — each with its own ``.base`` backup on first edit.
+# ``root`` is the folder a read or write goes to: the base install (FFXI_DIR) or another
+# DAT root such as FFXI_PIVOT_DIR (``xi dats build --pivot``). Nothing here picks a root
+# on its own. A root without its own copy of a table reads the install's, as the client
+# does, and a write copies that table into the root first. Edits in the install are in
+# place with a ``.base`` backup; another root gets none (xi_config's redirect rules).
 
-def dat_path(root, rom_path: str, for_write: bool = False) -> Path:
-    """The file the client loads for ``rom_path``: the pivot overlay's copy when
-    it exists, else ``root``'s. For a write with an overlay configured, a table
-    the overlay lacks is first copied into it from ``root`` and edited there, so
-    the base install stays pristine (its DATs are often read-only anyway)."""
-    import shutil
-    from xi.xi_config import FFXI_PIVOT_DIR
-    rel = Path(*rom_path.split('/'))
-    base = Path(root) / rel
-    if FFXI_PIVOT_DIR:
-        cand = Path(FFXI_PIVOT_DIR) / rel
-        if cand.exists():
-            return cand
-        if for_write and base.exists():
-            cand.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(base, cand)
-            return cand
-    return base
+def _install_file(rom_path: str) -> Path:
+    from xi.xi_config import FFXI_DIR
+    return Path(FFXI_DIR) / Path(*rom_path.split('/'))
 
 
-def menu_path(root, for_write: bool = False) -> Path:
-    return dat_path(root, MENU_DAT, for_write)
+@contextmanager
+def _into(root):
+    """Point xi_config's DAT read/write redirect at ``root`` for the block."""
+    import xi.xi_config as cfg
+    old = cfg._REDIRECT_DIR
+    cfg._REDIRECT_DIR = str(Path(root).resolve())
+    try:
+        yield
+    finally:
+        cfg._REDIRECT_DIR = old
+
+
+def dat_path(root, rom_path: str) -> Path:
+    """The copy of ``rom_path`` a read in ``root`` uses: ``root``'s own, else the install's."""
+    from xi.xi_config import read_path_for
+    with _into(root):
+        return read_path_for(_install_file(rom_path))
+
+
+def target_path(root, rom_path: str) -> Path:
+    """Where a write of ``rom_path`` into ``root`` lands (nothing is copied)."""
+    from xi.xi_config import output_path_for
+    with _into(root):
+        return output_path_for(_install_file(rom_path))
+
+
+def _write(root, rom_path: str, data: bytes) -> Path:
+    from xi.xi_config import editable_dat
+    with _into(root):
+        out = editable_dat(_install_file(rom_path), fresh=False)
+    out.write_bytes(data)
+    return out
+
+
+def menu_path(root) -> Path:
+    return dat_path(root, MENU_DAT)
 
 
 def load_menu(root) -> MenuDat:
-    """Parse 114.DAT from an install (mirror-aware read, like the other tables)."""
-    from xi.xi_config import read_path_for
-    return parse(read_path_for(menu_path(root)).read_bytes())
+    """Parse 114.DAT as ``root`` sees it."""
+    return parse(menu_path(root).read_bytes())
 
 
 def save_menu(root, menu: MenuDat, dry_run: bool = False) -> Path:
-    """Write 114.DAT back in place (``.base`` backup on first edit, later edits
-    layer). Returns the path that was (or would be) written."""
-    from xi.xi_config import editable_dat
-    p = menu_path(root, for_write=not dry_run)
+    """Write 114.DAT into ``root`` (later builds layer on it). Returns the path
+    written, or the one a dry run would write."""
     if dry_run:
-        return p
-    out = editable_dat(p, fresh=False)
-    out.write_bytes(menu.serialize())
-    return out
+        return target_path(root, MENU_DAT)
+    return _write(root, MENU_DAT, menu.serialize())
 
 
-def set_string(root, rom_path: str, idx: int, text: str, dry_run: bool = False) -> Path:
-    """Set block ``idx`` of a fixed-stride name/help table to ``text``, growing
-    the table past its retail count by cloning a real block's shape. Blocks in
-    between are filled with '.' like retail's unnamed rows."""
-    from xi.xi_config import editable_dat, read_path_for
-    p = dat_path(root, rom_path, for_write=not dry_run)
-    src = read_path_for(p)
-    if not src.exists():
+def string_tables(kind: str) -> List[str]:
+    """The name and help tables a record of ``kind`` is written to."""
+    k = KINDS[kind]
+    return sorted([*k.names.values(), *k.help.values()])
+
+
+def text_capacity(block: bytes) -> int:
+    """The longest text (cp932 bytes) sub-string 0 of a fixed-stride block holds."""
+    subs = D._parse_block(bytearray(block))
+    fixed = 4 + 8 * len(subs) + sum(len(s['raw']) for s in subs[1:]) + 4 + D.META_LEN
+    return max(0, (len(block) - fixed) // 4 * 4 - 1)
+
+
+def _table(root, rom_path: str) -> D.DmsgTable:
+    p = dat_path(root, rom_path)
+    if not p.exists():
         raise MenuError(f'string table not found: {p}')
-    t = D.parse(src.read_bytes())
+    t = D.parse(p.read_bytes())
     if t.variable:
         raise MenuError(f'{rom_path} is a variable-layout table; names are fixed-stride')
+    return t
+
+
+def _put_text(t: D.DmsgTable, rom_path: str, idx: int, text: str) -> None:
     template = bytearray(t.blocks[0])
     while len(t.blocks) <= idx:
         t.blocks.append(bytearray(D.set_text(template, 0, '.')))
-    t.blocks[idx] = bytearray(D.set_text(t.blocks[idx], 0, text))
+    try:
+        t.blocks[idx] = bytearray(D.set_text(t.blocks[idx], 0, text))
+    except D.DmsgError:
+        try:
+            n = len(text.encode('cp932'))
+        except UnicodeEncodeError:
+            raise MenuError(f'{rom_path}: {text!r} has characters the client cannot show '
+                            '(it needs cp932 / Shift-JIS text)')
+        raise MenuError(f'{rom_path}: {text!r} is {n} bytes; block {idx} holds '
+                        f'{text_capacity(t.blocks[idx])}')
+
+
+def set_string(root, rom_path: str, idx: int, text: str, dry_run: bool = False) -> Path:
+    """Set block ``idx`` of a fixed-stride name/help table in ``root`` to ``text``,
+    growing the table past its retail count by cloning a real block's shape. Blocks in
+    between hold '.' like retail's unnamed rows. Text that does not fit raises
+    MenuError and nothing is written."""
+    t = _table(root, rom_path)
+    _put_text(t, rom_path, idx, text)
     if dry_run:
-        return p
-    out = editable_dat(p, fresh=False)
-    out.write_bytes(D.serialize(t))
-    return out
+        return target_path(root, rom_path)
+    return _write(root, rom_path, D.serialize(t))
 
 
 def set_texts(kind: str, root, idx: int, text: dict, dry_run: bool = False) -> List[Path]:
-    """Names and help for a record in every language table (JP falls back to
-    EN, help to '.' so a grown table never shows garbage)."""
+    """Names and help for a record in every language table (JP falls back to EN,
+    help to '.' so a grown table never shows garbage). Every table is checked before
+    any is written, so text that does not fit leaves all of them as they were."""
     k = KINDS[kind]
-    written = []
     name_en = text['name_en']
     help_en = text.get('help_en') or '.'
+    edits = []
     for lang in LANGS:
-        name = text.get(f'name_{lang}') or name_en
-        helptext = text.get(f'help_{lang}') or help_en
-        written.append(set_string(root, k.names[lang], idx, name, dry_run))
-        written.append(set_string(root, k.help[lang], idx, helptext, dry_run))
-    return written
+        for rom, value in ((k.names[lang], text.get(f'name_{lang}') or name_en),
+                           (k.help[lang], text.get(f'help_{lang}') or help_en)):
+            t = _table(root, rom)
+            _put_text(t, rom, idx, value)
+            edits.append((rom, t))
+    if dry_run:
+        return [target_path(root, rom) for rom, _ in edits]
+    return [_write(root, rom, D.serialize(t)) for rom, t in edits]
 
 
-def clear_record(kind: str, root, idx: int, dry_run: bool = False) -> List[Path]:
-    """Undo: empty the record and put '.' back in every string table."""
-    k = KINDS[kind]
-    menu = load_menu(root)
-    written = []
+def capture_record(kind: str, root, idx: int, menu: Optional[MenuDat] = None) -> Optional[dict]:
+    """What a write at ``idx`` would replace, for ``restore_record``: the decoded record
+    and each name/help block as hex, or None when the row is empty or past the table."""
+    recs = (menu or load_menu(root)).records(kind)
+    if idx >= len(recs) or is_empty(recs[idx]):
+        return None
+    blocks = {}
+    for rom in string_tables(kind):
+        t = _table(root, rom)
+        if idx < len(t.blocks):
+            blocks[rom] = bytes(t.blocks[idx]).hex()
+    return {'record': recs[idx].hex(), 'blocks': blocks}
+
+
+def restore_row(kind: str, menu: MenuDat, idx: int, replaced: Optional[dict] = None) -> None:
+    """Put back the record ``replaced`` holds at ``idx``, or empty the row."""
     if idx < menu.count(kind):
-        menu.set_record(kind, idx, b'\0' * k.stride)
-        written.append(save_menu(root, menu, dry_run))
-    for lang in LANGS:
-        for rom in (k.names[lang], k.help[lang]):
-            written.append(set_string(root, rom, idx, '.', dry_run))
+        rec = bytes.fromhex(replaced['record']) if replaced else b'\0' * KINDS[kind].stride
+        menu.set_record(kind, idx, rec)
+
+
+def restore_texts(kind: str, root, idx: int, replaced: Optional[dict] = None,
+                  dry_run: bool = False) -> List[Path]:
+    """Put back the name/help blocks ``replaced`` holds at ``idx``, or '.' in each.
+    Tables ``root`` has no copy of, and rows past a table's end, are left alone."""
+    blocks = (replaced or {}).get('blocks') or {}
+    written = []
+    for rom in string_tables(kind):
+        if not target_path(root, rom).exists():
+            continue
+        t = _table(root, rom)
+        if idx >= len(t.blocks):
+            continue
+        if rom in blocks:
+            t.blocks[idx] = bytearray.fromhex(blocks[rom])
+        else:
+            _put_text(t, rom, idx, '.')
+        written.append(target_path(root, rom) if dry_run else _write(root, rom, D.serialize(t)))
     return written
+
+
+def restore_record(kind: str, root, idx: int, replaced: Optional[dict] = None,
+                   dry_run: bool = False) -> List[Path]:
+    """Undo a record in ``root``: put back what the build replaced (``capture_record``),
+    or empty the row and put '.' back in every name/help table. A root with no copy of
+    a table is left alone rather than given one."""
+    written = []
+    if target_path(root, MENU_DAT).exists():
+        menu = load_menu(root)
+        restore_row(kind, menu, idx, replaced)
+        written.append(save_menu(root, menu, dry_run))
+    return written + restore_texts(kind, root, idx, replaced, dry_run)
 
 
 def read_names(kind: str, root, lang: str = 'en') -> List[str]:
-    """[name] indexed by record id from the install's table ('' when missing)."""
-    from xi.xi_config import read_path_for
-    p = read_path_for(dat_path(root, KINDS[kind].names[lang]))
+    """[name] indexed by record id, as ``root`` sees the table ('' when missing)."""
+    p = dat_path(root, KINDS[kind].names[lang])
     if not p.exists():
         return []
     t = D.parse(p.read_bytes())

@@ -161,6 +161,29 @@ def test_validator_names_the_field():
     assert MT.validate_definition({"schema": "xi.nope.v1"})[0].startswith("schema must be")
 
 
+def test_validator_checks_text_fits_its_block():
+    # command names hold 39 bytes, spell names 99, help 215 — a Japanese character counts 2
+    ok = dict(COMMAND_EXAMPLE, text={"name_en": "x" * 39, "help_en": "y" * 215})
+    assert MT.validate_definition(ok) == []
+    long_name = dict(COMMAND_EXAMPLE, text={"name_en": "x" * 40})
+    assert any("text.name_en is 40 bytes; a command name holds 39" in e for e in MT.validate_definition(long_name))
+    assert MT.validate_definition(dict(SPELL_EXAMPLE, text={"name_en": "x" * 99})) == []
+    assert MT.validate_definition(dict(SPELL_EXAMPLE, text={"name_en": "x", "help_en": "y" * 216}))
+    jp = dict(COMMAND_EXAMPLE, text={"name_en": "Ok", "name_jp": "あ" * 20})    # 40 bytes in cp932
+    assert any("text.name_jp is 40 bytes" in e for e in MT.validate_definition(jp))
+    emoji = dict(SPELL_EXAMPLE, text={"name_en": "Fire \U0001F525"})
+    assert any("cannot show" in e for e in MT.validate_definition(emoji))
+
+
+def test_client_warning_names_the_plugin():
+    assert MT.client_warning("spell", 1023) is None
+    assert "cexislots" in MT.client_warning("spell", 1024) and "spells 0-1023" in MT.client_warning("spell", 1024)
+    assert MT.client_warning("command", 1791) is None
+    assert "mounts" in MT.client_warning("command", 1792)                   # /ja stops at 0x700
+    assert "commands 0-2815" in MT.client_warning("command", 2816)
+    assert MT.client_warning("spell").startswith("auto takes an id past what the game reads")
+
+
 def test_load_definition_rejects_bad_file(tmp_path: Path):
     p = tmp_path / "x.spell.json"
     p.write_text(json.dumps(dict(SPELL_EXAMPLE, like="four")), encoding="utf-8")
@@ -193,11 +216,11 @@ def test_server_snippet_mentions_ids_and_overrides():
     assert "INSERT INTO `abilities`" in sql and "SELECT 2304, 'war_cry', `job`, 30" in sql and "`abilityId` = 35" in sql
 
 
-# ── files on an install ────────────────────────────────────────────────────────
+# ── files in a DAT root ────────────────────────────────────────────────────────
 
 def test_strings_grow_and_clear(tmp_path: Path, monkeypatch):
     import xi.xi_config as cfg
-    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", None, raising=False)   # no overlay: stay inside tmp_path
+    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", None, raising=False)
     root = install(tmp_path / "game")
     monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
     assert MT.read_names("spell", root)[3] == "Name 3"
@@ -218,36 +241,70 @@ def test_strings_grow_and_clear(tmp_path: Path, monkeypatch):
     m.set_record("spell", 4095, spell_record(4095))
     MT.save_menu(root, m)
     assert not MT.is_empty(MT.load_menu(root).records("spell")[4095])
-    MT.clear_record("spell", root, 4095)
+    MT.restore_record("spell", root, 4095)
     assert MT.is_empty(MT.load_menu(root).records("spell")[4095])
     assert MT.read_names("spell", root)[4095] == "."
     assert (MT.menu_path(root).with_name("114.DAT.base")).exists()
 
 
-def test_overlay_copy_wins_when_configured(tmp_path: Path, monkeypatch):
-    """With a pivot overlay configured, the copy the client loads is the overlay's
-    (when it has one); tables the overlay lacks stay in the install."""
+def test_text_that_does_not_fit_writes_nothing(tmp_path: Path, monkeypatch):
     import xi.xi_config as cfg
-    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", None, raising=False)
+    root = install(tmp_path / "game")                    # the synthetic name tables are 80-byte blocks
+    monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
+    before = {rom: (root / rom).read_bytes() for rom in MT.string_tables("spell")}
+    with pytest.raises(MT.MenuError) as e:
+        MT.set_texts("spell", root, 4095, {"name_en": "x" * 40, "help_en": "fits"})
+    assert "40 bytes; block 4095 holds 39" in str(e.value)
+    assert {rom: (root / rom).read_bytes() for rom in MT.string_tables("spell")} == before
+    assert not list(root.rglob("*.base"))
+    assert MT.text_capacity(D.parse(before["ROM/181/75.DAT"]).blocks[0]) == 215
+
+
+def test_capture_and_restore_put_back_a_replaced_row(tmp_path: Path, monkeypatch):
+    import xi.xi_config as cfg
+    root = install(tmp_path / "game")
+    monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
+    original = MT.load_menu(root).records("spell")[5]
+    replaced = MT.capture_record("spell", root, 5)
+    assert replaced["record"] == original.hex() and set(replaced["blocks"]) == set(MT.string_tables("spell"))
+    assert MT.capture_record("spell", root, 4095) is None            # nothing there to keep
+    m = MT.load_menu(root)
+    m.set_record("spell", 5, spell_record(5, mp=99))
+    MT.save_menu(root, m)
+    MT.set_texts("spell", root, 5, {"name_en": "Testspell"})
+    MT.restore_record("spell", root, 5, replaced)
+    assert MT.load_menu(root).records("spell")[5] == original
+    assert MT.read_names("spell", root)[5] == "Name 5" and MT.read_names("spell", root, "jp")[5] == "Name 5"
+
+
+def test_pivot_root_is_used_only_when_asked(tmp_path: Path, monkeypatch):
+    """Reads and writes go to the root they are given. A configured FFXI_PIVOT_DIR
+    changes nothing by itself; given as the root, its own copy is read and written,
+    and a table it lacks reads the install's and is copied in (without .base) on write."""
+    import xi.xi_config as cfg
     root = install(tmp_path / "game")
     pivot = tmp_path / "pivot"
     (pivot / "ROM" / "118").mkdir(parents=True)
     (pivot / "ROM" / "118" / "114.DAT").write_bytes(menu_dat(9, 6))     # one more spell than the install
     monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
     monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot), raising=False)
-    assert MT.menu_path(root) == pivot / "ROM" / "118" / "114.DAT"
-    assert MT.load_menu(root).count("spell") == 9
-    assert MT.dat_path(root, "ROM/181/73.DAT") == root / "ROM" / "181" / "73.DAT"
-    m = MT.load_menu(root)
+    assert MT.menu_path(root) == root / "ROM" / "118" / "114.DAT"
+    assert MT.load_menu(root).count("spell") == 8
+    assert MT.menu_path(pivot) == pivot / "ROM" / "118" / "114.DAT"
+    assert MT.load_menu(pivot).count("spell") == 9
+    assert MT.dat_path(pivot, "ROM/181/73.DAT") == root / "ROM" / "181" / "73.DAT"   # reads fall back
+    m = MT.load_menu(pivot)
     m.set_record("spell", 4095, spell_record(4095))
-    assert MT.save_menu(root, m) == pivot / "ROM" / "118" / "114.DAT"
-    assert (pivot / "ROM" / "118" / "114.DAT.base").exists()
-    assert MT.load_menu(root).count("spell") == 4096
-    assert MT.parse((root / "ROM" / "118" / "114.DAT").read_bytes()).count("spell") == 8   # install untouched
-    # A table the overlay lacks is copied into it for a write; the install's copy stays pristine.
-    written = MT.set_string(root, "ROM/181/73.DAT", 4095, "Testspell")
+    assert MT.save_menu(pivot, m) == pivot / "ROM" / "118" / "114.DAT"
+    assert MT.load_menu(pivot).count("spell") == 4096
+    assert MT.load_menu(root).count("spell") == 8                               # install untouched
+    written = MT.set_string(pivot, "ROM/181/73.DAT", 4095, "Testspell")
     assert written == pivot / "ROM" / "181" / "73.DAT"
-    assert (pivot / "ROM" / "181" / "73.DAT.base").exists()
-    assert MT.read_names("spell", root)[4095] == "Testspell"
+    assert MT.read_names("spell", pivot)[4095] == "Testspell"
     assert len(D.parse((root / "ROM" / "181" / "73.DAT").read_bytes()).blocks) == 8
-    assert MT.dat_path(root, "ROM/181/69.DAT") == root / "ROM" / "181" / "69.DAT"           # reads still fall back
+    assert not list(pivot.rglob("*.base")) and not list(root.rglob("*.base"))
+    # undo in a root leaves tables it has no copy of alone instead of copying them in
+    MT.restore_record("spell", pivot, 4095)
+    assert MT.is_empty(MT.load_menu(pivot).records("spell")[4095])
+    assert MT.read_names("spell", pivot)[4095] == "."
+    assert not (pivot / "ROM" / "181" / "69.DAT").exists()

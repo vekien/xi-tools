@@ -13,17 +13,29 @@ are independent id spaces that only the server joins (`spell_list.animation`,
 
 ## Where the client's ceilings are
 
-| kind | section | record | retail rows | the client iterates | custom ids here |
+| kind | section | record | retail rows | an unpatched client reads | custom ids here |
 |---|---|---|---|---|---|
 | spell | `mgc_` (resource type 0x49) | 0x64 bytes | 1024 (ids 0–1023) | 0x400 | 1024–4095 |
-| command | `comm` (resource type 0x53) | 0x30 bytes | 2816 (ids 0–2815) | 0xB00 | 2816–4095 |
+| command | `comm` (resource type 0x53) | 0x30 bytes | 2816 (ids 0–2815) | 0xB00; `/ja` only below 0x700 | 2816–4095 |
 
 The section may be any length — FFXiMain reads records straight from the loaded file
-and its loops decide how many it looks at. So a **retail client shows nothing for the
-custom band**; it needs its loop bounds, known-list buffers and recast tables raised
-to 0x1000 by a runtime patch (an Ashita plugin that patches the client's tables
-in memory). The DAT side built here is the same either way, and a client without
-the patch is simply unaffected: the extra rows sit past everything it reads.
+and its loops decide how many it looks at. So a **client without a patch shows nothing
+for the custom band**: its loop bounds, known-list buffers and recast tables have to be
+raised to 0x1000 by a client plugin such as CatsEyeXI's cexislots, which rewrites them in
+memory at load (109 sites; what they are:
+[../dats/ROM_118_114.md](../dats/ROM_118_114.md#ffximain-evidence)). The DAT side built
+here is the same either way, and a client without the plugin is simply unaffected: the
+extra rows sit past everything it reads. `prepare`, the `dats new` wizard and every
+build print a ⚠ for an id past these limits.
+
+Commands have a second limit on the retail binary: `/ja` resolves only ids below 1792
+(0x700), and the client treats 1792–2815 as mounts. An id there (only with `--force`)
+gets its own warning.
+
+A static patch of `FFXiMain.dll` could make the same changes, the way `xi ftable expand
+gear` patches the gear tables, but none exists: gear needed one data table rewritten,
+while this is all 109 sites in code, including a relocated recast array and three
+replaced functions, and a client update would undo it.
 
 Ids are allocated **top-down from 4095** so they can never meet anything retail adds
 from the bottom. Ids inside the retail band are refused unless `--force` (a retail
@@ -82,7 +94,19 @@ flags, the donor's job table) is kept. `fields` are the decoded record fields:
 | `level`, `range`, `radius`, `aoe`, `tp_modifier` | `+0x0F`–`+0x15` u8 | |
 
 Texts: `name_en` is required; `name_jp` falls back to it, help to `.` (what retail
-puts in unnamed rows), so a grown table never shows garbage in either language.
+puts in unnamed rows), so a grown table never shows garbage in either language. Each
+text has to fit its fixed-size block, counted in cp932 bytes (a Japanese character
+takes 2):
+
+| text | tables | holds |
+|---|---|---|
+| command name | `ROM/181/72`, `68` (80-byte blocks) | 39 bytes |
+| spell name | `ROM/181/73`, `69` (140-byte blocks) | 99 bytes |
+| help, either kind | `ROM/181/74`, `70`, `75`, `71` (256-byte blocks) | 215 bytes |
+
+A longer text is refused when the definition is read (`prepare`, the wizard), and the
+build checks the live tables again before it writes anything, so a text that does not
+fit leaves `114.DAT` and every name table as they were.
 
 ## Commands
 
@@ -90,23 +114,29 @@ puts in unnamed rows), so a grown table never shows garbage in either language.
 uv run xi dats prepare exports/menu/testspell.spell.json --project testspell --replace   # --type spell inferred
 uv run xi dats build testspell --dry-run       # shows the id it would take + the server SQL
 uv run xi dats build testspell                 # writes 114.DAT + names/help, records the id
+uv run xi dats build testspell --pivot         # the same into FFXI_PIVOT_DIR instead of FFXI_DIR
 uv run xi dats changelog --project testspell
-uv run xi dats undo testspell                  # empties the record, puts '.' back in the names
-uv run xi dats new                             # wizard: "Spell menu record" / "Command menu record"
+uv run xi dats undo testspell                  # empties the row (or puts back what --force replaced)
+uv run xi dats new [--pivot]                   # wizard: "Spell menu record" / "Command menu record"
 ```
 
 `prepare` flags: `--record-id N` (instead of auto), `--menu-index N` (spells). The
 build records `result.record_id` (and `menu_index`) on the action; a rebuild lands on
 the same id, and `--replace` on a re-prepare keeps it unless a flag changed the
-target. `--force` allows an id inside the retail band or one that already holds a
-record.
+target. When the id does change, the next build into the same folder puts the old row
+back before writing the new one. `--force` allows an id inside the retail band or one
+that already holds a record; the build keeps what it writes over on `result.replaced`
+(the record and each name/help block, as hex) and `undo` puts it back.
 
-What a build writes, in place with `.base` backups on the first edit (later builds
-layer on the same files). Each file goes to the copy the client will actually load:
-when `FFXI_PIVOT_DIR` is configured and the XIPivot overlay carries that ROM path,
-the overlay's copy is read and written (a server that ships edited `114.DAT` and
-spell-name tables ships them there); tables the overlay lacks stay under
-`FFXI_DIR`. Close the client first — it holds these files open.
+Where a build writes: the base install (`FFXI_DIR`) by default, in place with `.base`
+backups on the first edit (later builds layer on the same files). With `--pivot` it
+writes `FFXI_PIVOT_DIR` instead — that folder's own copy of a table when it has one,
+otherwise the install's copy is copied in first and edited there, without `.base`. A
+configured `FFXI_PIVOT_DIR` is never used without the flag. The target is recorded on
+the action (`result.targets`), and `undo`, `package` and `release` follow it. A client
+that loads `FFXI_PIVOT_DIR` through XIPivot reads that folder's `114.DAT` over the
+install's, so test such a client with a `--pivot` build. Close the client first — it
+holds these files open.
 
 - `ROM/118/114.DAT` — the section grown to hold the id, the record encoded with the
   per-record rotation, every other byte of the file untouched (`xi.menu.xi_menu_table`).
@@ -117,8 +147,9 @@ spell-name tables ships them there); tables the overlay lacks stay under
   recast, level). A template — put the row where your server keeps custom content and
   set its `animation` to the number the `ability` action took.
 
-`xi dats package` / `release` ship `114.DAT` and the edited name tables with the
-project's other DATs.
+`xi dats package` (reading from where the project was built) and `release` ship
+`114.DAT` and the edited name tables with the project's other DATs; `release` stages the
+DATs of `--pivot` builds into the release's pivot folder.
 
 ## Reading and editing what is there
 
@@ -129,6 +160,9 @@ uv run xi ui spells export -o spells.json       # decoded fields per named recor
 uv run xi ui spells import edits.json           # write edited fields back (mp, levels, …)
 uv run xi ui layout mnc2-pos "ROM/118/114.DAT" --block mgc_ --records --limit 20
 ```
+
+`search`, `export` and `import` read and write the base install; `--pivot` uses
+`FFXI_PIVOT_DIR`'s copies instead.
 
 ## Format notes
 

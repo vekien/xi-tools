@@ -45,19 +45,24 @@
    "required": [
     "name_en"
    ],
+   "description": "Names hold 99 cp932 bytes and help 215 (a Japanese character takes 2); maxLength assumes one byte per character, the loader checks bytes.",
    "properties": {
     "name_en": {
      "type": "string",
-     "minLength": 1
+     "minLength": 1,
+     "maxLength": 99
     },
     "name_jp": {
-     "type": "string"
+     "type": "string",
+     "maxLength": 99
     },
     "help_en": {
-     "type": "string"
+     "type": "string",
+     "maxLength": 215
     },
     "help_jp": {
-     "type": "string"
+     "type": "string",
+     "maxLength": 215
     }
    }
   },

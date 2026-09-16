@@ -300,7 +300,7 @@ def _set_target_root(root: Path | None) -> None:
 
 
 # Build/package target names -> (label, config var name).
-_TARGET_LABELS = {"pivot": "Pivot overlay", "hd": "HD overlay", "dir": "Base install"}
+_TARGET_LABELS = {"pivot": "Pivot folder", "hd": "HD overlay", "dir": "Base install"}
 
 
 def _target_root(target: str) -> Path:
@@ -369,34 +369,75 @@ def _patch_raw_table(ft: Path, vt: Path, file_id: int, ftval: int, vt_val: int) 
     with open(vt, "r+b") as f:
         f.seek(file_id)
         f.write(bytes([vt_val & 0xFF]))
+    from xi.ftable.xi_core import forget_tables
+    forget_tables()
+
+
+def _table_holds(ft: Path, vt: Path, file_id: int) -> bool:
+    """Both tables exist and are large enough to carry ``file_id``."""
+    return (ft.exists() and vt.exists()
+            and ft.stat().st_size >= (file_id + 1) * 2 and vt.stat().st_size >= file_id + 1)
 
 
 def patch_launcher_tables(file_id: int, ftval: int, rom: int) -> None:
-    """Register file_id -> placement in the active target's base + ROM{rom} tables.
-    A target with no FTABLE (e.g. the HD overlay) is a DAT-only drop — the file_id
-    registration comes from another target's tables — so skip patching there."""
+    """Register file_id -> placement in the active target, in the table pair the client
+    resolves it through (xi.ftable.xi_core.resolve_dat_in_root).
+
+    A ROM{n} placement registers in the target's ROM{n} pair: the client honours that
+    entry over the main FTABLE/VTABLE, and reads a pivot folder's ROM{n} pair in place
+    of the install's. The base install's main pair gets the same entry when it is large
+    enough, for the tools that read only that pair; a retail-sized main FTABLE is left
+    alone instead of failing the build, and a pivot folder's main pair is never touched —
+    the client never reads it.
+
+    A ROM/ placement registers in the main pair, which counts only in the base install;
+    ``_check_registrable`` refuses one that would need a new entry anywhere else."""
     root = _active_build_root()
-    if not (root / "FTABLE.DAT").exists():
+    in_install = _root_target_name(root) == "dir"
+    main_ft, main_vt = root / "FTABLE.DAT", root / "VTABLE.DAT"
+    if rom == 1:
+        if in_install:
+            _patch_raw_table(main_ft, main_vt, file_id, ftval, rom)
         return
-    _patch_raw_table(root / "FTABLE.DAT", root / "VTABLE.DAT", file_id, ftval, rom)
-    if rom != 1:
-        _patch_raw_table(root / f"ROM{rom}" / f"FTABLE{rom}.DAT",
-                         root / f"ROM{rom}" / f"VTABLE{rom}.DAT", file_id, ftval, rom)
+    rom_ft, rom_vt = root / f"ROM{rom}" / f"FTABLE{rom}.DAT", root / f"ROM{rom}" / f"VTABLE{rom}.DAT"
+    if not (rom_ft.exists() and rom_vt.exists()):
+        raise click.ClickException(
+            f"{root} has no ROM{rom} tables, so file_id {file_id:,} cannot be registered there. "
+            f"Run `xi ftable expand` on it, or build into a folder that has ROM{rom}/FTABLE{rom}.DAT.")
+    _patch_raw_table(rom_ft, rom_vt, file_id, ftval, rom)
+    if in_install and _table_holds(main_ft, main_vt, file_id):
+        try:
+            _patch_raw_table(main_ft, main_vt, file_id, ftval, rom)
+        except PermissionError:
+            pass   # the copy for main-pair readers only; the ROM{rom} entry is registered
 
 
 def _patch_active_tables(file_id: int, ftval: int, rom: int) -> None:
     patch_launcher_tables(file_id, ftval, rom)
 
 
+def _check_registrable(file_id: int, place_rel: str, rom: int, action_id: str) -> None:
+    """Refuse, before anything is written, a ROM/ placement outside the base install
+    that needs a new main FTABLE entry: the client reads the main pair only from the
+    install, so an entry in a pivot folder would never count. When the client already
+    resolves file_id to that path, the DAT alone overrides the file and passes."""
+    if rom != 1 or _root_target_name(_active_build_root()) == "dir":
+        return
+    from xi.ftable.xi_core import resolve_dat_in_root
+    from xi.xi_config import FFXI_DIR
+    current, _ = resolve_dat_in_root(FFXI_DIR, file_id)
+    if (current or "").upper() != place_rel.upper():
+        raise click.ClickException(
+            f"{action_id}: {place_rel} is a ROM/ placement, which registers in the main FTABLE — and "
+            "the client reads that only from the base install, never from the pivot folder. Build it "
+            "without --pivot, or place it under ROM10.")
+
+
 def _active_placement(file_id: int) -> str | None:
-    """What file_id is registered to in the active target's tables (collision check)."""
-    from xi.ftable.xi_core import resolve_dat
-    root = _active_build_root()
-    ft, vt = root / "FTABLE.DAT", root / "VTABLE.DAT"
-    if not ft.exists() or not vt.exists():
-        return None
-    dat, _ = resolve_dat(ft.read_bytes(), vt.read_bytes(), file_id)
-    return dat
+    """What file_id resolves to for a client reading through the active target (the
+    collision check): its ROM{n} pair first, then the install's main pair."""
+    from xi.ftable.xi_core import resolve_dat_in_root
+    return resolve_dat_in_root(_active_build_root(), file_id)[0]
 
 
 def _current_launcher_placement(file_id: int) -> str | None:
@@ -763,6 +804,8 @@ def _build_mesh(action: dict, manifest_path: Path, manifest: dict, force: bool =
         )
     rom, subdir, file_idx = _parse_rom_placement(place_rel)
     out_dat = _pivot_build_dir() / Path(*place_rel.split("/"))
+    if model.get("model_id") is not None:
+        _check_registrable(int(model["model_id"]) + MODEL_FILE_OFFSET, place_rel, rom, action["id"])
 
     result = {
         "id": action["id"], "type": "mesh", "output": str(out_dat),
@@ -858,6 +901,7 @@ def _place_raw_dat_in_build(src: Path, place_rel: str, file_id: int, *, force: b
     a collision is reported rather than raised."""
     place_rel = _rom_rel(place_rel)
     rom, subdir, file_idx = _parse_rom_placement(place_rel)
+    _check_registrable(file_id, place_rel, rom, action_id)
     out_dat = _pivot_build_dir() / Path(*place_rel.split("/"))
     ftval = (subdir << 7) | (file_idx & 0x7F)
     existing = _active_placement(file_id)
@@ -1019,8 +1063,8 @@ def _is_own_previous(action: dict, dat: str) -> bool:
 # retail record to clone and the fields/texts to change; `dats build` decides the
 # id against the live table (ids above the retail band only), writes the record
 # into the enlarged section, the names/help into the d_msg tables, and emits a
-# server row template. Library: xi.menu.xi_menu_table. The client only iterates
-# past the retail band with its ceilings raised (docs/menu/records.md).
+# server row template. Library: xi.menu.xi_menu_table. The client only reads past
+# the retail band with a ceiling plugin such as cexislots (docs/menu/records.md).
 
 RECORD_TYPES = ("spell", "command")
 
@@ -1059,6 +1103,8 @@ def _record_result(built: dict | None) -> dict:
            "dat": b.get("dat"), "strings": b.get("strings") or [], "server": b.get("server")}
     if b.get("menu_index") is not None:
         res["menu_index"] = b["menu_index"]
+    if b.get("replaced"):
+        res["replaced"] = b["replaced"]   # a forced overwrite's old row, for undo
     return res
 
 
@@ -1076,6 +1122,17 @@ def _next_record_id(kind: str, action: dict, menu) -> int:
         raise click.ClickException(str(e))
 
 
+def _root_target_name(root: Path) -> str | None:
+    """The build target (`dir` / `pivot` / `hd`) whose folder is ``root``."""
+    for name in ("dir", "pivot", "hd"):
+        try:
+            if _target_root(name).resolve() == Path(root).resolve():
+                return name
+        except click.ClickException:
+            continue
+    return None
+
+
 def _build_record(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
                   dry_run: bool = False) -> dict:
     from xi.menu import xi_menu_table as MT
@@ -1089,45 +1146,57 @@ def _build_record(action: dict, manifest_path: Path, manifest: dict, force: bool
     except MT.MenuError as e:
         raise click.ClickException(str(e))
     target = action.get("target") or {}
+    prev = action.get("result") or {}
+    prev_id = prev.get("record_id") if isinstance(prev.get("record_id"), int) else None
     root = _active_build_root()
-    with _package_config(root, root):
-        try:
-            menu = MT.load_menu(root)
-        except (OSError, MT.MenuError) as e:
-            raise click.ClickException(f"{action['id']}: cannot read {MT.MENU_DAT} under {root}: {e}")
-        wanted = target.get("id", "auto")
-        record_id = _next_record_id(kind, action, menu) if wanted in (None, "auto") else int(wanted)
-        k = MT.KINDS[kind]
-        if record_id < k.custom_first and not force:
-            raise click.ClickException(
-                f"{action['id']}: {kind} id {record_id} is inside the retail band (< {k.custom_first}); "
-                "a retail update could take it. Pass --force to use it anyway.")
-        if record_id >= k.ceiling:
-            raise click.ClickException(f"{action['id']}: {kind} id {record_id} is past the client ceiling {k.ceiling - 1}.")
-        recs = menu.records(kind)
-        occupied = record_id < len(recs) and not MT.is_empty(recs[record_id]) \
-            and (action.get("result") or {}).get("record_id") != record_id
-        if occupied and not force:
-            raise click.ClickException(
-                f"{action['id']}: {kind} id {record_id} already holds a record. Pass --force to overwrite it.")
-        mi = target.get("menu_index", "auto") if kind == "spell" else None
-        menu_index = None if mi in (None, "auto") else int(mi)
-        if menu_index is None and kind == "spell":
-            # A rebuild keeps the slot it took (else "next free" would count its own record).
-            prev_mi = (action.get("result") or {}).get("menu_index")
-            if isinstance(prev_mi, int) and (action.get("result") or {}).get("record_id") == record_id:
-                menu_index = prev_mi
-        try:
-            rec = MT.build_record(kind, menu, d, record_id, menu_index)
-        except MT.MenuError as e:
-            raise click.ClickException(f"{action['id']}: {e}")
+    # Only a build into this same folder counts as "ours" here: another target may
+    # hold something else at that id.
+    built_here = _root_target_name(root) in (prev.get("targets") or [])
+    try:
+        menu = MT.load_menu(root)
+    except (OSError, MT.MenuError) as e:
+        raise click.ClickException(f"{action['id']}: cannot read {MT.MENU_DAT} under {root}: {e}")
+    wanted = target.get("id", "auto")
+    record_id = _next_record_id(kind, action, menu) if wanted in (None, "auto") else int(wanted)
+    k = MT.KINDS[kind]
+    if record_id < k.custom_first and not force:
+        raise click.ClickException(
+            f"{action['id']}: {kind} id {record_id} is inside the retail band (< {k.custom_first}); "
+            "a retail update could take it. Pass --force to use it anyway.")
+    if record_id >= k.ceiling:
+        raise click.ClickException(f"{action['id']}: {kind} id {record_id} is past the client ceiling {k.ceiling - 1}.")
+    # The id changed since the last build into this folder: that row goes back to what
+    # it replaced (or empty) instead of being left behind.
+    moved_from = prev_id if prev_id is not None and prev_id != record_id and built_here else None
+    if moved_from is not None:
+        MT.restore_row(kind, menu, moved_from, prev.get("replaced"))
+    own = prev_id == record_id and built_here
+    recs = menu.records(kind)
+    occupied = record_id < len(recs) and not MT.is_empty(recs[record_id]) and not own
+    if occupied and not force:
+        raise click.ClickException(
+            f"{action['id']}: {kind} id {record_id} already holds a record. Pass --force to overwrite it.")
+    mi = target.get("menu_index", "auto") if kind == "spell" else None
+    menu_index = None if mi in (None, "auto") else int(mi)
+    if menu_index is None and kind == "spell" and prev_id == record_id:
+        # A rebuild keeps the slot it took (else "next free" would count its own record).
+        if isinstance(prev.get("menu_index"), int):
+            menu_index = prev["menu_index"]
+    try:
+        # What a forced overwrite replaces is kept on the result so undo can put it back.
+        replaced = prev.get("replaced") if own else MT.capture_record(kind, root, record_id, menu)
+        rec = MT.build_record(kind, menu, d, record_id, menu_index)
         fields = MT.read_fields(kind, rec)
         menu.set_record(kind, record_id, rec)
+        # Every name / help table is checked before anything is written, so text that
+        # does not fit leaves 114.DAT and the string tables as they were.
+        MT.set_texts(kind, root, record_id, d["text"], dry_run=True)
         dat_path = MT.save_menu(root, menu, dry_run=dry_run)
-        try:
-            strings = MT.set_texts(kind, root, record_id, d["text"], dry_run=dry_run)
-        except MT.MenuError as e:
-            raise click.ClickException(f"{action['id']}: {e}")
+        if moved_from is not None:
+            MT.restore_texts(kind, root, moved_from, prev.get("replaced"), dry_run=dry_run)
+        MT.set_texts(kind, root, record_id, d["text"], dry_run=dry_run)
+    except MT.MenuError as e:
+        raise click.ClickException(f"{action['id']}: {e}")
 
     sql = MT.server_snippet(kind, d, record_id, d["like"])
     server_path = None
@@ -1139,25 +1208,16 @@ def _build_record(action: dict, manifest_path: Path, manifest: dict, force: bool
     return {
         "id": action["id"], "type": kind, "record_id": record_id, "like": d["like"],
         "name": d["text"]["name_en"], "menu_index": fields.get("menu_index"),
-        "dat": MT.MENU_DAT, "output": str(dat_path),
-        "strings": sorted({_rom_rel_of(root, p) for p in strings}),
+        "dat": MT.MENU_DAT, "output": str(dat_path), "strings": MT.string_tables(kind),
+        "replaced": replaced, "moved_from": moved_from,
         "server": str(server_path) if server_path else None, "sql": sql,
+        "warning": MT.client_warning(kind, record_id),
         "registered": f"{kind} {record_id} ({d['text']['name_en']}) <- cloned from {d['like']}",
     }
 
 
-def _rom_rel_of(root: Path, path: Path) -> str:
-    """``ROM/181/73.DAT`` for a path under the install root (or the mirrored
-    build root), falling back to the path's own tail."""
-    parts = Path(path).parts
-    for i, part in enumerate(parts):
-        if part.upper().startswith("ROM") and i + 2 < len(parts):
-            return "/".join(parts[i:i + 3])
-    return Path(path).name
-
-
 def _wizard_record(kind: str, slug: str, prev: dict | None, manifest_path: Path, manifest: dict) -> dict:
-    from xi.menu.xi_menu_table import KINDS, load_definition, MenuError
+    from xi.menu.xi_menu_table import KINDS, client_warning, load_definition, MenuError
     p = prev or {}
     resource_root = _resource_root(manifest_path, manifest)
     found = sorted(Path("exports").glob(f"**/*.{kind}.json")) if Path("exports").is_dir() else []
@@ -1190,9 +1250,17 @@ def _wizard_record(kind: str, slug: str, prev: dict | None, manifest_path: Path,
     prev_id = (p.get("target") or {}).get("id", "auto")
     click.echo(f"\n>> Which {kind} id? (auto = the highest free id above the retail band "
                f"{k.custom_first}..{k.ceiling - 1}; ids below need --force)")
+    click.echo(click.style(f"   ⚠ {client_warning(kind)}", fg="yellow"))
     click.echo()
-    raw = click.prompt("Enter id or auto", default=str(prev_id)).strip().lower()
-    record_id = None if raw in ("", "auto") else int(raw)
+    while True:
+        raw = click.prompt("Enter id or auto", default=str(prev_id)).strip().lower()
+        if raw in ("", "auto"):
+            record_id = None
+            break
+        if raw.isdigit() and int(raw) < k.ceiling:
+            record_id = int(raw)
+            break
+        click.echo(f"   ✗ enter auto or a number 0..{k.ceiling - 1}")
     action = _record_action_from_definition(src, resource_root, kind, action_id=f"{kind}.{slug}",
                                             record_id=record_id)
     if p.get("result"):
@@ -1515,6 +1583,15 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         fid = _prepare_file_id(saved)
         fid_note = f" -> file_id {fid}" if fid is not None else ""
         click.echo(f"Model ID: {model['model_id']} ({model.get('kind')}){fid_note}")
+    if kind in RECORD_TYPES:
+        # The id the build will take: an explicit target, else the one a build recorded, else auto.
+        from xi.menu.xi_menu_table import client_warning
+        rid = (saved.get("target") or {}).get("id")
+        if not isinstance(rid, int):
+            rid = (saved.get("result") or {}).get("record_id")
+        warning = client_warning(kind, rid if isinstance(rid, int) else None)
+        if warning:
+            click.echo(click.style(f"⚠ {warning}", fg="yellow"))
 
 
 def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
@@ -1650,14 +1727,18 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
                    "without writing any files or patching tables.")
 @click.option("--dry-note/--no-dry-note", default=True, hidden=True,
               help="Print the trailing 'Dry run — nothing written' note (the wizard suppresses it).")
+@click.option("--pivot", is_flag=True, default=False,
+              help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
 def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...], verbose: bool,
-              force: bool, dry_run: bool, dry_note: bool = True):
-    """Build a manifest directly into the base install (FFXI_DIR).
+              force: bool, dry_run: bool, dry_note: bool = True, pivot: bool = False):
+    """Build a manifest into the base install (FFXI_DIR), or FFXI_PIVOT_DIR with --pivot.
 
-    DATs are placed and their file_ids registered straight into the base install's
-    tables (which must already exist + be expanded); the tables are backed up once
-    to `<name>.base` before the first patch. (XIPivot can't overlay the root FTABLE,
-    so the base install is the only target where custom gear/entity file_ids resolve.)
+    DATs are placed and their file_ids registered straight into the target's tables
+    (which must already exist + be expanded); in the base install the tables are backed
+    up once to `<name>.base` before the first patch. A base-install build then syncs the
+    custom region of FFXI_PIVOT_DIR's tables so the sizes match; a --pivot build
+    registers in that folder's own tables and skips the sync. Each action records the
+    target it was built into, which `undo`, `package` and `release` follow.
     """
     import xi.xi_config as cfg
 
@@ -1689,19 +1770,32 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         _ensure_rom_tables(standard_root, 10)
         click.echo(f"Copied {len(copied_tables)} f/v tables -> {standard_root}")
 
-    # mesh + the verbatim-placement types write DATs + table patches directly into
-    # the base install (the only target whose root FTABLE the client actually reads).
+    # mesh + the verbatim-placement types write DATs + table patches directly into the
+    # target (the base install, or FFXI_PIVOT_DIR with --pivot); menu records edit its
+    # 114.DAT and string tables.
     pack_actions = [a for a in active_actions
                     if a.get("type") in ("mesh", "entity", "gear", "mount", "ability")]
-    target_roots = [("dir", _target_root("dir"))]
-    if pack_actions:
+    target = "pivot" if pivot else "dir"
+    target_roots = [(target, _target_root(target))]
+    if pivot and not target_roots[0][1].is_dir():
+        raise click.ClickException(f"FFXI_PIVOT_DIR does not exist: {target_roots[0][1]}")
+    if any(a.get("type") != "zone" for a in active_actions):
+        from xi.xi_config import CUSTOM_ROM_IDX
         n_with_tables = 0
         for name, root in target_roots:
-            has_tables = _ftable_entries(root / "FTABLE.DAT") > 0
+            # A ROM{n} pair alone registers file_ids (the client honours it over the main
+            # pair, and it is all a pivot folder can register through).
+            main_entries = _ftable_entries(root / "FTABLE.DAT")
+            rom_entries = _ftable_entries(root / f"ROM{CUSTOM_ROM_IDX}" / f"FTABLE{CUSTOM_ROM_IDX}.DAT")
+            has_tables = max(main_entries, rom_entries) > 0
             n_with_tables += has_tables
-            suffix = "" if has_tables else "  (DAT-only — no FTABLE here)"
+            suffix = ""
+            if pack_actions and not has_tables:
+                suffix = "  (DAT-only — no FTABLE here)"
+            elif pack_actions and main_entries == 0:
+                suffix = f"  (ROM{CUSTOM_ROM_IDX} tables only)"
             click.echo(f"Target: {_TARGET_LABELS[name]} -> {root}{suffix}")
-        if n_with_tables == 0:
+        if pack_actions and n_with_tables == 0:
             raise click.ClickException(
                 "None of the chosen targets have an FTABLE to register the file_ids in — "
                 "include a target with tables (pivot or dir).")
@@ -1781,7 +1875,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
 
     if dry_run:
         _print_placements(results, "Planned actions:")
-        if pack_actions:
+        if any(a.get("type") != "zone" for a in active_actions):
             click.echo("\nWould build into: " + ", ".join(str(r) for _n, r in target_roots))
         if dry_note:
             click.echo(click.style("\nDry run — nothing was written. Re-run without --dry-run to build.",
@@ -1791,12 +1885,15 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     # Persist the inline results back into the manifest (self-describing, idempotent).
     _write_manifest(manifest, manifest_data)
 
-    # The client reads lookup tables through the XIPivot overlay (FFXI_PIVOT_DIR)
-    # when set — it shadows the base install's FTABLE/VTABLE. Propagate the custom
-    # region (the file_ids we just registered) into any table the pivot overrides,
-    # so the new gear/entity models resolve there too and the sizes stay uniform
-    # (a size mismatch crashes the client). Retail-range pivot entries are kept.
-    if pack_actions:
+    # A client that loads FFXI_PIVOT_DIR through XIPivot reads that folder's ROM{n}
+    # tables in place of the install's (never its main FTABLE/VTABLE). Propagate the
+    # custom region (the gear/entity file_ids just registered) into each table the
+    # pivot folder carries, so those models resolve there too and the sizes stay
+    # uniform. Retail-range pivot entries are kept — so a job ability, spell or weapon
+    # skill registered only in the install stays invisible to that client; those are
+    # built with --pivot. A --pivot build registered in the pivot's own tables, which a
+    # copy of the base install's region would overwrite, so it skips this.
+    if pack_actions and not pivot:
         from xi.ftable.xi_expand import sync_pivot_from_base, pivot_root
         if pivot_root():
             click.echo(f"\nSyncing pivot overlay tables ({pivot_root()}) ...")
@@ -1836,16 +1933,20 @@ def _action_placements(action: dict) -> list[tuple[int, str]]:
 
 def _unregister_file_id(root: Path, file_id: int, rom: int) -> bool:
     """Clear a file_id's entry (ftval + vtable version -> 0, so it resolves to
-    nothing) in ``root``'s base + ROM{rom} tables. No-op (returns False) if the
-    target has no FTABLE (a DAT-only overlay)."""
-    if not (root / "FTABLE.DAT").exists():
-        return False
-    _patch_raw_table(root / "FTABLE.DAT", root / "VTABLE.DAT", file_id, 0, 0)
+    nothing) in the tables a build of ``root`` registers it in
+    (``patch_launcher_tables``): the ROM{rom} pair, and in the base install its main
+    pair when that holds the id. False when ``root`` has none of them."""
+    pairs = []
     if rom != 1:
-        ft, vt = root / f"ROM{rom}" / f"FTABLE{rom}.DAT", root / f"ROM{rom}" / f"VTABLE{rom}.DAT"
-        if ft.exists():
+        pairs.append((root / f"ROM{rom}" / f"FTABLE{rom}.DAT", root / f"ROM{rom}" / f"VTABLE{rom}.DAT"))
+    if _root_target_name(root) == "dir":
+        pairs.append((root / "FTABLE.DAT", root / "VTABLE.DAT"))
+    cleared = False
+    for ft, vt in pairs:
+        if _table_holds(ft, vt, file_id):
             _patch_raw_table(ft, vt, file_id, 0, 0)
-    return True
+            cleared = True
+    return cleared
 
 
 def _pick_project(verb: str) -> str:
@@ -1861,14 +1962,24 @@ def _pick_project(verb: str) -> str:
     return names[click.prompt("Enter number", type=click.IntRange(1, len(names))) - 1]
 
 
-def _project_dat_rels(manifest_data: dict) -> tuple[list[str], bool]:
+def _action_targets(action: dict) -> list[str]:
+    """Targets an action was built into (``result.targets``). A result from before
+    targets were recorded counts as the base install."""
+    res = action.get("result") or {}
+    return res.get("targets") or (["dir"] if res else [])
+
+
+def _project_dat_rels(manifest_data: dict, target: str | None = None) -> tuple[list[str], bool]:
     """ROM-relative DATs a project's actions produced (from inline results), plus
-    whether it has any mount action (whose d_msg string DATs must ship too)."""
+    whether it has any mount action (whose d_msg string DATs must ship too). With
+    ``target``, only the actions built into that target count."""
     rels: list[str] = []
     has_mount = False
     for action in manifest_data.get("actions", []):
         typ = action.get("type")
         res = action.get("result") or {}
+        if target is not None and target not in _action_targets(action):
+            continue
         if typ in ("gear", "ability"):
             rels += [_rom_rel(p["dat"]) for p in res.get("placements", []) if p.get("dat")]
         elif typ in RECORD_TYPES:
@@ -1884,18 +1995,19 @@ def _project_dat_rels(manifest_data: dict) -> tuple[list[str], bool]:
 
 @group.command("package")
 @click.argument("project", required=False, default=None)
-@click.option("--from", "source", type=click.Choice(["dir", "pivot", "hd"]), default="dir", show_default=True,
-              help="Read the built DATs + tables from the base install ('dir', default), "
-                   "FFXI_PIVOT_DIR ('pivot'), or FFXI_HD_DIR ('hd').")
+@click.option("--from", "source", type=click.Choice(["dir", "pivot", "hd"]), default=None,
+              help="Read the built DATs + tables from the base install ('dir'), FFXI_PIVOT_DIR "
+                   "('pivot'), or FFXI_HD_DIR ('hd'). Default: where the project was built — "
+                   "'pivot' when every build used --pivot, else 'dir'.")
 @click.option("--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output zip path (default dats/packages/<project>.zip).")
-def package_cmd(project: str | None, source: str, output: Path | None):
+def package_cmd(project: str | None, source: str | None, output: Path | None):
     """Zip a project's built DATs + F/V tables into a distributable overlay pack.
 
-    With no PROJECT, lists the dats/*.json projects to pick from. Reads from the base
-    install by default (where builds land); collects every DAT the project's actions
-    placed (from each action's inline result), the mount string DATs for any mount
-    actions, and the full FTABLE/VTABLE set — into a single zip laid out ROM-relative.
+    With no PROJECT, lists the dats/*.json projects to pick from. Reads from where the
+    project was built; collects every DAT the actions built there placed (from each
+    action's inline result), the mount string DATs for any mount actions, and the full
+    FTABLE/VTABLE set — into a single zip laid out ROM-relative.
     """
     import zipfile
 
@@ -1905,11 +2017,13 @@ def package_cmd(project: str | None, source: str, output: Path | None):
     if not manifest_path.exists():
         raise click.ClickException(f"No manifest at {manifest_path}.")
     manifest_data = _read_manifest(manifest_path)
+    if source is None:
+        source = "pivot" if _project_built_targets(manifest_data) == ["pivot"] else "dir"
     root = _target_root(source)
     if not (root / "FTABLE.DAT").exists():
         raise click.ClickException(f"No FTABLE.DAT under {root}.")
 
-    dat_rels, has_mount = _project_dat_rels(manifest_data)
+    dat_rels, has_mount = _project_dat_rels(manifest_data, target=source)
     table_rels = [rel.as_posix() for rel in _table_rel_paths() if (root / rel).exists()]
     # Mount name/help/key-item string DATs (shared d_msg tables the mount build edits).
     if has_mount:
@@ -1956,10 +2070,11 @@ def release_cmd(project: str | None, release_root: Path | None, no_dll: bool):
     the patched FFXiMain.dll — into `<release>\\Game\\FINAL FANTASY XI\\...`, mirroring
     the game's folder layout so the launcher deploys them straight to the client.
 
-    Also stages the XIPivot overlay's synced F/V tables (from FFXI_PIVOT_DIR),
-    since the client reads those over the base install's tables — the build must
-    carry them or the overlay shadows the base with stale/retail tables and
-    crashes.
+    Also stages the pivot folder's synced F/V tables (from FFXI_PIVOT_DIR): the
+    client reads its ROM{n} tables over the base install's, so the release must carry
+    the same copies or they shadow the base with stale/retail ones. DATs of actions
+    built with --pivot are staged from FFXI_PIVOT_DIR into that same pivot folder of
+    the release.
     """
     if not project:
         project = _pick_project("release")
@@ -1967,7 +2082,7 @@ def release_cmd(project: str | None, release_root: Path | None, no_dll: bool):
     if not manifest_path.exists():
         raise click.ClickException(f"No manifest at {manifest_path}.")
     manifest_data = _read_manifest(manifest_path)
-    src_root = _target_root("dir")  # builds land in the base install
+    src_root = _target_root("dir")  # builds without --pivot land in the base install
 
     if release_root is None:
         click.echo("\n>> Launcher build release folder")
@@ -1976,7 +2091,7 @@ def release_cmd(project: str | None, release_root: Path | None, no_dll: bool):
 
     # What to ship: the project's DATs (+ mount d_msg), the full F/V table set, and
     # the patched DLL (the model->file_id map the client reads at boot).
-    dat_rels, has_mount = _project_dat_rels(manifest_data)
+    dat_rels, has_mount = _project_dat_rels(manifest_data, target="dir")
     if has_mount:
         for sub in ("ROM/351", "ROM/175"):
             d = src_root / Path(*sub.split("/"))
@@ -2006,13 +2121,14 @@ def release_cmd(project: str | None, release_root: Path | None, no_dll: bool):
     for r in missing:
         click.echo(click.style(f"  ⚠ not in base install (build first?): {r}", fg="yellow"))
 
-    # Also stage the XIPivot overlay's F/V tables. The client reads these OVER the
-    # base install's tables (redirect_fopens), so the build must carry the same
-    # synced/expanded copies or the overlay shadows the base with stale tables and
-    # the client crashes on a size mismatch. Mirrors the pivot folder layout under
+    # Also stage the pivot folder's F/V tables. The client reads its ROM{n} tables
+    # OVER the base install's (XIPivot; the main FTABLE/VTABLE always come from the
+    # install), so the build must carry the same synced/expanded copies or they shadow
+    # the base with stale ones. Mirrors the pivot folder layout under
     # <release>\Ashita\polplugins\DATs\catseyexi (created here, full path).
     from xi.xi_config import FFXI_PIVOT_DIR
-    pivot_copied = 0
+    pivot_copied = pivot_dats = 0
+    pivot_rels, pivot_mount = _project_dat_rels(manifest_data, target="pivot")
     if FFXI_PIVOT_DIR and Path(FFXI_PIVOT_DIR).is_dir():
         piv_src = Path(FFXI_PIVOT_DIR)
         piv_dest = release_root / _LAUNCHER_PIVOT_PARENT / piv_src.name
@@ -2024,11 +2140,31 @@ def release_cmd(project: str | None, release_root: Path | None, no_dll: bool):
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, d)
             pivot_copied += 1
+        # DATs of actions built with --pivot live in that folder, so they ship in it.
+        if pivot_mount:
+            for sub in ("ROM/351", "ROM/175"):
+                d = piv_src / Path(*sub.split("/"))
+                if d.is_dir():
+                    pivot_rels += [f"{sub}/{f.name}" for f in d.iterdir() if f.suffix.lower() == ".dat"]
+        for rel in sorted(set(pivot_rels)):
+            s = piv_src / Path(*rel.split("/"))
+            if not s.exists():
+                click.echo(click.style(f"  ⚠ not in FFXI_PIVOT_DIR (build with --pivot first?): {rel}",
+                                       fg="yellow"))
+                continue
+            d = piv_dest / Path(*rel.split("/"))
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(s, d)
+            pivot_dats += 1
+    elif pivot_rels:
+        click.echo(click.style("  ⚠ some actions were built with --pivot, but FFXI_PIVOT_DIR is not "
+                               "configured — their DATs are not staged", fg="yellow"))
 
     n_tables = len([r for r in rels if r in table_rels])
     n_dat = len([r for r in rels if r in dat_rels])
     dll = " + FFXiMain.dll" if (not no_dll and "FFXiMain.dll" in rels) else ""
     pivot = f" + {pivot_copied} pivot table(s)" if pivot_copied else ""
+    pivot += f" + {pivot_dats} pivot DAT(s)" if pivot_dats else ""
     click.echo(click.style(
         f"✓ Released {n_dat} DAT(s) + {n_tables} F/V table file(s){dll}{pivot} -> {dest_base}",
         fg="green"))
@@ -2073,6 +2209,8 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool):
     for name in built:
         root = _target_root(name)
         for action in actions:
+            if name not in _action_targets(action):
+                continue   # never built here: whatever this folder holds at those paths is not ours
             for file_id, dat in _action_placements(action):
                 rom = _parse_rom_placement(dat)[0]
                 p = root / Path(*dat.split("/"))
@@ -2087,11 +2225,11 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool):
                     with _package_config(root, root):
                         M.clear_mount_strings(mid)
             if action.get("type") in RECORD_TYPES:
-                rid = (action.get("result") or {}).get("record_id")
-                if isinstance(rid, int):
-                    from xi.menu.xi_menu_table import clear_record
-                    with _package_config(root, root):
-                        clear_record(action["type"], root, rid)
+                res = action.get("result") or {}
+                if isinstance(res.get("record_id"), int):
+                    # Put back what a forced overwrite replaced, else empty the row.
+                    from xi.menu.xi_menu_table import restore_record
+                    restore_record(action["type"], root, res["record_id"], res.get("replaced"))
                     cleared += 1
         click.echo(f"  ✓ {name}: DATs deleted + table entries cleared")
 
@@ -2125,8 +2263,15 @@ def _print_placements(results: list[dict], title: str) -> None:
             mi = f", menu index {r['menu_index']}" if r.get("menu_index") is not None else ""
             click.echo(f"{head}: {kind} {r.get('record_id')} \"{r.get('name')}\" "
                        f"cloned from {r.get('like')}{mi} -> {r.get('dat')}")
+            if r.get("moved_from") is not None:
+                click.echo(f"     - moved from {kind} {r['moved_from']}, which is put back")
+            if r.get("replaced"):
+                click.echo(click.style(f"     ⚠ writes over the record that was at {r.get('record_id')} "
+                                       "(--force); undo puts it back", fg="yellow"))
             for s in r.get("strings") or []:
                 click.echo(f"     - names/help: {s}")
+            if r.get("warning"):
+                click.echo(click.style(f"     ⚠ {r['warning']}", fg="yellow"))
             if r.get("server"):
                 click.echo(f"     server: {r['server']}")
             if r.get("sql"):
@@ -3228,20 +3373,21 @@ def _expansion_report(entries: int) -> list[tuple[str, str, bool, str]]:
     return out
 
 
-def _check_targets_ready() -> dict[str, bool]:
-    """First step of the wizard: verify the base install's FTABLE and whether it's
-    expanded for mounts / entity / gear (with sizes). Aborts when there's no FTABLE
-    at all (nothing could register file_ids); otherwise returns per-type readiness
-    so the wizard can refuse a type whose tables/DLL aren't ready — instead of
-    collecting every answer and only failing at build time. Builds patch this
-    table directly (no seeding)."""
-    root = _target_root("dir")
+def _check_targets_ready(target: str = "dir") -> dict[str, bool]:
+    """First step of the wizard: verify the build target's FTABLE (the base install,
+    or FFXI_PIVOT_DIR for `--pivot`) and whether it's expanded for mounts / entity /
+    gear (with sizes). Aborts when there's no FTABLE at all (nothing could register
+    file_ids); otherwise returns per-type readiness so the wizard can refuse a type
+    whose tables/DLL aren't ready — instead of collecting every answer and only
+    failing at build time. Builds patch this table directly (no seeding)."""
+    root = _target_root(target)
+    setting = "FFXI_PIVOT_DIR" if target == "pivot" else "FFXI_DIR"
     entries = _ftable_entries(root / "FTABLE.DAT")
-    click.echo(f"\nBase install (FFXI_DIR): {root}")
+    click.echo(f"\n{_TARGET_LABELS[target]} ({setting}): {root}")
     if entries == 0:
         raise click.ClickException(
             f"No FTABLE.DAT in {root} — builds register file_ids there, so nothing "
-            "can be built. Check FFXI_DIR points at the game install, then re-run "
+            f"can be built. Check {setting} points at the right folder, then re-run "
             "`xi dats new`.")
     from xi.ftable.xi_expand import RETAIL_ENTRIES
     if entries > RETAIL_ENTRIES:
@@ -3266,7 +3412,9 @@ def _check_targets_ready() -> dict[str, bool]:
 @group.command("new")
 @click.option("--project", default=None,
               help="Skip the name prompt — writes to dats/<project>.json.")
-def new_cmd(project: str | None):
+@click.option("--pivot", is_flag=True, default=False,
+              help="Check and build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
+def new_cmd(project: str | None, pivot: bool = False):
     """Interactively inject prebuilt DAT(s) at new model ids.
 
     A wizard for the "I already have the DATs, just place them at new model ids"
@@ -3276,7 +3424,7 @@ def new_cmd(project: str | None):
     """
     click.echo("\nWelcome to the Dat Modification wizard")
     _rule()
-    ready = _check_targets_ready()
+    ready = _check_targets_ready("pivot" if pivot else "dir")
     _rule()
     project = project or _prompt_project_name()
     slug = _project_slug(project)
@@ -3308,8 +3456,8 @@ def new_cmd(project: str | None):
                 "entity": "Run `xi ftable expand entity`",
                 "mount": "The FTABLE is smaller than retail — check the install"}[ready_key]
         raise click.ClickException(
-            f"The base install isn't ready for {ctype} content (see the report above). "
-            f"{hint}, then re-run `xi dats new`.")
+            f"The {'pivot folder' if pivot else 'base install'} isn't ready for {ctype} content "
+            f"(see the report above). {hint}, then re-run `xi dats new`.")
     # If this project already has action(s) of the chosen type, use them to
     # default the prompts (slot, model id, paths, …) so re-running just tweaks.
     if ctype == "gear":
@@ -3356,6 +3504,6 @@ def new_cmd(project: str | None):
 
     if click.confirm("\n>> Would you like to build this project now?", default=True):
         _rule()
-        click.get_current_context().invoke(build_cmd, project=slug)
+        click.get_current_context().invoke(build_cmd, project=slug, pivot=pivot)
     else:
-        click.echo(f"Run it later with:  xi dats build --project {slug}")
+        click.echo(f"Run it later with:  xi dats build --project {slug}" + (" --pivot" if pivot else ""))

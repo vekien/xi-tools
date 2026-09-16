@@ -46,8 +46,8 @@ WebSocket at `ws://HOST:PORT/ws`. Used by xi-zone-editor; exits after idle-secs 
 ```text
 xi dats json
 xi dats prepare
-xi dats build
-xi dats new
+xi dats build                    # --pivot: into FFXI_PIVOT_DIR instead of FFXI_DIR
+xi dats new                      # --pivot: the same for the wizard
 xi dats package
 xi dats release
 xi dats changelog
@@ -109,9 +109,10 @@ xi mv update --only abilities    # the mixer's pick list (mv/lists/abilities.jso
 ```text
 xi dats prepare X.spell.json --project P     # a definition (schema/spell_definition.json): clone retail spell N + names/fields
 xi dats prepare X.command.json --project P   # same for a job ability / weapon skill row (schema/command_definition.json)
-xi dats build P [--dry-run]                  # grows ROM/118/114.DAT, writes the record + EN/JP names/help, records the id
-xi dats new                                  # wizard: "Spell menu record" / "Command menu record"
-xi ui spells search NAME [--abilities]       # id, MP, cast/recast, learnable jobs (decoded records)
+xi dats build P [--dry-run] [--pivot]        # grows ROM/118/114.DAT, writes the record + EN/JP names/help, records the id
+xi dats new [--pivot]                        # wizard: "Spell menu record" / "Command menu record"
+xi ui spells search NAME [--abilities]       # id, MP, cast/recast, learnable jobs (decoded records; --pivot)
+# ids past 1023 (spells) / 2815 (commands) need a client plugin such as cexislots — the build warns
 ```
 
 ## Entity

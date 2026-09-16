@@ -28,11 +28,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name_en"],
+      "description": "Names hold 39 cp932 bytes and help 215 (a Japanese character takes 2); maxLength assumes one byte per character, the loader checks bytes.",
       "properties": {
-        "name_en": {"type": "string", "minLength": 1},
-        "name_jp": {"type": "string"},
-        "help_en": {"type": "string"},
-        "help_jp": {"type": "string"}
+        "name_en": {"type": "string", "minLength": 1, "maxLength": 39},
+        "name_jp": {"type": "string", "maxLength": 39},
+        "help_en": {"type": "string", "maxLength": 215},
+        "help_jp": {"type": "string", "maxLength": 215}
       }
     },
     "fields": {
