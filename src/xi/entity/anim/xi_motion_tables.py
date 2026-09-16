@@ -398,6 +398,20 @@ def weapon_skill_slot(banks: Dict[str, WsBank], race, animation: int) -> WsSlot:
     animation = int(animation)
     if not 0 <= animation <= 0xFFF:
         raise ValueError(f'animation {animation} is not a 12-bit action animation number')
+    # A configured custom band sits above both retail banks. Its ids are grouped by
+    # animation number — eight races of body clip, then eight of waist pack A, then
+    # eight of B — so the reserved slot count stays out of the arithmetic and raising
+    # it later moves nothing already published. It resolves only on a client whose
+    # animation-to-file-id arithmetic has been patched to reach it (xi_config).
+    import xi.xi_config as cfg
+    if cfg.FX_WS_BAND_FIRST and cfg.FX_WS_BAND_BASE and animation >= cfg.FX_WS_BAND_FIRST:
+        last = cfg.FX_WS_BAND_FIRST + (cfg.FX_WS_BAND_SLOTS or 0) - 1
+        if cfg.FX_WS_BAND_SLOTS and animation > last:
+            raise ValueError(f'animation {animation} is past the custom weapon-skill band '
+                             f'({cfg.FX_WS_BAND_FIRST}..{last}); raise FX_WS_BAND_SLOTS')
+        idx = animation - cfg.FX_WS_BAND_FIRST
+        body = cfg.FX_WS_BAND_BASE + idx * 24 + ri
+        return WsSlot(RACE_NAMES[ri], animation, 'custom', idx, body, body + 8, body + 16)
     bank = banks.get('primary' if animation < WS_EXTENDED_FIRST else 'extended')
     if bank is None or not bank.contains(animation):
         have = ', '.join(f'{b.name} {b.first_animation}..{b.last_animation}'
