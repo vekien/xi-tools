@@ -111,7 +111,10 @@ Rules that follow:
 - The client never opens a path directly. `file_id` → `FTABLE.DAT` (u16: `subdir<<7 | index`)
   + `VTABLE.DAT` (u8: ROM number) → `ROM<n>/<subdir>/<index>.DAT`. Overlays (pivot, HD)
   shadow files at the same ROM path; a pack that ships its own tables **hides** base-table
-  registrations (a top crash cause).
+  registrations (a top crash cause). A `ROM{n}` pair (`ROM10/FTABLE10.DAT`) wins over the
+  main pair, and XIPivot shadows only `ROM{n}` pairs — the main `FTABLE.DAT`/`VTABLE.DAT`
+  always come from the install (`xi.ftable.xi_core.resolve_dat_in_root`,
+  `docs/dats/README.md` "Which table registers a file_id").
 - **Entity modelid → file_id** is a 4-range formula; custom content always uses
   `file_id = modelid + 98239` (the 3500+ range). Retail tops out at modelid ~11,241.
 - **Gear** is per `(race, slot)` group tables from `FFXiMain.dll` (`RACE_TABLES` in
@@ -144,6 +147,8 @@ Rules that follow:
   `zone reset`, `mount import`, dialogue edits) before writing.
 - `xi dats build` writes into `FFXI_DIR` and then syncs the custom region of the pivot
   tables (`FFXI_PIVOT_DIR`) so sizes match — a table size mismatch crashes the client.
+  `--pivot` (also on `dats new`, `ability publish`, `ui spells`) writes `FFXI_PIVOT_DIR`
+  instead and skips the sync; without it that sync is the only pivot write a build makes.
 
 ### 2.7 Engine limits that decide "loads in a viewer but crashes in game"
 
@@ -188,7 +193,7 @@ Resolution order for any question about a command:
 | `xi title` | `src/xi/title/` | `docs/title/README.md`, `docs/dats/ROM_0_23.md`, `docs/HANDOVER.md` |
 | `xi event` | `src/xi/event/`, `src/xi/dialog/` | `docs/events/README.md` → `authoring/dialogue/format/opcodes/cutscenes.md`, `docs/dialog/*.md`, `docs/cutscene_authoring.md` |
 | `xi ftable` | `src/xi/ftable/` | `docs/ftable/*.md`, `docs/reference/model-file-ids.md` |
-| `xi dats` | `src/xi/dats/` | `docs/dats/README.md`, `schema/*.json` |
+| `xi dats` | `src/xi/dats/` | `docs/dats/README.md`, `schema/*.json`; spell / command menu records: `src/xi/menu/`, `docs/menu/records.md`, `schema/{spell,command}_definition.json` |
 | `xi ability` | `src/xi/ability/` | `docs/ability/{inspect,mixer}.md`, `schema/ability_recipe.json` (recipe), `schema/ability.json` (the `dats` action publish uses) |
 | `xi dll` | `src/xi/dll/`, `src/xi/ffximain/` | `docs/dll/README.md`, `docs/ffximain/*.md` |
 | `xi mv` | `src/xi/mv/` (+ `gear_sets.json`, `npc_anims.json`) | `docs/mv/README.md`, `docs/anim/fishing.md` |

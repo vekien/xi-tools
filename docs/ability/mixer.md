@@ -82,10 +82,10 @@ uv run xi dats new
 uv run xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace \
     [--kind ja|spell|ws] [--animation N] [--subdir 20]
 uv run xi dats build tiger_fury --dry-run          # the plan: slot, file ids, server SQL
-uv run xi dats build tiger_fury
+uv run xi dats build tiger_fury                    # add --pivot to build into FFXI_PIVOT_DIR
 
 # 3. the shortcut — exactly 2., in one command
-uv run xi ability publish recipe.json [--project NAME] [--dry-run]
+uv run xi ability publish recipe.json [--project NAME] [--dry-run] [--pivot]
 ```
 
 `prepare` copies the recipe to `projects/resources/ability/<name>.recipe.json` and writes:
@@ -104,10 +104,15 @@ uv run xi ability publish recipe.json [--project NAME] [--dry-run]
 weapon skill), takes the animation number, places the DAT(s) under `ROM10/<subdir>/`
 in the base install and registers the file id(s) — the same verbatim placement and
 table patching every other action uses, `.base` backups included, then syncs the
-custom table region into the pivot overlay. The allocation is recorded on the action
-(`result`: kind, animation, placements), so a rebuild lands on the same slot and
-`dats undo` knows what to clear. A running client holds the file tables in memory:
-publish with it closed, or restart it afterwards.
+custom table region into the pivot overlay. With `--pivot` it places and registers in
+`FFXI_PIVOT_DIR` instead and skips that sync. A pivot folder that carries its own `ROM10`
+tables (CatsEyeXI's does) hides a base-install publish from its client: the client reads
+that folder's `ROM10` tables, and the sync copies only ids above retail, which ability
+file ids never are — so publish with `--pivot` for such a client (see
+[which table registers a file_id](../dats/README.md#which-table-registers-a-file_id)).
+The allocation is recorded on the action (`result`: kind, animation, placements), so a
+rebuild lands on the same slot and `dats undo` knows what to clear. A running client
+holds the file tables in memory: publish with it closed, or restart it afterwards.
 
 | Kind | When | Client lookup | Custom numbers | Server |
 |---|---|---|---|---|
@@ -155,7 +160,9 @@ generator with the motion's hit frame), the selected block's numbers, and the **
 of the previewed source with *solo* (play one generator alone) and *take*. **Play mix**
 composes for the actor's race under `exports/ability/mixer/` and plays it; **Publish**
 prepares the `xi dats` action for the recipe, shows `dats build --dry-run`'s plan, then
-builds it. Recipes save next to the composed DATs.
+builds it. The Manage panel's *Use Pivot Folder* switch adds `--pivot` to that build and
+to its Check, so the mix goes into `FFXI_PIVOT_DIR` instead of the game folder. Recipes
+save next to the composed DATs.
 
 Weapon-skill motion carries its own clips; the viewer resolves a routine's clip refs
 against the loaded character, so picking a `ws:` motion source also sets the

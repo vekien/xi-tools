@@ -42,7 +42,6 @@ import click
 from xi.ability.xi_compose import Composed, _lanes, compose, load_recipe, output_name
 from xi.ability.xi_inspect import ABILITY_FILE_OFFSET
 from xi.entity.anim.xi_motion_tables import resolve_weapon_skill
-from xi.ftable.xi_core import resolve_dat
 
 JA_CUSTOM_FIRST = 339           # first animation number past the retail band
 JA_CUSTOM_LAST = 499            # 4412 + 499 = 4911, just below the weapon-skill VFX band
@@ -65,11 +64,19 @@ OUT_ROOT = Path("exports") / "ability"      # composed DATs + reports, per recip
 
 
 def _placement(root: Path, file_id: int) -> Optional[str]:
-    ft, vt = root / "FTABLE.DAT", root / "VTABLE.DAT"
-    if not ft.exists() or not vt.exists():
-        raise click.ClickException(f"{root} has no FTABLE.DAT/VTABLE.DAT — not a DAT root")
-    dat, _ = resolve_dat(ft.read_bytes(), vt.read_bytes(), file_id)
-    return dat
+    """Where ``file_id`` resolves for a client reading DATs through ``root``: the custom
+    ROM pair first, then the base install's main pair (xi.ftable.xi_core.
+    resolve_dat_in_root). Animation numbers are picked against this, so a slot that is
+    live through a ROM{n} entry is seen as taken."""
+    from xi.ftable.xi_core import resolve_dat_in_root, root_table_pair
+    from xi.xi_config import CUSTOM_ROM_IDX, FFXI_DIR
+    pairs = (root_table_pair(root, CUSTOM_ROM_IDX), root_table_pair(FFXI_DIR, CUSTOM_ROM_IDX),
+             root_table_pair(FFXI_DIR, 1))
+    if not any(all(Path(p).exists() for p in pair) for pair in pairs):
+        raise click.ClickException(
+            f"{root} has no ROM{CUSTOM_ROM_IDX} tables and the base install has no FTABLE.DAT/VTABLE.DAT "
+            "— not a DAT root")
+    return resolve_dat_in_root(root, file_id)[0]
 
 
 def is_placeholder(root: Path, rel: Optional[str]) -> bool:
@@ -282,11 +289,18 @@ def server_snippet(recipe: dict, kind: str, animation: int) -> str:
 
 
 def permission_hint(root: Path, e: PermissionError) -> str:
-    return (f"cannot write {e.filename}: the target's file tables are owned by another account "
-            "(a launcher or updater that ran elevated). Either run this command from an "
-            "elevated terminal, or grant yourself modify rights on the install once:\n"
-            f'  icacls "{root}" /grant "%USERNAME%":(OI)(CI)M /T\n'
-            "Nothing was registered; any DAT already copied is unreferenced and harmless.")
+    from xi.xi_config import FFXI_PIVOT_DIR
+    hint = (f"cannot write {e.filename}: the target's file tables are owned by another account "
+            "(a launcher or updater that ran elevated).")
+    if FFXI_PIVOT_DIR and Path(FFXI_PIVOT_DIR).resolve() != Path(root).resolve():
+        # The ROM10 tables register from the pivot folder too, and building there
+        # leaves the install alone — a better answer than taking ownership of it.
+        hint += ("\nThe simplest fix is to build into the pivot folder instead: add --pivot "
+                 "(Use Pivot Folder in the model viewer's Manage panel).")
+    hint += ("\nOr run this command from an elevated terminal, or grant yourself modify rights "
+             "on the install once:\n"
+             f'  icacls "{root}" /grant "%USERNAME%":(OI)(CI)M /T')
+    return hint + "\nNothing was registered; any DAT already copied is unreferenced and harmless."
 
 
 # ── `xi ability publish` — the dats action, prepared and built in one command ────────
@@ -301,14 +315,15 @@ def permission_hint(root: Path, e: PermissionError) -> str:
 @click.option("--subdir", type=int, default=DEFAULT_SUBDIR, show_default=True, help="ROM10 folder to place DATs in.")
 @click.option("--force", is_flag=True, help="Repoint a file id that is already registered.")
 @click.option("--dry-run", is_flag=True, help="Show the plan; write nothing.")
+@click.option("--pivot", is_flag=True, help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
 def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation: Optional[int],
-                subdir: int, force: bool, dry_run: bool):
+                subdir: int, force: bool, dry_run: bool, pivot: bool = False):
     """Publish RECIPE_PATH through `xi dats`: prepare an ability action, then build it.
 
     \b
     Shorthand for
       xi dats prepare RECIPE --project NAME --type ability --replace
-      xi dats build NAME --only ability.<name>
+      xi dats build NAME --only ability.<name> [--pivot]
     The action lands in projects/<NAME>.json beside any gear or mount actions, so the
     ability is rebuilt, listed and undone with the rest of the project.
     """
@@ -317,7 +332,7 @@ def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation:
     project = project or recipe["name"]
     ctx = click.get_current_context()
     ctx.invoke(prepare_cmd, source=recipe_path, project=project, action_type="ability", replace=True,
-               kind=kind, animation=animation, subdir=subdir)
+               ability_kind=kind, animation=animation, subdir=subdir)
     click.echo()
     ctx.invoke(build_cmd, project=project, only=(f"ability.{_slug(recipe['name'])}",),
-               force=force, dry_run=dry_run)
+               force=force, dry_run=dry_run, pivot=pivot)

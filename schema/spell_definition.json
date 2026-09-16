@@ -1,0 +1,199 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://xi.tools/schema/spell_definition.json",
+ "title": "xi spell definition",
+ "description": "A new spell menu record for ROM/118/114.DAT (mgc_) and its names/help: a retail spell to clone plus the fields and texts that differ. Read by `xi dats prepare --type spell` / the `spell` action; see docs/menu/records.md.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "schema",
+  "name",
+  "like",
+  "text"
+ ],
+ "properties": {
+  "schema": {
+   "type": "string",
+   "const": "xi.spell.v1"
+  },
+  "name": {
+   "type": "string",
+   "pattern": "^[A-Za-z0-9_-]+$",
+   "description": "Slug: the action id (spell.<name>), the resource file name and the server row name."
+  },
+  "description": {
+   "type": "string"
+  },
+  "like": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "The retail spell id whose record is cloned (icon, targets, flags come from it)."
+  },
+  "id": {
+   "$ref": "common.json#/$defs/autoOrInteger",
+   "default": "auto",
+   "description": "The spell id to take. auto = the highest free id above the retail band (1024..4095); ids inside the retail band need --force."
+  },
+  "menu_index": {
+   "$ref": "common.json#/$defs/autoOrInteger",
+   "default": "auto",
+   "description": "The slot the known-spell list sorts the spell into. auto = one past the highest retail slot."
+  },
+  "text": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "name_en"
+   ],
+   "description": "Names hold 99 cp932 bytes and help 215 (a Japanese character takes 2); maxLength assumes one byte per character, the loader checks bytes.",
+   "properties": {
+    "name_en": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 99
+    },
+    "name_jp": {
+     "type": "string",
+     "maxLength": 99
+    },
+    "help_en": {
+     "type": "string",
+     "maxLength": 215
+    },
+    "help_jp": {
+     "type": "string",
+     "maxLength": 215
+    }
+   }
+  },
+  "fields": {
+   "type": "object",
+   "additionalProperties": false,
+   "description": "Record fields to change on the clone (anything not named keeps the donor's value).",
+   "properties": {
+    "kind": {
+     "oneOf": [
+      {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 65535
+      },
+      {
+       "type": "string",
+       "enum": [
+        "white",
+        "black",
+        "summon",
+        "ninjutsu",
+        "song",
+        "blue",
+        "geomancy",
+        "trust"
+       ]
+      }
+     ]
+    },
+    "element": {
+     "oneOf": [
+      {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 65535
+      },
+      {
+       "type": "string",
+       "enum": [
+        "fire",
+        "ice",
+        "wind",
+        "earth",
+        "lightning",
+        "water",
+        "light",
+        "dark",
+        "none"
+       ]
+      }
+     ]
+    },
+    "targets": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 65535
+    },
+    "skill": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 65535
+    },
+    "mp": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 65535
+    },
+    "cast": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 255,
+     "description": "Cast time in quarter seconds."
+    },
+    "recast": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 255,
+     "description": "Recast in quarter seconds."
+    },
+    "icon": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 65535
+    },
+    "icon2": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 65535
+    },
+    "requirements": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 255,
+     "description": "Requirement bits (+0x44): the client refuses the spell ('required ability not activated') until the matching state is on. Retail sets 0x10 only on Meteor (job point gift), 0x20/0x40 on addendum/unbridled spells. A clone of such a spell needs 0 here."
+    },
+    "levels": {
+     "type": "object",
+     "description": "Level per job that can learn it ({JOB: level}); jobs not named cannot. Replaces the donor's table.",
+     "additionalProperties": false,
+     "patternProperties": {
+      "^(WAR|MNK|WHM|BLM|RDM|THF|PLD|DRK|BST|BRD|RNG|SAM|NIN|DRG|SMN|BLU|COR|PUP|DNC|SCH|GEO|RUN)$": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 65534
+      }
+     }
+    }
+   }
+  }
+ },
+ "examples": [
+  {
+   "schema": "xi.spell.v1",
+   "name": "testspell",
+   "like": 144,
+   "id": "auto",
+   "text": {
+    "name_en": "Testspell",
+    "help_en": "A test spell: deals fire damage to the target."
+   },
+   "fields": {
+    "mp": 12,
+    "cast": 8,
+    "recast": 40,
+    "element": "fire",
+    "levels": {
+     "BLM": 20,
+     "RDM": 25
+    }
+   }
+  }
+ ]
+}

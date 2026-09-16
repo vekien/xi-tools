@@ -89,6 +89,7 @@ the `0x07` scheduler that cutscenes use to drive character motion.
 | [anim/weapon-skills.md](anim/weapon-skills.md) | Weapon-skill animations: the three unrelated id spaces, the primary (0–255) and extended (256–271) per-race motion banks with their companion blocks, the rotated ability table, the name table, the effect-directory naming pattern and its counterexamples, `xi anim ws` |
 | [ability/inspect.md](ability/inspect.md) | `xi ability inspect`: flatten an ability's `0x07` routine graph (job ability / spell / weapon skill / any DAT) into one absolute-frame timeline of motion, VFX and sound |
 | [ability/mixer.md](ability/mixer.md) | `xi ability recipe` / `compose` / `publish` (an `xi dats` ability action) and the `abilities` list target: build a new ability from pieces of retail ones, install it in ROM10, and the viewer's Ability Mixer mode that drives them |
+| [menu/records.md](menu/records.md) | The `spell` / `command` actions of `xi dats`: add a new spell or job-ability id to the client's menu tables (`ROM/118/114.DAT` records + `ROM/181` names/help) above the retail band; record layouts, the client's ceilings, `xi ui spells` |
 
 ---
 

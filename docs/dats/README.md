@@ -28,17 +28,18 @@ When you **already have the built `.DAT` files** and just want to place them at 
 model ids — no `mesh export` / GLB rebuild — run the wizard:
 
 ```bash
-uv run xi dats new
+uv run xi dats new            # builds into the base install (FFXI_DIR)
+uv run xi dats new --pivot    # builds into FFXI_PIVOT_DIR instead
 ```
 
 It walks you through, in order:
 
-1. **Target check.** Reports each live target (`FFXI_DIR`, and `FFXI_PIVOT_DIR` if
-   distinct) and whether its `FTABLE` is **expanded** for each content type (with sizes),
-   warning about any that aren't:
+1. **Target check.** Reports the build target — the base install (`FFXI_DIR`), or
+   `FFXI_PIVOT_DIR` with `--pivot` — and whether its `FTABLE` is **expanded** for each
+   content type (with sizes), warning about any that aren't:
 
    ```text
-   Pivot overlay (FFXI_PIVOT_DIR): …\DATs\<your-overlay>
+   Pivot folder (FFXI_PIVOT_DIR): …\DATs\<your-overlay>
      FTABLE: 423,152 entries
        ✓ Mounts: file_ids up to 102,768
        ✓ Entity models: custom band from file_id 113,239
@@ -54,8 +55,9 @@ It walks you through, in order:
    tweaks it, and gear re-uses each slot's destination block (overwrite in place).
 
 3. **Content type** — `Gear`, `Mounts`, `Entity (NPC / Monster / Object)`,
-   `NPC (costume: race + gear + weapons)`, or `Ability` (a recipe from the model
-   viewer's Ability Mixer or `xi ability recipe`).
+   `NPC (costume: race + gear + weapons)`, `Ability` (a recipe from the model
+   viewer's Ability Mixer or `xi ability recipe`), or a `Spell` / `Command` menu
+   record (a new spell or job-ability id with its name, help and stats).
 
 4. **Type-specific questions** (see below), then it writes the manifest action and offers
    to build (with a dry-run preview first).
@@ -146,24 +148,85 @@ uv run xi dats build tiger_fury --dry-run
 
 Full detail: [../ability/mixer.md](../ability/mixer.md#publish).
 
+### Spell / command menu record (a new spell or job-ability id)
+
+Point it at a **definition** (`*.spell.json` / `*.command.json`,
+[schema](../../schema/spell_definition.json), [schema](../../schema/command_definition.json)):
+the retail record to clone (`like`), the names and help, and the fields that differ
+(MP, cast/recast, element, learnable jobs and levels; level, TP, targets for commands).
+Then choose the id — auto takes the highest free one above the retail band (spells
+1024–4095, commands 2816–4095), top-down so retail can never reach it. The build grows
+the `mgc_` / `comm` section of `ROM/118/114.DAT`, writes the record and the EN/JP
+name/help blocks, records the id (and a spell's menu index) on the action and emits a
+server row template to `projects/server/spells/` or `commands/`. A client without a
+ceiling plugin such as cexislots ignores the new band, and `prepare`, the wizard and the
+build say so with a ⚠ — see [../menu/records.md](../menu/records.md). Names hold 39
+bytes (commands) or 99 (spells) and help 215; a longer text is refused before anything
+is written. From arguments, with every parameter defaulted (the type is inferred from
+the definition's `schema`):
+
+```bash
+uv run xi dats prepare exports/menu/testspell.spell.json --project testspell --replace
+uv run xi dats build testspell --dry-run
+uv run xi dats build testspell --pivot     # into FFXI_PIVOT_DIR's 114.DAT + name tables
+```
+
+Full detail: [../menu/records.md](../menu/records.md).
+
 ## Building (`xi dats build`)
 
 A build writes DATs and patches their file_ids **directly into the base install
-(`FFXI_DIR`)**. There is no multi-target `--target pivot,hd` switch — the base install is
-the only place custom gear/entity file_ids can register (XIPivot cannot overlay the root
-`FTABLE`). After a successful pack build, if `FFXI_PIVOT_DIR` is set, the custom region of
-the pivot's tables is updated via `sync_pivot_from_base()` so sizes stay uniform and the
-new file_ids resolve through the overlay.
+(`FFXI_DIR`)** — or, with **`--pivot`**, into `FFXI_PIVOT_DIR` instead. A configured
+`FFXI_PIVOT_DIR` is never written to without the flag (apart from the table sync below).
+After a successful pack build into the base install, if `FFXI_PIVOT_DIR` is set, the
+custom region of the pivot's tables is updated via `sync_pivot_from_base()` so sizes stay
+uniform and new gear/entity file_ids resolve through it; a `--pivot` build registers in
+the pivot's own tables and skips that sync. Each action records the target it was built
+into (`result.targets`), and `undo`, `package` and `release` follow it.
 
 ```bash
 uv run xi dats build --project gyokko_mask            # into FFXI_DIR, then sync pivot tables
+uv run xi dats build --project gyokko_mask --pivot    # into FFXI_PIVOT_DIR (no sync)
 uv run xi dats build --project gyokko_mask --dry-run  # preview only, writes nothing
 uv run xi dats changelog --project gyokko_mask        # table of recorded results
 ```
 
-- The base install's `FTABLE`/`VTABLE` **must already exist and be expanded** for the custom
+### Which table registers a file_id
+
+The client resolves a file_id through the `ROM{n}` pair first (`ROM10/FTABLE10.DAT` +
+`VTABLE10.DAT`) and falls back to the main `FTABLE.DAT`/`VTABLE.DAT`. XIPivot swaps in
+the pivot folder's copy of a `ROM{n}` pair, but the main pair always comes from the base
+install: the pivot folder's copy of it is never read. Tested in game with `!injectaction`
+(a job ability, a spell and a weapon skill each played its custom DAT when registered only
+in the pivot folder's `ROM10` pair, even over a main entry still pointing at a retail
+placeholder), and XIPivot's debug log shows the same — it serves `ROM10/FTABLE10.DAT` from
+the pivot folder and never sees `FTABLE.DAT` opened.
+
+So a build registers a `ROM{n}` placement in the target's `ROM{n}` pair. In the base
+install the main pair gets the same entry when it is big enough to hold the id (for the
+tools that read only that pair); a retail-sized main `FTABLE` — a launcher may put one
+back — is left alone instead of failing the build, and a pivot folder's main pair is never
+written. A `ROM/…` placement registers in the main pair, so it needs the base install: with
+`--pivot` the build refuses one that would need a new entry.
+
+What this means with a pivot folder that carries its own `ROM10` tables (CatsEyeXI's does):
+
+- A job ability, spell or weapon skill built into the base install lands in the install's
+  `ROM10` tables, which that client never reads, and `sync_pivot_from_base()` copies only
+  the custom region above retail (109,701 on), so it stays invisible there. Build those
+  with `--pivot` (the model viewer's *Use Pivot Folder*).
+- The same resolution order decides whether a slot is free: builds and the ability
+  publisher read the `ROM{n}` pair first, so a slot that is live through a `ROM{n}` entry
+  is never handed out again.
+- Gear and entity ids sit in the custom region, so a base-install build reaches the pivot
+  folder through the sync — and the same sync overwrites that region of the pivot folder's
+  tables, including entries a `--pivot` build registered there. Don't mix plain and
+  `--pivot` builds for gear and entities.
+
+- The target's `FTABLE`/`VTABLE` **must already exist and be expanded** for the custom
   models you're placing — run `xi ftable expand entity` / `xi ftable expand gear` on
-  that install first. The wizard's opening step reports expansion status.
+  that install first (for a `ROM10` placement the `ROM10` pair is the one that must hold
+  the id). The wizard's opening step reports expansion status.
 - Each table is backed up once to `<name>.base` before the first patch (recoverable via
   `xi ftable reset`).
 - **`--dry-run`** prints the full per-DAT placement plan (every race for gear) and any
@@ -178,16 +241,16 @@ project's DATs from the live install frees those slots again.
 ## Packaging for distribution (`xi dats package`)
 
 ```bash
-uv run xi dats package gyokko_mask               # read from FFXI_DIR (default --from dir)
-uv run xi dats package gyokko_mask --from pivot  # or pivot | hd
+uv run xi dats package gyokko_mask               # read from where it was built
+uv run xi dats package gyokko_mask --from pivot  # or dir | pivot | hd
 ```
 
 With no project argument, lists `projects/*.json` to pick from. Reads from **one** source
-(`--from dir|pivot|hd`, default `dir` — where builds land). Zips everything needed to run
-one project as an overlay:
+(`--from dir|pivot|hd`; the default is where the project was built — `pivot` when every
+build used `--pivot`, else `dir`). Zips everything needed to run one project as an overlay:
 
-- every DAT the project's actions placed (from each action's inline `result` — all
-  per-race DATs for gear), plus the mount name/help/key-item string DATs for mount actions,
+- every DAT the actions built into that source placed (from each action's inline `result`
+  — all per-race DATs for gear), plus the mount name/help/key-item string DATs for mount actions,
 - the full `FTABLE`/`VTABLE` set (so the new file_ids resolve).
 
 Files are laid out ROM-relative inside the zip (XIPivot-ready). Build the project first.
@@ -198,7 +261,7 @@ Two different trees — don't confuse them:
 
 | Path | Role |
 |---|---|
-| **Live target** (`FFXI_DIR`) | Where `dats build` places mesh/entity/gear/mount DATs + table patches. Then `sync_pivot_from_base()` updates pivot overlay tables when configured. |
+| **Live target** (`FFXI_DIR`, or `FFXI_PIVOT_DIR` with `--pivot`) | Where `dats build` places mesh/entity/gear/mount DATs + table patches and edits menu records. After a base-install build, `sync_pivot_from_base()` updates pivot overlay tables when configured. |
 | `projects/resources/` | Source tree you commit: GLBs, PNGs, `zone-changes.json`, imported JSON, mount DATs, etc. |
 | `projects/ffxi/` + `projects/ffxi-hd/` | **Zone actions only** — standard/HD package output trees (not the live gear/entity target). |
 | `projects/packages/` | Zip output from `xi dats package`. |
@@ -283,18 +346,18 @@ resource files that live next to the source JSON into `projects/resources/<type>
 
 | Command | What it does |
 |---|---|
-| `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity/NPC) at new model ids, or publish an ability recipe, and write a manifest action |
-| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--dry-run` previews (no separate `plan` command) |
-| `xi dats package <project>` | Zip the project's built DATs + F/V tables (`--from dir`/`pivot`/`hd`, default `dir`) into `projects/packages/<project>.zip` (ROM-relative, XIPivot-ready) |
-| `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder). Prompts for the folder; `--to <path>`, `--no-dll` |
-| `xi dats undo <project>` | Reverse a build: delete the placed DATs + clear their file_id entries, then remove the manifest (`--keep-json` keeps it) |
+| `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity/NPC) at new model ids, publish an ability recipe, or add a spell / command menu record, and write a manifest action; `--pivot` checks and builds into `FFXI_PIVOT_DIR` |
+| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--pivot` builds into `FFXI_PIVOT_DIR` instead (no sync); `--dry-run` previews (no separate `plan` command) |
+| `xi dats package <project>` | Zip the project's built DATs + F/V tables (`--from dir`/`pivot`/`hd`, default where it was built) into `projects/packages/<project>.zip` (ROM-relative, XIPivot-ready) |
+| `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder), and the DATs of `--pivot` builds into the release's pivot folder. Prompts for the folder; `--to <path>`, `--no-dll` |
+| `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back, then remove the manifest (`--keep-json` keeps it) |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe into `projects/resources` and add an action (`--type`, and for abilities `--kind` / `--animation` / `--subdir`) |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`) |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
-> (then sync pivot tables), while `zone` actions still build the `projects/ffxi` +
-> `projects/ffxi-hd` package trees.
+> (then sync pivot tables), or into `FFXI_PIVOT_DIR` with `--pivot`, while `zone` actions
+> still build the `projects/ffxi` + `projects/ffxi-hd` package trees.
 
 ## Current builders
 
@@ -312,6 +375,13 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   number against the live tables, places them under `ROM10/<subdir>/` and registers the
   file ids; records kind / animation / placements on the action and emits the server
   SQL to `projects/server/abilities/`. Needs no table expansion.
+- `spell` / `command`: writes a definition (`xi.menu.xi_menu_table`) as a new record of
+  `ROM/118/114.DAT` (the `mgc_` / `comm` section grown to hold it) plus its EN/JP
+  name/help blocks in `ROM/181`, at an id above the retail band decided against the
+  live table; records `record_id` (+ `menu_index`) and the edited string tables on the
+  action, emits a server row template to `projects/server/spells|commands/`. No file
+  ids, no table expansion; the client needs a ceiling plugin such as cexislots to show
+  the band. A `--force` overwrite keeps the old row on `result.replaced` for `undo`.
 
 GLB-rebuild / package types:
 
