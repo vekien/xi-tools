@@ -20,11 +20,49 @@ from typing import Dict, List, Optional
 
 from xi.ability.xi_inspect import ABILITY_FILE_OFFSET
 from xi.ability.xi_inspect import Model, _sql_rows, _title
-from xi.entity.anim.xi_motion_tables import RACE_NAMES
+from xi.entity.anim.xi_motion_tables import RACE_NAMES, category_bases, load_maindll
 from xi.ftable.xi_core import load_all_tables, scan_file_ids
 from xi.xi_config import FFXI_DIR
 
 JA_ANIM_MAX = 338
+
+# The always-loaded race base (the `movement` table's file +0) carries the cast and
+# job-ability clips on every character, so a job ability or spell references one by name
+# (compose's `by_reference` lane) and it maps to every race for free — no baking. These
+# are the short, curated motion list the Ability Mixer offers for `ja`/`spell`, in place
+# of every spell whose motion is really one of these few.
+#
+# Each family is a clip GROUP whose 4th character wildcards the body part: chant `<x>0`,
+# release `<x>1` (the PC basic action set, ``xi.event.xi_compile.CAST_FAMILIES``: black
+# mb0/mb1, white mw0/mw1, blue ma0/ma1, ninjutsu mn0/mn1, summon ms0/ms1, item mi0/mi2,
+# generic job ability cm0/cm1). v1 exposes the chant group as the representative motion.
+#
+# NAMES ARE COSMETIC — edit them freely; the clip prefix is what resolves the motion, so
+# a renamed row still plays the same animation. (name, kind, chant-clip prefix.)
+BASE_MOTIONS = [
+    # Confirmed magic casts (xi.event.xi_compile.CAST_FAMILIES: black mb, white mw, blue
+    # ma, ninjutsu mn, summon ms, item mi, generic job ability cm).
+    ("Black Magic Cast", "spell", "mb0"),
+    ("White Magic Cast", "spell", "mw0"),
+    ("Blue Magic Cast",  "spell", "ma0"),
+    ("Ninjutsu Cast",    "spell", "mn0"),
+    ("Summoning",        "spell", "ms0"),
+    ("Item Use",         "ja",    "mi0"),
+    ("Job Ability",      "ja",    "cm0"),
+    # Bard songs, ranged and Geomancy motions the race base also carries. The game does
+    # not name these clips, so the LABELS ARE BEST-EFFORT — preview each in the mixer and
+    # rename here; the clip prefix (not the name) is what resolves the motion. `yu` = yumi
+    # (bow) is certain; the song/geomancy split (sf/sh/sk, gc/gh) is not.
+    ("Bard: Flute",          "spell", "sf0"),
+    ("Bard: String",         "spell", "sh0"),
+    ("Bard: Singing",        "spell", "sk1"),   # the base has sk1/sk2, no sk0
+    ("Ranged: Bow",          "ja",    "yu0"),
+    ("Ranged: Marksmanship", "ja",    "gu0"),
+    ("Geomancy",             "spell", "gc0"),   # tentative — gc/gh are an unlabelled pair
+]
+# The `movement` table file that carries them (its clips are named, not baked, so it is
+# always index 0..4 — a `by_reference` slot in compose). +0 is the race base itself.
+_BASE_MOTION_MOVEMENT_INDEX = 0
 
 
 def _ability_names() -> Dict[int, List[str]]:
@@ -138,3 +176,46 @@ def build_catalog(kinds=("ja", "spell", "ws"), echo=lambda s: None) -> List[dict
                                 "path": hm, "paths": paths, **d})
         echo(f"ws: {sum(1 for e in entries if e['kind'] == 'ws')}")
     return entries
+
+
+def build_base_motions(echo=lambda s: None) -> List[dict]:
+    """The curated always-loaded motions a job ability or spell can reference (see
+    ``BASE_MOTIONS``) as catalog rows: name, kind, the clip group, and the race base DAT
+    per race (so the viewer previews each race's own copy). The clip refs and lengths come
+    from HumeMale's base; a family with no clip there is skipped. Empty when the game dir
+    or FFXiMain.dll is unavailable — the mixer then falls back to the full ja/spell list."""
+    base = Path(FFXI_DIR)
+    try:
+        move = category_bases(load_maindll()).get("movement")
+    except (FileNotFoundError, ValueError):
+        return []
+    if not move:
+        return []
+    tables = load_all_tables()
+    fids = [move[ri] + _BASE_MOTION_MOVEMENT_INDEX for ri in range(len(RACE_NAMES))]
+    hits = {h["file_id"]: h["dat"] for h in scan_file_ids(fids, tables)}
+    paths: Dict[str, str] = {}
+    for ri, race in enumerate(RACE_NAMES):
+        rel = hits.get(move[ri] + _BASE_MOTION_MOVEMENT_INDEX)
+        if rel and (base / rel).exists():
+            paths[race] = rel
+    hm = paths.get("HumeMale")
+    if not hm:
+        return []
+    try:
+        m = Model.load(base / hm)
+    except Exception:  # noqa: BLE001 — a malformed base DAT means no base-motion list
+        return []
+    out: List[dict] = []
+    for name, kind, prefix in BASE_MOTIONS:
+        # The clip group's body parts: <prefix><digit> (mb0 -> mb00, mb01). The ref the
+        # recipe carries wildcards the last character (mb0?), which the client resolves
+        # against whichever race is loaded.
+        parts = [c for c in m.clips if len(c) == 4 and c[:3] == prefix and c[3:].isdigit()]
+        if not parts:
+            continue
+        frames = max((int(round(m.clips[c].get("frames") or 0)) for c in parts), default=0)
+        out.append({"spec": hm, "kind": kind, "name": name, "cat": "Base Motion",
+                    "path": hm, "paths": paths, "clip": {"ref": f"{prefix}?", "frames": frames or 1}})
+    echo(f"base motions: {len(out)}")
+    return out

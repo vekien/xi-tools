@@ -5,6 +5,7 @@ Install-backed tests use the ``root`` fixture and skip without FFXI_DIR."""
 import struct
 from pathlib import Path
 
+import click
 import pytest
 
 from xi.ability import xi_compose as ac
@@ -98,16 +99,102 @@ def test_mesh_textures_come_along(root: Path):
 
 
 def test_clip_pack_lane_without_routine(root: Path):
-    # Basic (ROM/27/82) is a clip pack: idl0/idl1/idl2 and friends, no `main`. A lane
-    # with `routine: null` composes a PlayClip from the template and carries the clips.
-    recipe = {"name": "idle", "sources": {"motion": {"spec": "ROM/27/82.DAT", "routine": None}},
-              "events": [{"from": "motion", "op": 5, "ref": "idl?", "start": 0, "dur": 30}]}
+    # An emote file (ROM/37/13, Hume Female) is a clip pack: bow0/bow1 and friends, no
+    # `main`. A lane with `routine: null` composes a PlayClip from the template and
+    # carries the clips.
+    recipe = {"name": "bow", "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 30}]}
     assert ac.validate_recipe(recipe) == []
-    (c,) = ac.compose(recipe)
+    (c,) = ac.compose(recipe, race="HumeFemale")
     names = {s.split("(")[0] for s in c.sections}
-    assert "idl0" in names and "main" in names, c.sections
-    assert [t["ref"] for t in c.timeline if t["op"] == 5] == ["idl?"]
+    assert "bow0" in names and "main" in names, c.sections
+    assert [t["ref"] for t in c.timeline if t["op"] == 5] == ["bow?"]
     assert c.total == 30      # the routine ends where its lone clip's window does, not at 0
+
+
+def test_emote_lane_maps_to_every_race(root: Path):
+    # Hume Female's emote file is a slot in the client's per-race emote table: every race
+    # composes its own bow, the waist part (bow2, in the +6 sibling) included.
+    recipe = {"name": "bow", "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 60}]}
+    lane = ac._lanes(recipe)["motion"]
+    assert lane.race_bound and lane.slot.category == "emote"
+    out = ac.compose(recipe)
+    assert [c.race for c in out] == list(ac.RACE_NAMES)
+    for c in out:
+        names = {s.split("(")[0] for s in c.sections}
+        assert {"bow0", "bow1", "bow2"} <= names, (c.race, c.sections)
+        assert c.warnings == [], (c.race, c.warnings)
+    by_race = {c.race: c for c in out}
+    assert by_race["HumeFemale"].data != by_race["Galka"].data      # each race's own clips
+
+
+def test_race_base_lane_names_clips_without_carrying(root: Path):
+    # The race base (movement table, +0) is always loaded on a character, so its clips
+    # are named, not carried: one DAT serves every race, and a job ability can use it.
+    recipe = {"name": "cm", "sources": {"motion": {"spec": "ROM/32/58.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "cm0?", "start": 0, "dur": 30}]}
+    lane = ac._lanes(recipe)["motion"]
+    assert lane.by_reference and not lane.race_bound
+    (c,) = ac.compose(recipe)
+    assert not any(s.endswith("(0x2B)") for s in c.sections), c.sections
+    assert [t["ref"] for t in c.timeline if t["op"] == 5] == ["cm0?"]
+    assert c.warnings == []
+
+
+def test_base_motions_are_by_reference_casts(root: Path):
+    # The curated base-motion list the mixer offers for a job ability or spell: real clips
+    # from the always-loaded race base, one row per cast/ability family, each with a base
+    # DAT per race for preview. A pick composes by-reference — one race-agnostic DAT that
+    # names the clip, so the motion plays from every race's own pool.
+    from xi.ability import xi_catalog as cat
+    motions = cat.build_base_motions()
+    assert motions, "no base motions built (needs the game dir)"
+    by_name = {m["name"]: m for m in motions}
+    assert {"Black Magic Cast", "Job Ability"} <= set(by_name)
+    bm = by_name["Black Magic Cast"]
+    assert bm["kind"] == "spell" and bm["clip"]["ref"] == "mb0?" and bm["clip"]["frames"] > 0
+    assert {"HumeMale", "Mithra"} <= set(bm["paths"])      # a base DAT per race for preview
+    recipe = {"name": "bm", "sources": {"motion": {"spec": bm["spec"], "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": bm["clip"]["ref"],
+                          "start": 0, "dur": bm["clip"]["frames"] * 2}]}
+    assert ac.validate_recipe(recipe) == []
+    lane = ac._lanes(recipe)["motion"]
+    assert lane.by_reference and not lane.race_bound       # one DAT for every race
+    (c,) = ac.compose(recipe)
+    assert not any(s.endswith("(0x2B)") for s in c.sections), c.sections   # clip named, not carried
+    assert [t["ref"] for t in c.timeline if t["op"] == 5] == [bm["clip"]["ref"]]
+    # v1 exposes only always-loaded motions, so nothing here forces a per-race (ws) bake.
+    assert all(m["kind"] in ("ja", "spell") for m in motions)
+
+
+def test_one_races_own_motion_is_built_for_that_race_only(root: Path):
+    # HumeF Variations (ROM/173/48) is outside the motion tables and the character list
+    # gives it to Hume Female alone: every race composes, only Hume Female carries the
+    # clips, and the other races say they were built without them.
+    recipe = {"name": "var", "sources": {"motion": {"spec": "ROM/173/48.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "ol6?", "start": 0, "dur": 30}]}
+    lane = ac._lanes(recipe)["motion"]
+    assert lane.slot is None and lane.owners == frozenset({"HumeFemale"}) and lane.race_bound
+    by_race = {c.race: c for c in ac.compose(recipe)}
+    assert "ol60" in {s.split("(")[0] for s in by_race["HumeFemale"].sections}
+    assert by_race["HumeFemale"].warnings == []
+    galka = by_race["Galka"]
+    assert not any(s.endswith("(0x2B)") for s in galka.sections), galka.sections
+    assert len(galka.warnings) == 1 and "HumeFemale only" in galka.warnings[0], galka.warnings
+
+
+def test_per_race_motion_publishes_as_a_weapon_skill(root: Path):
+    from xi.ability import xi_publish as ap
+    emote = {"name": "bow", "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
+             "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 60}]}
+    assert ap.infer_kind(emote) == "ws"
+    with pytest.raises(click.ClickException):
+        ap.infer_kind(emote, "spell")
+    assert ap._source_ws_animation(emote) is None          # waist clips ride in the body DAT
+    base = {"name": "cm", "sources": {"motion": {"spec": "ROM/32/58.DAT", "routine": None}},
+            "events": [{"from": "motion", "op": 5, "ref": "cm0?", "start": 0, "dur": 30}]}
+    assert ap.infer_kind(base) == "ja"
 
 
 def test_race_bound_recipe_composes_per_race(root: Path):

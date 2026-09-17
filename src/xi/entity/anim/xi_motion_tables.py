@@ -42,6 +42,7 @@ This partitions cleanly: no file_id is attributed to two different races
 exception, by game design).
 """
 
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -303,6 +304,74 @@ def enumerate_race_animations(
             seen.add(wspec)
             yield race, 'emote', resolver.file_id_for(wspec) or 0, wspec, wanims
                 # dense: skip non-animation slot, keep filling the window
+
+
+# -- a motion DAT in every race -------------------------------------------------
+
+@dataclass(frozen=True)
+class MotionSlot:
+    """Where a PC motion DAT sits in the client's per-race motion tables. The same
+    category and index name every race's own copy: ``base[race] + index``, which is
+    how the client itself finds a race's emote, battle pack or weapon skill."""
+    race: str            # the race whose file it is (TaruMale for the shared Taru row)
+    category: str
+    index: int
+    waist: bool = False  # an emote part-2 sibling: file-NUMBER +6 of the slot's DAT
+
+
+_SLOT_TABLES = None
+
+
+def _rom_key(spec: str) -> str:
+    return re.sub(r'\.DAT$', '', str(spec).replace('\\', '/').strip('/'), flags=re.I).upper()
+
+
+def _slot_tables():
+    """``(category bases, ROM key -> MotionSlot, resolver)``, built once per process
+    from FFXiMain.dll and the file tables alone. No motion DAT is read: about 20,000
+    ids resolve in a few hundredths of a second."""
+    global _SLOT_TABLES
+    if _SLOT_TABLES is None:
+        cat_bases = category_bases(load_maindll())
+        windows = _window_sizes(cat_bases)
+        resolver = _FileIdResolver()
+        by_key: Dict[str, MotionSlot] = {}
+        for cat, bases in cat_bases.items():
+            for ri, race in enumerate(RACE_NAMES):
+                for off in range(windows[cat]):
+                    spec = resolver.rom_spec(bases[ri] + off)
+                    if not spec:
+                        continue
+                    by_key.setdefault(_rom_key(spec), MotionSlot(race, cat, off))
+                    if cat == 'emote':
+                        waist = _waist_sibling_spec(spec)
+                        if waist:
+                            by_key.setdefault(_rom_key(waist), MotionSlot(race, cat, off, True))
+        _SLOT_TABLES = (cat_bases, by_key, resolver)
+    return _SLOT_TABLES
+
+
+def motion_slot_for(spec: str) -> Optional[MotionSlot]:
+    """The per-race motion slot a ROM DAT spec occupies, or None when the client's
+    motion tables do not index it (an effect DAT, a monster, or a pack such as a
+    race's Variations files, which belong to that one race)."""
+    try:
+        return _slot_tables()[1].get(_rom_key(spec))
+    except (OSError, ValueError):
+        return None
+
+
+def motion_dat_for_race(slot: MotionSlot, race) -> Optional[str]:
+    """ROM spec of ``slot`` in ``race``'s motion set (the waist sibling for a waist
+    slot), or None when that race's table entry resolves to nothing."""
+    cat_bases, _, resolver = _slot_tables()
+    bases = cat_bases.get(slot.category)
+    if not bases:
+        return None
+    spec = resolver.rom_spec(bases[race_index(race)] + slot.index)
+    if spec and slot.waist:
+        spec = _waist_sibling_spec(spec)
+    return spec
 
 
 # -- weapon-skill banks --------------------------------------------------------

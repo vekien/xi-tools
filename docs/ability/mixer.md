@@ -118,7 +118,39 @@ holds the file tables in memory: publish with it closed, or restart it afterward
 |---|---|---|---|---|
 | `ja` | no lane is race-bound and no clips are carried | `file_id = 4412 + animation` | first free from **339** (retail band 4412–4750 is full) | `abilities.animation` |
 | `spell` | the motion lane is a `spell:N` (or `target.kind` says so); one DAT for every race | `file_id = 0xAF0 + animation` — the client has no spell table, `spell_list.animation` rides in the magic-finish action packet | first **unregistered** id from **1012** (retail reaches 1011; the ids above are shared with other content, 92 free up to 1611) | `spell_list.animation` |
-| `ws` | a lane is `ws:N` (per-race clips) | per-race extended bank, slots 256–271 | first slot whose body DAT is a retail dummy on every race (**264–271**) | `weapon_skills.animation`, or a `mob_skills` row with id < 256 |
+| `ws` | a lane is race-bound: `ws:N`, or a motion from a race's own animation files (below) | per-race extended bank, slots 256–271 | first slot whose body DAT is a retail dummy on every race (**264–271**) | `weapon_skills.animation`, or a `mob_skills` row with id < 256 |
+
+### Motion from a race's own animation files
+
+A lane whose source is a PC motion DAT — an emote, a battle pack, a dance, a weapon-skill
+file picked from the character list — is mapped to every race through the client's own
+per-race motion tables in FFXiMain.dll (`base[race] + index`, the lookup the client
+uses; `xi.entity.anim.xi_motion_tables.motion_slot_for`). Hume Female's emote file
+`ROM/37/13` is Galka's `ROM/61/8`, and so on. Such a recipe composes once per race, and
+each race's DAT carries that race's own clips, an emote's waist part from its `+6`
+sibling included. A race with no copy of the file, or no clip by that name, is built
+without that motion, and compose, `dats build` and its dry run say so:
+
+```text
+⚠ Galka: motion2 (ROM/173/48.DAT) is HumeFemale only; built without its 3 events
+```
+
+That is why such motion publishes only as `ws`: a job-ability or spell slot is one DAT
+for every race, and the client reads emote and pack motions only while they play
+(`XiSkeletonActor::ReadEMotionRes`, then `DeleteResp`), so a single DAT can neither
+carry every race's clips nor name them. Two cases differ:
+
+- **The race base** (the first five files of the `movement` table: idle, walk, cast and
+  job-ability motions such as `cm0?`, `mb0?`) is always loaded on a character, so its
+  clips are named, not carried, and a job ability or spell can use them. A race whose
+  base lacks the clip gets a warning.
+- **A file the tables do not index** that the character list gives to some races only
+  (a race's Variations files) is built for those races, with the warning above for the
+  rest.
+
+A weapon-skill slot built from motion that is not itself a weapon skill has no source
+companions to copy: its waist clips ride in the body DAT, and the slot's own companion
+ids keep pointing at retail's placeholders.
 
 For `ws`, the three DATs per race (body + companion A/B waist packs) are placed and
 registered; the companions are copied from the motion source's own slot for that race.
@@ -149,6 +181,19 @@ frames. Dummies and DATs without `main` are skipped. ~1,500 entries, about a min
 It ships with the viewer like every other list and reaches installs through the lists
 manifest (see [../mv/README.md](../mv/README.md)); the mixer's *Build catalog* button
 runs the same target into the viewer's own lists folder when the list is missing.
+
+The file also carries a `base_motions` list (`xi.ability.xi_catalog.build_base_motions`):
+the curated cast and job-ability motions the always-loaded race base offers — black/white/
+blue magic, ninjutsu, summoning, item use, generic job ability, plus Bard songs, ranged
+(bow/marksmanship) and Geomancy — each a clip group (`mb0?`, `mw0?`, `cm0?`…) read from the
+real race base, with the base DAT per race for preview. The game does not name these clips,
+so the song/ranged/geomancy labels are best-effort; the clip prefix, not the name, resolves
+the motion (edit `BASE_MOTIONS` freely). On the `ja`/`spell` motion lane the mixer shows this short list in place of every
+spell whose motion is really one of these few; a pick composes by-reference (one
+race-agnostic DAT that names the clip). WS still shows every motion, baked per race. The
+names are cosmetic — edit `BASE_MOTIONS` in `xi_catalog.py`; the clip prefix resolves the
+motion. Motions that live in the weapon-skill bank (Tomahawk, Jump, Mug…) are **not** here:
+they are race-bound and would force a `ws` publish, so they stay on the WS list.
 
 ## In the viewer
 

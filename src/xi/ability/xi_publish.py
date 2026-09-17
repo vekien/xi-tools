@@ -39,9 +39,10 @@ from typing import Dict, List, Optional
 
 import click
 
-from xi.ability.xi_compose import Composed, _lanes, compose, load_recipe, output_name
+from xi.ability.xi_compose import Composed, _is_race_bound, _lanes, compose, load_recipe, output_name
 from xi.ability.xi_inspect import ABILITY_FILE_OFFSET
-from xi.entity.anim.xi_motion_tables import resolve_weapon_skill
+from xi.entity.anim.xi_motion_tables import (
+    WS_EXTENDED_FIRST, WS_EXTENDED_SLOTS, WS_PRIMARY_SLOTS, resolve_weapon_skill)
 
 JA_CUSTOM_FIRST = 339           # first animation number past the retail band
 JA_CUSTOM_LAST = 499            # 4412 + 499 = 4911, just below the weapon-skill VFX band
@@ -110,8 +111,10 @@ def infer_kind(recipe: dict, kind: Optional[str] = None) -> str:
         kind = "ws" if race_bound else ("spell" if motion_spec.lower().startswith("spell:") else "ja")
     if race_bound and kind != "ws":
         raise click.ClickException(
-            "this recipe carries per-race motion clips (a ws: lane), so it must be published "
-            "as kind 'ws' — a job-ability or spell slot is one DAT for every skeleton")
+            "this recipe's motion is different for every race (a weapon skill, emote, battle, "
+            "dance or one race's own motion), so it must be published as kind 'ws', which "
+            "builds one DAT per race — a job-ability or spell slot is one DAT for every race, "
+            "and the game only loads those motions while they play")
     if kind not in KINDS:
         raise click.ClickException(f"unsupported ability kind {kind!r} (ja, spell or ws)")
     return kind
@@ -145,11 +148,23 @@ def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool,
             return n
     if wanted is not None:
         raise click.ClickException(
-            f"weapon-skill slot {wanted} is not free on every race (a slot is free when each "
-            "race's body DAT is a retail dummy); pass --force to overwrite it")
+            f"Weapon-skill slot {wanted} isn't free — some race already has a real motion DAT "
+            f"there (a slot is free only when every race's body DAT is a retail dummy). Pass "
+            f"--force to overwrite it, pick another slot in {WS_CUSTOM_FIRST}–{WS_CUSTOM_LAST}, "
+            f"or publish the mix as a job ability / spell instead.")
     raise click.ClickException(
-        "no weapon-skill extended slot is free (a slot is free when every race's body DAT is "
-        "a retail dummy); pass --animation N --force to overwrite one")
+        f"All {WS_CUSTOM_LAST - WS_CUSTOM_FIRST + 1} custom weapon-skill animation slots "
+        f"({WS_CUSTOM_FIRST}–{WS_CUSTOM_LAST}) are taken on this install — none is a retail "
+        "dummy on every race, so there's nowhere free to bake a per-race weapon-skill motion. "
+        "Three ways forward:\n"
+        f"  1. --animation N --force  — overwrite one of {WS_CUSTOM_FIRST}–{WS_CUSTOM_LAST} "
+        "(clobbers whatever custom skill is on that slot);\n"
+        "  2. --pivot  — build into FFXI_PIVOT_DIR instead, if it has room;\n"
+        "  3. give the mix a motion that isn't race-bound (a magic cast, a Bard song, a base "
+        "ability motion) so it publishes as a job ability or spell — those have far more room "
+        "(and cexislots raises their id ceiling further). Note: cexislots lifts the spell / "
+        "job-ability id ceilings, but not this 16-slot weapon-skill motion bank — enlarging "
+        "that would need its own client patch.")
 
 
 def _free_files(root: Path, subdir: int, count: int, reserved: Optional[set] = None) -> List[int]:
@@ -173,9 +188,18 @@ def _ws_file_ids(animation: int, race: str) -> Dict[str, int]:
 
 
 def _source_ws_animation(recipe: dict) -> Optional[int]:
+    """The weapon-skill number whose slot the companion (waist) DATs are copied from: a
+    ``ws:N`` lane's, or a weapon-skill motion file's own bank slot. None when the
+    per-race motion comes from elsewhere (an emote, a battle pack), which carries its
+    waist clips in the body DAT."""
     for lane in _lanes(recipe).values():
-        if lane.race_bound:
+        if _is_race_bound(lane.spec):
             return int(lane.spec.split(":")[1])
+        slot = lane.slot
+        if slot is not None and slot.category == "weaponSkill":
+            return slot.index % WS_PRIMARY_SLOTS
+        if slot is not None and slot.category == "weaponSkillExt":
+            return WS_EXTENDED_FIRST + slot.index % WS_EXTENDED_SLOTS
     return None
 
 
@@ -229,6 +253,10 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
             files.append({"race": c.race, "role": "body", "file_id": ids["body"],
                           "place": place_for(c.race, "body", pool), "composed": c})
             # Companion (waist) DATs come from the motion source's slot for the same race.
+            # Motion that is not a weapon skill has no such slot: its waist clips ride in
+            # the body DAT, and the slot's own companions (retail's placeholders) stay.
+            if src_anim is None:
+                continue
             src_ids = _ws_file_ids(src_anim, c.race)
             for role in ("companion_a", "companion_b"):
                 hits = scan_file_ids([src_ids[role]])
@@ -239,7 +267,9 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
                               "copy_from": Path(FFXI_DIR) / hits[0]["dat"]})
     for f in files:
         f["current"] = _placement(root, f["file_id"])
-    return {"root": root, "kind": kind, "animation": anim, "subdir": subdir, "files": files}
+    warnings = list(dict.fromkeys(w for c in composed for w in c.warnings))
+    return {"root": root, "kind": kind, "animation": anim, "subdir": subdir, "files": files,
+            "warnings": warnings}
 
 
 def write_sources(recipe: dict, p: dict) -> List[Path]:

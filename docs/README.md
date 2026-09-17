@@ -324,6 +324,7 @@ Core lookup tables and named-DAT catalog.
 | [reference/named-dats.md](reference/named-dats.md) | fileId catalog: string tables, system messages, per-zone event/entity ranges |
 | [reference/dat_sections.md](reference/dat_sections.md) | DAT section type reference |
 | [reference/ps2_decomp_crosscheck.md](reference/ps2_decomp_crosscheck.md) | 2003 PS2 client decompile vs. these docs: verified formulas, SE names for event/scheduler opcodes, 2003 packet opcode tables, section-type map |
+| [reference/ps2_beta_2001.md](reference/ps2_beta_2001.md) | 2001 PS2 beta disc (unstripped ELF): SE `RES_TYPE` names for every section code, SE names for all `0x05` generator and `0x07` scheduler opcodes, attach points, hide groups, POL library names and ciphers |
 | [ffximain/dll.md](ffximain/dll.md) | `xi dll` category: shared POL1 unpack/pack for FFXiMain / polcore / app |
 | [ffximain/ffximain.md](ffximain/ffximain.md) | FFXiMain.dll: POL1 algorithm, gear groups, model formulas, Ghidra |
 | [ffximain/polcore.md](ffximain/polcore.md) | polcore.dll: PlayOnline COM host, IPOLCoreCom, base collision with FFXiMain |
@@ -362,3 +363,9 @@ Reference material from other researchers.
 |------|---------|
 | [external_source/zone184_event22.md](external_source/zone184_event22.md) | Annotated event bytecode dump — zone 184, event 22 |
 | [external_source/New-Player-Cutscene-Pipeline.md](external_source/New-Player-Cutscene-Pipeline.md) | New-player cutscene pipeline notes |
+
+### PS2 PlayOnline Viewer
+
+| Doc | Summary |
+|-----|---------|
+| [ps2_pol_viewer_2001.md](reference/ps2_pol_viewer_2001.md) | SLPM 621.34 POL Viewer disc (`F:\`): CDFILE map, MWo3 `.pex`, POLKEY / `.pex.enc` open leads |

@@ -29,6 +29,16 @@ resolved by renaming the later section and patching its references.
 
 A lane whose spec is a weapon-skill number without a race (``ws:1``) is race-bound, so the
 recipe composes once per race and the output is one DAT per race.
+
+A lane read from a PC race's own motion file is race-bound the same way: the client's
+per-race motion tables (xi_motion_tables) map an emote, battle pack, dance or weapon-skill
+DAT to every race's copy, and each race's DAT carries that race's clips (an emote's waist
+part from its +6 sibling included). A race without a copy, or without the clip, is built
+without that motion and the composed result says so in ``warnings``. The race base (the
+``movement`` table: idle, walk, cast and job-ability motions) is always loaded on a
+character, so its clips are named, not carried, and a job ability or spell can use them. A
+motion file the tables do not index but the character list gives to some races (a race's
+Variations) is kept for those races only.
 """
 
 from __future__ import annotations
@@ -37,7 +47,7 @@ import fnmatch
 import json
 import re
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -47,7 +57,7 @@ from xi.ability.xi_inspect import (
     LINK_OPS, REF_OPS, SOUND_OPS, T_CLIP, T_DIR, T_GEN, T_ROUTINE, T_SOUND, T_TRACE,
     Model, Target, _clean, flatten, resolve_targets)
 from xi.common.xi_section import encode_section_meta
-from xi.entity.anim.xi_motion_tables import RACE_NAMES
+from xi.entity.anim.xi_motion_tables import RACE_NAMES, _waist_sibling_spec, motion_dat_for_race, motion_slot_for
 from xi.fx.xi_copy import _DEP_TYPES, _effect_deps
 
 VFX_OPS = frozenset({0x02, 0x3F, 0x1E, 0x2D})
@@ -81,6 +91,15 @@ class Lane:
     model: Optional[Model] = None
     target: Optional[Target] = None
     events: List[dict] = field(default_factory=list)
+    # Read from a PC race's own motion file (see the module docstring): `slot` maps it
+    # to every race's copy; `owners` are the races a file outside the tables belongs
+    # to; `by_reference` (the race base) names clips without carrying them.
+    slot: Optional[object] = None
+    owners: frozenset = frozenset()
+    by_reference: bool = False
+    source: Optional[Model] = None     # the spec's own DAT: commands looked up by offset
+    waist: Optional[Model] = None      # an emote's part-2 clips (file-NUMBER +6)
+    missing: Optional[str] = None      # why this race has no copy; its events are left out
 
 
 @dataclass
@@ -91,6 +110,7 @@ class Composed:
     renames: Dict[str, str]
     timeline: List[dict]
     total: int
+    warnings: List[str] = field(default_factory=list)
 
 
 # ── Recipe loading ───────────────────────────────────────────────────────────────
@@ -212,27 +232,96 @@ def _is_race_bound(spec: str) -> bool:
     return kind.lower() == "ws" and ":" not in rest
 
 
+_ROM_SPEC_RX = re.compile(r"^ROM\d*/\d+/\d+(\.DAT)?$", re.I)
+_TARU = frozenset({"TaruMale", "TaruFemale"})
+_OWNER_CACHE: Dict[str, frozenset] = {}
+
+
+def _race_owners(spec: str) -> frozenset:
+    """The races whose motion set lists a DAT the motion tables do not index, from
+    the character list (HumeF Variations is Hume Female's alone). Empty when no race
+    lists it, or when every race does (a shared file, nothing to map)."""
+    key = spec.replace("\\", "/").upper().removesuffix(".DAT")
+    if key in _OWNER_CACHE:
+        return _OWNER_CACHE[key]
+    owners: Set[str] = set()
+    try:
+        from xi.entity.anim.xi_categories import CHARACTERS_LIST, _LIST_RACE_TO_XI, rom_key
+        data = json.loads(Path(CHARACTERS_LIST).read_text(encoding="utf-8"))
+        for race in data.get("races") or []:
+            xi_race = _LIST_RACE_TO_XI.get(str(race.get("id") or ""))
+            if not xi_race:
+                continue
+            for action in race.get("actions") or []:
+                if any(rom_key(p) == key for p in (action.get("paths") or []) + (action.get("motionPaths") or [])):
+                    owners.update(_TARU if xi_race in _TARU else {xi_race})
+                    break
+    except (OSError, ValueError):
+        owners = set()
+    out = frozenset() if len(owners) in (0, len(RACE_NAMES)) else frozenset(owners)
+    _OWNER_CACHE[key] = out
+    return out
+
+
 def _lanes(recipe: dict) -> Dict[str, Lane]:
     lanes = {}
     for name, src in recipe["sources"].items():
         if isinstance(src, str):
             src = {"spec": src}
-        lanes[name] = Lane(name, src["spec"], src.get("routine", "main"), _is_race_bound(src["spec"]))
+        spec = src["spec"]
+        ws = _is_race_bound(spec)
+        slot, owners = None, frozenset()
+        if not ws and _ROM_SPEC_RX.match(spec.replace("\\", "/")):
+            slot = motion_slot_for(spec)
+            # The movement table's real files are the race base, +0..4 (idle, walk,
+            # cast and job-ability motions); the rest of its window is unrelated.
+            if slot is not None and slot.category == "movement" and slot.index > 4:
+                slot = None
+            if slot is None:
+                owners = _race_owners(spec)
+        by_reference = slot is not None and slot.category == "movement"
+        race_bound = ws or (slot is not None and not by_reference) or bool(owners)
+        lanes[name] = Lane(name, spec, src.get("routine", "main"), race_bound,
+                           slot=slot, owners=owners, by_reference=by_reference)
     return lanes
 
 
-def _load_lane(lane: Lane, race: Optional[str]) -> Lane:
-    spec = f"{lane.spec}:{race}" if (lane.race_bound and race) else lane.spec
+def _load_model(spec: str) -> Tuple[Target, Model]:
     t = resolve_targets(spec)[0]
-    m = Model.load(t.path)
+    return t, Model.load(t.path)
+
+
+def _load_lane(lane: Lane, race: Optional[str]) -> Lane:
+    spec = lane.spec
+    if lane.slot is not None and not lane.by_reference and race:
+        mapped = motion_dat_for_race(lane.slot, race)
+        from xi.xi_config import FFXI_DIR
+        if not mapped or not (Path(FFXI_DIR) / mapped).is_file():
+            return replace(lane, missing=f"{race}: {lane.name} ({lane.spec}) has no {race} copy")
+        spec = mapped
+    elif lane.owners and race and race not in lane.owners:
+        return replace(lane, missing=f"{race}: {lane.name} ({lane.spec}) is "
+                                     f"{', '.join(sorted(lane.owners))} only")
+    elif lane.race_bound and race and lane.slot is None and not lane.owners:
+        spec = f"{lane.spec}:{race}"      # ws:N
+    t, m = _load_model(spec)
+    # Commands a recipe names by routine + offset point into the spec's own DAT, not a
+    # mapped race's copy (whose routines may sit elsewhere).
+    source = m if spec == lane.spec or lane.slot is None else _load_model(lane.spec)[1]
+    waist = None
+    if lane.slot is not None and lane.slot.category == "emote" and not lane.slot.waist and not lane.by_reference:
+        wspec = _waist_sibling_spec(t.rel)
+        from xi.xi_config import FFXI_DIR
+        if wspec and (Path(FFXI_DIR) / wspec).is_file():
+            waist = _load_model(wspec)[1]
     # A lane with no routine (`"routine": null`) is a bare clip pack — Basic, the
     # emotes — whose events are plain PlayClip commands built from the template.
     if lane.routine is None:
-        return Lane(lane.name, spec, None, lane.race_bound, m, t, [])
-    if lane.routine not in m.routines:
-        raise click.ClickException(f"lane {lane.name}: {t.rel} has no routine {lane.routine!r}")
-    return Lane(lane.name, spec, lane.routine, lane.race_bound, m, t,
-                flatten(m, lane.routine))
+        return replace(lane, spec=spec, model=m, target=t, events=[], source=source, waist=waist)
+    if lane.routine not in source.routines:
+        raise click.ClickException(f"lane {lane.name}: {lane.spec} has no routine {lane.routine!r}")
+    return replace(lane, spec=spec, model=m, target=t, events=flatten(source, lane.routine),
+                   source=source, waist=waist)
 
 
 # ── Command bytes ────────────────────────────────────────────────────────────────
@@ -252,8 +341,8 @@ def _source_command(lane: Lane, ev: dict) -> bytes:
     op = _op(ev["op"])
     if ev.get("raw"):
         return bytes.fromhex(ev["raw"])
-    if ev.get("routine") and ev.get("offset") is not None and lane.model:
-        return lane.model.raw_command(ev["routine"], int(ev["offset"]))
+    if ev.get("routine") and ev.get("offset") is not None and (lane.source or lane.model):
+        return (lane.source or lane.model).raw_command(ev["routine"], int(ev["offset"]))
     ref = ev.get("ref")
     for e in lane.events:
         if e["op"] == op and (e["ref"] == ref or (ref is None and e["ref"] is None)):
@@ -393,9 +482,14 @@ def _gather_for_command(bag: Bag, lane: Lane, op: int, ref: Optional[str],
             f"lane {lane.name!r} ({lane.target.rel}) has no sound pointer {ref!r}; "
             f"it has: {', '.join(sorted(m.sounds)) or 'none'}")
     if op == 0x05:
-        for clip in _match(m, ref, T_CLIP):
-            s = _sections_named(m, clip, (T_CLIP,))[0]
-            bag.add(lane.name, clip, T_CLIP, m.data[s.start:s.start + s.size])
+        if lane.by_reference:
+            return ref            # the race base is always loaded: name the clip, carry nothing
+        for model in (m, lane.waist):
+            if model is None:
+                continue
+            for clip in _match(model, ref, T_CLIP):
+                s = _sections_named(model, clip, (T_CLIP,))[0]
+                bag.add(lane.name, clip, T_CLIP, model.data[s.start:s.start + s.size])
         return ref
     if op == 0x2C:
         for tr in _match(m, ref, T_TRACE):
@@ -443,10 +537,27 @@ _TYPE_ORDER = {T_CLIP: 0, T_TRACE: 1, T_GEN: 2, T_ROUTINE: 3, 0x19: 4, 0x1F: 5, 
                0x20: 7, 0x21: 8, 0x2E: 9, T_SOUND: 10}
 
 
+def _base_clip_gaps(lane: Lane, ref: str, race: Optional[str], cache: Dict[str, Optional[Model]]) -> List[str]:
+    """Races (``race`` alone, or all of them) whose race base has no clip matching
+    ``ref`` — a by-reference lane names the clip, and those races will not play it."""
+    from xi.xi_config import FFXI_DIR
+    gaps = []
+    for r in ([race] if race else RACE_NAMES):
+        mapped = motion_dat_for_race(lane.slot, r)
+        if mapped not in cache:
+            cache[mapped] = _load_model(mapped)[1] if mapped and (Path(FFXI_DIR) / mapped).is_file() else None
+        if cache[mapped] is None or not _match(cache[mapped], ref, T_CLIP):
+            gaps.append(r)
+    return gaps
+
+
 def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str]) -> Composed:
     loaded = {n: _load_lane(l, race) for n, l in lanes.items()}
     bag = Bag()
     carried: Set[str] = set()
+    warnings: List[str] = []
+    left_out: Dict[str, int] = {}
+    bases: Dict[str, Optional[Model]] = {}
     events = sorted(recipe["events"], key=lambda e: (int(e["start"]), e.get("order", 0)))
     stamped: List[Tuple[dict, bytes, Optional[str]]] = []
     for ev in events:
@@ -455,6 +566,19 @@ def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str]) -> C
             raise click.ClickException(f"event refers to unknown lane {ev.get('from')!r}")
         op = _op(ev["op"])
         ref = ev.get("ref")
+        if lane.missing:
+            left_out[lane.name] = left_out.get(lane.name, 0) + 1
+            continue
+        if op == 0x05 and ref:
+            if lane.by_reference:
+                gaps = _base_clip_gaps(lane, ref, race, bases)
+                if gaps:
+                    warnings.append(f"{', '.join(gaps)}: no clip {ref} in the race base; "
+                                    f"{'that race' if len(gaps) == 1 else 'those races'} will not play it")
+            elif (lane.slot is not None or lane.owners) and not any(
+                    _match(model, ref, T_CLIP) for model in (lane.model, lane.waist) if model is not None):
+                warnings.append(f"{race}: no clip {ref} in {lane.target.rel}; built without it")
+                continue
         cmd = _source_command(lane, ev)
         new_ref = _gather_for_command(bag, lane, op, ref, carried) if ref else None
         if ref and new_ref == ref and (lane.name, ref) in bag.renames:
@@ -499,7 +623,9 @@ def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str]) -> C
     names.append("main(0x07)")
     out += _END_SECTION
     renames = {f"{lane}:{old}": new for (lane, old), new in bag.renames.items()}
-    return Composed(race, bytes(out), names, renames, timeline, total)
+    for name, n in left_out.items():
+        warnings.append(f"{loaded[name].missing}; built without its {n} event{'s' if n != 1 else ''}")
+    return Composed(race, bytes(out), names, renames, timeline, total, list(dict.fromkeys(warnings)))
 
 
 def compose(recipe: dict, race: Optional[str] = None) -> List[Composed]:
@@ -561,7 +687,8 @@ def compose_cmd(recipe_path: Path, out_dir: Optional[Path], race: Optional[str],
         p = out_dir / output_name(recipe, c)
         p.write_bytes(c.data)
         report.append({"race": c.race, "dat": str(p), "size": len(c.data), "total": c.total,
-                       "sections": c.sections, "renames": c.renames, "timeline": c.timeline})
+                       "sections": c.sections, "renames": c.renames, "timeline": c.timeline,
+                       "warnings": c.warnings})
     (out_dir / f"{recipe['name']}.report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     if as_json:
         click.echo(json.dumps(report, indent=2))
@@ -569,6 +696,8 @@ def compose_cmd(recipe_path: Path, out_dir: Optional[Path], race: Optional[str],
     for r in report:
         click.echo(f"{r['dat']}  {r['size']:,} B  totalDelay {r['total']}  {len(r['sections'])} sections"
                    + (f"  renames {r['renames']}" if r["renames"] else ""))
+        for w in r["warnings"]:
+            click.echo(click.style(f"  ⚠ {w}", fg="yellow"))
 
 
 @click.command("recipe")

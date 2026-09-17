@@ -1048,6 +1048,7 @@ def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: boo
         "id": action["id"], "type": "ability", "kind": plan["kind"], "animation": plan["animation"],
         "recipe": str(recipe_path), "placements": placements,
         "server": str(server_path) if server_path else None, "sql": sql,
+        "warnings": plan.get("warnings") or [],
         "registered": f"animation {plan['animation']} -> {len(placements)} DAT(s)",
     }
 
@@ -2281,6 +2282,8 @@ def _print_placements(results: list[dict], title: str) -> None:
             files = r.get("placements", [])
             click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "
                        f"— {len(files)} DAT{'s' if len(files) != 1 else ''}")
+            for w in r.get("warnings") or []:
+                click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
             for p in files:
                 who = f"{p.get('race') or 'all races'} {p['role']}"
                 occ = p.get("occupied_by")

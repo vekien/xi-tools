@@ -1,9 +1,9 @@
 {
- "generated": "2026-09-15T15:36:27Z",
+ "generated": "2026-09-17T15:29:22Z",
  "files": {
   "abilities.json": {
-   "sha256": "537e81bd9efe9f1bc7e05fc00c92f817aed7d3ad4c9937d53220b46a3f07bdef",
-   "bytes": 847865
+   "sha256": "0da95e7ee9081153fbfa9b4b4b298d87acf4808100c61c5e0563e2f410bc42a1",
+   "bytes": 855637
   },
   "characters.json": {
    "sha256": "b8f9149774a5861c435ff45ba4fbccb564d5012861adfc65b6fbbe3d7b61ce21",
