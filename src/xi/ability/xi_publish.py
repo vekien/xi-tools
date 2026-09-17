@@ -104,17 +104,14 @@ def infer_kind(recipe: dict, kind: Optional[str] = None) -> str:
     recipe's ``target.kind``), else inferred from the motion lane."""
     if kind in (None, "", "auto"):
         kind = (recipe.get("target") or {}).get("kind")
-    race_bound = any(l.race_bound for l in _lanes(recipe).values())
+    # A job ability or spell bakes a race-bound motion from one race into its single DAT
+    # (xi_compose._lanes), the way retail Blue Magic carries its own wz* clips — so only
+    # an UNSET kind falls back to ws for such motion.
+    race_bound = any(l.race_bound for l in _lanes(recipe, kind=kind).values())
     motion = (recipe.get("sources") or {}).get("motion") or {}
     motion_spec = str(motion.get("spec") if isinstance(motion, dict) else motion or "")
     if kind is None:
         kind = "ws" if race_bound else ("spell" if motion_spec.lower().startswith("spell:") else "ja")
-    if race_bound and kind != "ws":
-        raise click.ClickException(
-            "this recipe's motion is different for every race (a weapon skill, emote, battle, "
-            "dance or one race's own motion), so it must be published as kind 'ws', which "
-            "builds one DAT per race — a job-ability or spell slot is one DAT for every race, "
-            "and the game only loads those motions while they play")
     if kind not in KINDS:
         raise click.ClickException(f"unsupported ability kind {kind!r} (ja, spell or ws)")
     return kind
@@ -213,12 +210,10 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
     description of where the ability lives. Nothing is written here except the composed
     DAT bytes, which are returned on each file (``composed``) or as ``copy_from``."""
     kind = infer_kind(recipe, kind)
-    composed = compose(recipe)
-    if kind in _SINGLE_DAT_KINDS and any(s.endswith("(0x2B)") for c in composed for s in c.sections):
-        raise click.ClickException(
-            "this recipe carries skeleton clips, which are one race's; a job-ability or spell "
-            "slot is one DAT for every race. Use a ws: lane (published per race) or motion the "
-            "actor already has (cm0?, ma2?...)")
+    # A job ability or spell may carry skeleton clips: they are baked from one race's copy
+    # and play on every race, exactly as retail Blue Magic ships its own wz* clips in the
+    # single spell DAT (compose bakes them when told the kind).
+    composed = compose(recipe, kind=kind)
     prev_places = {(p.get("race"), p.get("role")): p for p in (previous or {}).get("placements") or []}
     ours = {str(p.get("dat", "")).upper() for p in prev_places.values()}
     prev_anim = (previous or {}).get("animation")

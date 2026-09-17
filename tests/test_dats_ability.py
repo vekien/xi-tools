@@ -62,8 +62,9 @@ def test_infer_kind():
     assert ap.infer_kind(EXAMPLE) == "ja"
     assert ap.infer_kind({"name": "s", "sources": {"motion": {"spec": "spell:144"}}, "events": []}) == "spell"
     assert ap.infer_kind({"name": "w", "sources": {"motion": {"spec": "ws:1"}}, "events": []}) == "ws"
-    with pytest.raises(Exception):
-        ap.infer_kind({"name": "w", "sources": {"motion": {"spec": "ws:1"}}, "events": []}, kind="ja")
+    # A race-bound motion asked to publish as a job ability is baked from one race into
+    # the single DAT (retail Blue Magic carries its own clips the same way), not refused.
+    assert ap.infer_kind({"name": "w", "sources": {"motion": {"spec": "ws:1"}}, "events": []}, kind="ja") == "ja"
 
 
 # ── dats prepare / build / undo ──────────────────────────────────────────────────

@@ -116,7 +116,7 @@ holds the file tables in memory: publish with it closed, or restart it afterward
 
 | Kind | When | Client lookup | Custom numbers | Server |
 |---|---|---|---|---|
-| `ja` | no lane is race-bound and no clips are carried | `file_id = 4412 + animation` | first free from **339** (retail band 4412–4750 is full) | `abilities.animation` |
+| `ja` | no lane is race-bound, or the recipe / action says `ja` (a race-bound motion is then baked from one race, below) | `file_id = 4412 + animation` | first free from **339** (retail band 4412–4750 is full) | `abilities.animation` |
 | `spell` | the motion lane is a `spell:N` (or `target.kind` says so); one DAT for every race | `file_id = 0xAF0 + animation` — the client has no spell table, `spell_list.animation` rides in the magic-finish action packet | first **unregistered** id from **1012** (retail reaches 1011; the ids above are shared with other content, 92 free up to 1611) | `spell_list.animation` |
 | `ws` | a lane is race-bound: `ws:N`, or a motion from a race's own animation files (below) | per-race extended bank, slots 256–271 | first slot whose body DAT is a retail dummy on every race (**264–271**) | `weapon_skills.animation`, or a `mob_skills` row with id < 256 |
 
@@ -135,10 +135,15 @@ without that motion, and compose, `dats build` and its dry run say so:
 ⚠ Galka: motion2 (ROM/173/48.DAT) is HumeFemale only; built without its 3 events
 ```
 
-That is why such motion publishes only as `ws`: a job-ability or spell slot is one DAT
-for every race, and the client reads emote and pack motions only while they play
-(`XiSkeletonActor::ReadEMotionRes`, then `DeleteResp`), so a single DAT can neither
-carry every race's clips nor name them. Two cases differ:
+Such motion can also be published as a job ability or spell. That slot is one DAT for every
+race, so the motion is **baked from one race's copy** into it (`_lanes` resolves the lane
+to that race — the `--race` given to `compose`, HumeMale by default — and carries its clips,
+an emote's waist sibling included) rather than composed per race. This is exactly how retail
+Blue Magic ships: Maelstrom, Digest, Claw Cyclone and thirteen more carry their own `wz*`
+clips inside the single spell DAT, and they play on every race because the PC skeletons
+share their joints (proportions differ, so the bake race is what looks best). The mixer
+previews the bake with the viewer's race and publishes Hume ♂. A weapon-skill motion baked
+this way carries its body clips only — the waist companions are not copied. Two cases differ:
 
 - **The race base** (the first five files of the `movement` table: idle, walk, cast and
   job-ability motions such as `cm0?`, `mb0?`) is always loaded on a character, so its

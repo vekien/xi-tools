@@ -263,7 +263,31 @@ def _race_owners(spec: str) -> frozenset:
     return out
 
 
-def _lanes(recipe: dict) -> Dict[str, Lane]:
+_BAKE_KINDS = frozenset({"ja", "spell"})
+_DEFAULT_BAKE_RACE = "HumeMale"
+
+
+def _bake_spec(spec: str, ws: bool, slot, race: str) -> str:
+    """One race's copy of a race-bound motion, to bake into a single DAT."""
+    if ws:
+        return f"{spec}:{race}"                       # ws:N -> ws:N:Race
+    if slot is not None:
+        mapped = motion_dat_for_race(slot, race)
+        if mapped:
+            return mapped
+        raise click.ClickException(f"{spec}: {race} has no copy of this motion to bake")
+    return spec                                        # a race's own file: bake it as it is
+
+
+def _lanes(recipe: dict, bake_race: Optional[str] = None, kind: Optional[str] = None) -> Dict[str, Lane]:
+    """The recipe's lanes. ``kind`` (the action's, else ``target.kind``) decides how a
+    race-bound motion is handled: a job ability or spell is one DAT for every race, so it
+    BAKES the motion from one race's copy (``bake_race``, HumeMale by default) into that
+    DAT — the way retail Blue Magic carries its own ``wz*`` clips — instead of composing per
+    race. The clips play on every race, since PC skeletons share their joints."""
+    kind = kind or (recipe.get("target") or {}).get("kind")
+    bake = kind in _BAKE_KINDS
+    race = bake_race or _DEFAULT_BAKE_RACE
     lanes = {}
     for name, src in recipe["sources"].items():
         if isinstance(src, str):
@@ -281,6 +305,11 @@ def _lanes(recipe: dict) -> Dict[str, Lane]:
                 owners = _race_owners(spec)
         by_reference = slot is not None and slot.category == "movement"
         race_bound = ws or (slot is not None and not by_reference) or bool(owners)
+        if bake and race_bound:
+            # Resolve to the bake race's DAT now; `slot` stays so an emote's waist
+            # sibling (+6) still comes along in _load_lane.
+            spec = _bake_spec(spec, ws, slot, race)
+            race_bound, owners = False, frozenset()
         lanes[name] = Lane(name, spec, src.get("routine", "main"), race_bound,
                            slot=slot, owners=owners, by_reference=by_reference)
     return lanes
@@ -628,8 +657,11 @@ def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str]) -> C
     return Composed(race, bytes(out), names, renames, timeline, total, list(dict.fromkeys(warnings)))
 
 
-def compose(recipe: dict, race: Optional[str] = None) -> List[Composed]:
-    lanes = _lanes(recipe)
+def compose(recipe: dict, race: Optional[str] = None, kind: Optional[str] = None) -> List[Composed]:
+    """Compose the recipe: once per race when a lane is race-bound, else once. ``kind``
+    (ja / spell) bakes a race-bound motion from one race — ``race``, else HumeMale —
+    into that single DAT instead (see _lanes)."""
+    lanes = _lanes(recipe, bake_race=race, kind=kind)
     race_bound = any(l.race_bound for l in lanes.values())
     if race_bound:
         races = [race] if race else list(RACE_NAMES)
@@ -674,14 +706,16 @@ def recipe_from(spec: str, lane: str = "motion", routine: str = "main") -> dict:
 @click.argument("recipe_path", type=click.Path(exists=True, path_type=Path))
 @click.option("--out", "out_dir", type=click.Path(path_type=Path), default=None,
               help="Output folder (default: exports/ability/<name>/).")
-@click.option("--race", default=None, help="Compose one race only (race-bound recipes).")
+@click.option("--race", default=None, help="Compose one race only (race-bound recipes); the bake race for a ja/spell.")
+@click.option("--kind", type=click.Choice(["ja", "spell", "ws"]), default=None,
+              help="Publish kind: a job ability or spell bakes a race-bound motion from one race into its single DAT.")
 @click.option("--json", "as_json", is_flag=True, help="Print the compose report as JSON.")
-def compose_cmd(recipe_path: Path, out_dir: Optional[Path], race: Optional[str], as_json: bool):
+def compose_cmd(recipe_path: Path, out_dir: Optional[Path], race: Optional[str], kind: Optional[str], as_json: bool):
     """Build ability DAT(s) from RECIPE_PATH. Writes <name>[.<Race>].DAT plus a report."""
     recipe = load_recipe(recipe_path)
     out_dir = out_dir or Path("exports") / "ability" / recipe["name"]
     out_dir.mkdir(parents=True, exist_ok=True)
-    results = compose(recipe, race)
+    results = compose(recipe, race, kind=kind)
     report = []
     for c in results:
         p = out_dir / output_name(recipe, c)

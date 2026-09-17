@@ -168,6 +168,28 @@ def test_base_motions_are_by_reference_casts(root: Path):
     assert all(m["kind"] in ("ja", "spell") for m in motions)
 
 
+def test_job_ability_or_spell_bakes_a_race_bound_motion_from_one_race(root: Path):
+    # A job ability or spell is one DAT for every race, so a race-bound motion (an emote
+    # here) is BAKED from one race's copy into that single DAT — the way retail Blue Magic
+    # ships its own wz* clips — rather than composed per race. The waist sibling (+6) comes
+    # along, and the bake race is HumeMale unless compose is given one.
+    recipe = {"name": "bow_spell", "target": {"kind": "spell"},
+              "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 60}]}
+    assert ac.validate_recipe(recipe) == []
+    lane = ac._lanes(recipe)["motion"]
+    assert not lane.race_bound and not lane.by_reference     # one DAT, clips carried
+    (hume,) = ac.compose(recipe)
+    assert hume.race is None
+    assert {"bow0", "bow1", "bow2"} <= {s.split("(")[0] for s in hume.sections}, hume.sections
+    (mithra,) = ac.compose(recipe, race="Mithra")
+    assert mithra.race is None
+    assert {"bow0", "bow1", "bow2"} <= {s.split("(")[0] for s in mithra.sections}
+    assert mithra.data != hume.data                            # Mithra's own clips
+    # Without a kind the same recipe is still race-bound and composes per race.
+    assert [c.race for c in ac.compose({**recipe, "target": {}})] == list(ac.RACE_NAMES)
+
+
 def test_one_races_own_motion_is_built_for_that_race_only(root: Path):
     # HumeF Variations (ROM/173/48) is outside the motion tables and the character list
     # gives it to Hume Female alone: every race composes, only Hume Female carries the
@@ -189,8 +211,9 @@ def test_per_race_motion_publishes_as_a_weapon_skill(root: Path):
     emote = {"name": "bow", "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
              "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 60}]}
     assert ap.infer_kind(emote) == "ws"
-    with pytest.raises(click.ClickException):
-        ap.infer_kind(emote, "spell")
+    # Asked for a spell, the same emote is baked from one race into the single DAT (as
+    # retail Blue Magic carries its own clips), so the kind is honoured, not refused.
+    assert ap.infer_kind(emote, "spell") == "spell"
     assert ap._source_ws_animation(emote) is None          # waist clips ride in the body DAT
     base = {"name": "cm", "sources": {"motion": {"spec": "ROM/32/58.DAT", "routine": None}},
             "events": [{"from": "motion", "op": 5, "ref": "cm0?", "start": 0, "dur": 30}]}
