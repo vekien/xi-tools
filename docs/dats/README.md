@@ -225,8 +225,18 @@ What this means with a pivot folder that carries its own `ROM10` tables (CatsEye
 
 - The target's `FTABLE`/`VTABLE` **must already exist and be expanded** for the custom
   models you're placing — run `xi ftable expand entity` / `xi ftable expand gear` on
-  that install first (for a `ROM10` placement the `ROM10` pair is the one that must hold
-  the id). The wizard's opening step reports expansion status.
+  that install first. The wizard's opening step reports expansion status.
+- A `ROM{n}` pair long enough to hold the id is **not** on its own enough: the client
+  takes its file_id ceiling from the tables it loads at startup, and those come from the
+  **base install**. A `--pivot` build registers, it does not expand.
+
+  Measured against an install still at the retail 109,701 entries, with the pivot
+  folder's `ROM10` pair grown to 431,344: a `ROM10` registration at file id 100,500
+  loaded in game, the same registration at 109,750 did not, and lengthening only the
+  pivot pair changed neither. After `xi ftable expand` grew the install's tables, both
+  loaded. So expansion is a one-time write to the install (or a table set a launcher
+  ships) before any file_id past the retail range exists at all — and it is the first
+  thing to check when a registration that reads back correctly resolves to nothing.
 - Each table is backed up once to `<name>.base` before the first patch (recoverable via
   `xi ftable reset`).
 - **`--dry-run`** prints the full per-DAT placement plan (every race for gear) and any
