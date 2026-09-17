@@ -144,9 +144,9 @@ def infer_kind(recipe: dict, kind: Optional[str] = None) -> str:
     recipe's ``target.kind``), else inferred from the motion lane."""
     if kind in (None, "", "auto"):
         kind = (recipe.get("target") or {}).get("kind")
-    # A job ability or spell bakes a race-bound motion from one race into its single DAT
-    # (xi_compose._lanes), the way retail Blue Magic carries its own wz* clips — so only
-    # an UNSET kind falls back to ws for such motion.
+    # Asked for a job ability or spell, a race-bound motion is baked from one race into the
+    # single DAT (xi_compose._lanes — experimental, unverified in game), so only an UNSET
+    # kind falls back to ws for such motion.
     race_bound = any(l.race_bound for l in _lanes(recipe, kind=kind).values())
     motion = (recipe.get("sources") or {}).get("motion") or {}
     motion_spec = str(motion.get("spec") if isinstance(motion, dict) else motion or "")
@@ -259,9 +259,8 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
     description of where the ability lives. Nothing is written here except the composed
     DAT bytes, which are returned on each file (``composed``) or as ``copy_from``."""
     kind = infer_kind(recipe, kind)
-    # A job ability or spell may carry skeleton clips: they are baked from one race's copy
-    # and play on every race, exactly as retail Blue Magic ships its own wz* clips in the
-    # single spell DAT (compose bakes them when told the kind).
+    # A job ability or spell may carry skeleton clips baked from one race's copy (compose
+    # does it when told the kind). Experimental: see xi_compose._lanes for what is unproven.
     composed = compose(recipe, kind=kind)
     prev_places = {(p.get("race"), p.get("role")): p for p in (previous or {}).get("placements") or []}
     ours = {str(p.get("dat", "")).upper() for p in prev_places.values()}

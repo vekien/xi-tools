@@ -281,10 +281,15 @@ def _bake_spec(spec: str, ws: bool, slot, race: str) -> str:
 
 def _lanes(recipe: dict, bake_race: Optional[str] = None, kind: Optional[str] = None) -> Dict[str, Lane]:
     """The recipe's lanes. ``kind`` (the action's, else ``target.kind``) decides how a
-    race-bound motion is handled: a job ability or spell is one DAT for every race, so it
-    BAKES the motion from one race's copy (``bake_race``, HumeMale by default) into that
-    DAT — the way retail Blue Magic carries its own ``wz*`` clips — instead of composing per
-    race. The clips play on every race, since PC skeletons share their joints."""
+    race-bound motion is handled: a job ability or spell is one DAT for every race, so
+    asked for one the motion is BAKED from one race's copy (``bake_race``, HumeMale by
+    default) into that DAT instead of composed per race.
+
+    EXPERIMENTAL — not verified in game. No retail spell or job ability carries caster
+    clips (Blue Magic's ``wz*`` clips animate the monster it shows; the caster plays
+    ``ma2?`` from its pool), and the PS2 client's PlayClip (tag 0x05) resolves a wildcard
+    ref only from the actor's loaded motions — only an exact ref searches the routine's
+    own DAT. The proven route for a unique motion is a weapon skill (per-race DATs)."""
     kind = kind or (recipe.get("target") or {}).get("kind")
     bake = kind in _BAKE_KINDS
     race = bake_race or _DEFAULT_BAKE_RACE

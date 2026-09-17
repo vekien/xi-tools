@@ -170,9 +170,9 @@ def test_base_motions_are_by_reference_casts(root: Path):
 
 def test_job_ability_or_spell_bakes_a_race_bound_motion_from_one_race(root: Path):
     # A job ability or spell is one DAT for every race, so a race-bound motion (an emote
-    # here) is BAKED from one race's copy into that single DAT — the way retail Blue Magic
-    # ships its own wz* clips — rather than composed per race. The waist sibling (+6) comes
-    # along, and the bake race is HumeMale unless compose is given one.
+    # here) is BAKED from one race's copy into that single DAT rather than composed per race.
+    # Experimental: this tests what compose writes, not that a client plays it. The waist
+    # sibling (+6) comes along, and the bake race is HumeMale unless compose is given one.
     recipe = {"name": "bow_spell", "target": {"kind": "spell"},
               "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
               "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 60}]}
@@ -211,8 +211,8 @@ def test_per_race_motion_publishes_as_a_weapon_skill(root: Path):
     emote = {"name": "bow", "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
              "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 60}]}
     assert ap.infer_kind(emote) == "ws"
-    # Asked for a spell, the same emote is baked from one race into the single DAT (as
-    # retail Blue Magic carries its own clips), so the kind is honoured, not refused.
+    # Asked for a spell, the same emote is baked from one race into the single DAT
+    # (experimental), so the kind is honoured, not refused.
     assert ap.infer_kind(emote, "spell") == "spell"
     assert ap._source_ws_animation(emote) is None          # waist clips ride in the body DAT
     base = {"name": "cm", "sources": {"motion": {"spec": "ROM/32/58.DAT", "routine": None}},

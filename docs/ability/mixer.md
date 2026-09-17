@@ -142,15 +142,20 @@ without that motion, and compose, `dats build` and its dry run say so:
 ⚠ Galka: motion2 (ROM/173/48.DAT) is HumeFemale only; built without its 3 events
 ```
 
-Such motion can also be published as a job ability or spell. That slot is one DAT for every
-race, so the motion is **baked from one race's copy** into it (`_lanes` resolves the lane
+The proven route for such motion is `ws`: one DAT per race, and with a client-side plugin's
+custom band (cexislots: numbers 272–527, see *Running out of numbers?* above) there is room
+for hundreds.
+
+**Experimental — a job ability or spell with a baked motion.** Asked for `ja` or `spell`,
+compose bakes the motion from one race's copy into the single DAT (`_lanes` resolves the lane
 to that race — the `--race` given to `compose`, HumeMale by default — and carries its clips,
-an emote's waist sibling included) rather than composed per race. This is exactly how retail
-Blue Magic ships: Maelstrom, Digest, Claw Cyclone and thirteen more carry their own `wz*`
-clips inside the single spell DAT, and they play on every race because the PC skeletons
-share their joints (proportions differ, so the bake race is what looks best). The mixer
-previews the bake with the viewer's race and publishes Hume ♂. A weapon-skill motion baked
-this way carries its body clips only — the waist companions are not copied. Two cases differ:
+an emote's waist sibling included). This is **not verified in game** and there is no retail
+precedent: no spell or job ability carries caster clips (Blue Magic's `wz*` clips animate the
+monster it shows; Maelstrom's caster plays `ma2?` from its pool), the per-race copies of one
+clip do not even share a joint count (`bow0` is 14 joints on Tarutaru, 16 on Hume and Elvaan,
+24 on Mithra and Galka), and the PS2 client's PlayClip (`ymschdecript.cpp`, tag `0x05`)
+resolves a wildcard ref such as `bow?` only from the actor's loaded motions — only an exact
+ref (`bow0`) searches the routine's own DAT. Two cases differ:
 
 - **The race base** (the first five files of the `movement` table: idle, walk, cast and
   job-ability motions such as `cm0?`, `mb0?`) is always loaded on a character, so its
