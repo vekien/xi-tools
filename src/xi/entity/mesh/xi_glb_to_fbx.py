@@ -10,11 +10,110 @@ A 4th argument of ``1`` also bakes the GLB's skeletal animation into the FBX. Of
 default because a mesh export carries no clips, and baking none still costs a pass.
 """
 
+import math
 import os
 import re
 import sys
 
 import bpy
+import bmesh
+from collections import defaultdict
+
+
+def _weld_within_materials(dist: float) -> None:
+    """Weld coincident vertices in every mesh, but only within a single material,
+    keeping UVs and every face.
+
+    A glTF splits a vertex at every UV seam (one UV per vertex), so tiled zone
+    terrain imports as disconnected shells. Blender stores UVs per face-corner
+    (loop), so welding the shared *vertices* fuses the topology while each face
+    keeps its own UV — connected geometry with the texture intact, unlike
+    collapsing the UVs in the GLB.
+
+    Crucially this welds only verts whose faces are the SAME material. FFXI terrain
+    layers a blended overlay (e.g. `sar_kk2_alpha`) on top of the opaque base
+    (`sar_kk2`) as a second triangle at the same position; a blind merge-by-distance
+    would fold those two into one vertex set, and Blender can't hold two faces with
+    identical verts, so it would delete the overlay (a visible ~10% of the surface).
+    Grouping by (material set, position) keeps base and overlay apart — the base
+    still welds its own UV-seam splits, the overlay survives untouched. Operates on
+    mesh data directly so shared (instanced) meshes weld once and every placement
+    follows."""
+    dp = max(0, round(-math.log10(dist))) if dist > 0 else 4
+    for me in bpy.data.meshes:
+        if not me.vertices:
+            continue
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        # The glTF import stores the DAT's authored normals as custom split
+        # (per-corner) normals — already correct (all "up") and matched between a
+        # base tile and its alpha overlay. bmesh from_mesh/to_mesh drops them, and
+        # Blender would recompute from the winding (wrong way for FFXI's
+        # clockwise-front terrain, and it would make the overlay's normals diverge
+        # from the base's). Carry each corner's normal on its own loop through a
+        # custom loop layer: the weld keeps every loop (it moves vertices, never
+        # removes faces here), so the normal rides along exactly, unaffected by the
+        # vertex moving to its weld representative.
+        nlay = bm.loops.layers.float_vector.new("xi_normal")
+        src = [tuple(me.corner_normals[li].vector)
+               for poly in me.polygons for li in poly.loop_indices]
+        i = 0
+        for f in bm.faces:
+            for loop in f.loops:
+                loop[nlay] = src[i]
+                i += 1
+        # Group verts to weld by (material-bucket, position). The bucket keeps the
+        # blended overlay layers apart from the base while connecting the base as
+        # much as possible: every opaque (non-"_alpha") material shares one bucket,
+        # so the ground welds across a texture boundary too; each alpha material is
+        # its own bucket, so an overlay never folds into the base (which would
+        # delete it — Blender can't hold two faces with identical verts). A vert on
+        # a base↔overlay boundary carries both and stays in its own bucket.
+        alpha = [bool(m) and m.name.endswith("_alpha") for m in me.materials]
+
+        def bucket(mis):
+            return "opaque" if all(not alpha[i] for i in mis) else frozenset(mis)
+
+        vmats = defaultdict(set)
+        for f in bm.faces:
+            for v in f.verts:
+                vmats[v].add(f.material_index)
+        groups = defaultdict(list)
+        for v in bm.verts:
+            key = (bucket(vmats.get(v, ())), tuple(round(c, dp) for c in v.co))
+            groups[key].append(v)
+        targetmap = {}
+        for verts in groups.values():
+            for v in verts[1:]:
+                targetmap[v] = verts[0]
+        # Never lose a face: weld_verts deletes any face that ends up degenerate
+        # (two corners on one vert) or identical to another face, and a few cliff
+        # meshes do draw the same triangle twice inside one bucket. Leave the
+        # corners of such faces unwelded instead.
+        for _ in range(4):
+            seen, bad = {}, set()
+            for f in bm.faces:
+                key = frozenset(targetmap.get(v, v) for v in f.verts)
+                if len(key) < len(f.verts):
+                    bad.update(f.verts)
+                elif key in seen:
+                    bad.update(f.verts)
+                    bad.update(seen[key].verts)
+                else:
+                    seen[key] = f
+            bad = {v for v in bad if v in targetmap}
+            if not bad:
+                break
+            for v in bad:
+                del targetmap[v]
+        if targetmap:
+            bmesh.ops.weld_verts(bm, targetmap=targetmap)
+        # Read the carried normals back in the post-weld loop order, which is the
+        # order to_mesh writes, so it lines up with me.loops for the custom set.
+        new_normals = [tuple(loop[nlay]) for f in bm.faces for loop in f.loops]
+        bm.to_mesh(me)
+        bm.free()
+        me.normals_split_custom_set(new_normals)
 
 
 def _png_for_mat(mat_name: str, tex_dir: str):
@@ -62,11 +161,15 @@ def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1:]
     glb_in, fbx_out, tex_dir = argv[0], argv[1], argv[2]
     bake_anim = len(argv) > 3 and argv[3] == "1"
+    merge_dist = float(argv[4]) if len(argv) > 4 else 0.0
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
 
     bpy.ops.import_scene.gltf(filepath=glb_in)
+
+    if merge_dist > 0.0:
+        _weld_within_materials(merge_dist)
 
     leftover = bpy.data.collections.get("glTF_not_exported")
     if leftover:

@@ -24,6 +24,7 @@ from xi.entity.mesh.xi_export import (
     TextureImage,
     compute_min_max_vec3,
     convert_glb_to_fbx,
+    pack_indices,
     pack_vec2,
     pack_vec3,
     pack_vec4,
@@ -537,6 +538,8 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
               write_loose_textures: bool = True,
               opaque_nonblend: bool = False,
               drop_names: Optional[set] = None,
+              weld: bool = True,
+              mesh_merge_dp: int = 4,
               out_stem: Optional[str] = None) -> List[Path]:
     # out_stem overrides the .glb filename stem (default: dat_path.stem) — used by
     # --objects to write one <meshname>.glb per object instead of one zone file.
@@ -615,11 +618,14 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
 
     # --- one glTF mesh per unique zone mesh (local geometry), built on demand ---
     meshes: List[dict] = []
-    mesh_index_by_name: Dict[str, int] = {}
+    mesh_index_by_name: Dict[Tuple[str, bool], int] = {}
 
-    def mesh_for(name: str) -> int:
-        if name in mesh_index_by_name:
-            return mesh_index_by_name[name]
+    def mesh_for(name: str, mirrored: bool = False) -> int:
+        # mirrored=True builds a variant with the reflection baked in (x -> -x on
+        # positions and normals) for --right-handed; see the placement loop.
+        cache_key = (name, mirrored)
+        if cache_key in mesh_index_by_name:
+            return mesh_index_by_name[cache_key]
         # Group by (tex_key, mode) so bark and leaves sharing the same texture
         # each get their own material slot (opaque vs alpha variant).
         by_tex: Dict[Tuple[Optional[str], str], List[ZonePrimitive]] = {}
@@ -632,11 +638,53 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
             normals: List[Tuple[float, float, float]] = []
             uvs: List[Tuple[float, float]] = []
             colors: List[Tuple[float, float, float, float]] = []
-            for prim in group:
-                positions.extend(prim.positions)
-                normals.extend(prim.normals)
-                uvs.extend(prim.uvs)
-                colors.extend(prim.colors)
+            tri_indices: Optional[List[int]] = None
+            if weld:
+                # Weld coincident triangle corners into a shared, indexed vertex
+                # buffer — a joined, editable mesh like Noesis (and like
+                # `gear export --weld`), instead of the loose triangle soup a
+                # non-indexed export produces. Dedup by rounded (position, UV);
+                # first occurrence wins the normal, so a shared edge welds even
+                # where the two faces stored different normals. Baked vertex
+                # colour is part of the key: zones carry meaningful per-vertex
+                # lighting, and merging across a colour discontinuity would alter
+                # the bake, so verts that differ only in colour stay split.
+                #
+                # A UV seam still splits the vertex here — glTF stores one UV per
+                # vertex, so tiled terrain (one spot reused with many UVs) stays
+                # split. `--weld-seams` fuses those seams too, but does it in
+                # Blender during FBX conversion (mesh merge-by-distance keeps the
+                # per-corner UVs), not here — a GLB can't hold merged points with
+                # split UVs. See export_zone / xi_glb_to_fbx.
+                tri_indices = []
+                key_to_idx: Dict[tuple, int] = {}
+                for prim in group:
+                    pcolors = prim.colors or None
+                    for i in range(len(prim.positions)):
+                        pos = prim.positions[i]
+                        color = pcolors[i] if pcolors else None
+                        key = (tuple(round(c, mesh_merge_dp) for c in pos),
+                               (round(prim.uvs[i][0], 4), round(prim.uvs[i][1], 4)),
+                               color)
+                        idx = key_to_idx.get(key)
+                        if idx is None:
+                            idx = len(positions)
+                            key_to_idx[key] = idx
+                            positions.append(pos)
+                            normals.append(prim.normals[i])
+                            uvs.append(prim.uvs[i])
+                            if color is not None:
+                                colors.append(color)
+                        tri_indices.append(idx)
+            else:
+                for prim in group:
+                    positions.extend(prim.positions)
+                    normals.extend(prim.normals)
+                    uvs.extend(prim.uvs)
+                    colors.extend(prim.colors)
+            if mirrored:
+                positions = [(-x, y, z) for (x, y, z) in positions]
+                normals = [(-x, y, z) for (x, y, z) in normals]
             pmin, pmax = compute_min_max_vec3(positions)
             attrs = {
                 "POSITION": builder.add_accessor(pack_vec3(positions), 5126, "VEC3", len(positions), target=34962, min_value=pmin, max_value=pmax),
@@ -655,10 +703,35 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
                 col2x = [(min(1.0, r * 2.0), min(1.0, g * 2.0), min(1.0, b * 2.0), 1.0)
                          for (r, g, b, _a) in colors]
                 attrs["COLOR_0"] = builder.add_accessor(pack_vec4(col2x), 5126, "VEC4", len(col2x), target=34962)
-            mesh_prims.append({"attributes": attrs, "mode": 4, "material": material_for(tex_key, mode)})
-        mesh_index_by_name[name] = len(meshes)
-        meshes.append({"name": name, "primitives": mesh_prims})
-        return mesh_index_by_name[name]
+            # FFXI DAT triangles are clockwise-front (Direct3D); glTF and game
+            # engines treat counter-clockwise as the front face. The exporter
+            # normally leaves the winding as-is because every zone material is
+            # doubleSided, so two-sided viewers never notice. A single-sided
+            # engine does: Unreal/Unity/Godot make imported materials one-sided
+            # and cull the back face, so the CW-front terrain reads as black /
+            # see-through from above and only lights from below. --right-handed
+            # targets those engines, so flip to CCW-front there — the stored
+            # up-normals already agree with that winding (verified: winding vs
+            # normal disagrees 100% before the flip). A baked-mirror variant has
+            # its winding reversed by the reflection already, hence the XOR.
+            if right_handed != mirrored:
+                if tri_indices is None:
+                    tri_indices = [j for t in range(0, len(positions) - 2, 3)
+                                   for j in (t, t + 2, t + 1)]
+                else:
+                    for t in range(0, len(tri_indices) - 2, 3):
+                        tri_indices[t + 1], tri_indices[t + 2] = tri_indices[t + 2], tri_indices[t + 1]
+            prim_dict = {"attributes": attrs, "mode": 4, "material": material_for(tex_key, mode)}
+            if tri_indices is not None:
+                index_component = 5123 if max(tri_indices, default=0) <= 0xFFFF else 5125
+                prim_dict["indices"] = builder.add_accessor(
+                    pack_indices(tri_indices), index_component, "SCALAR", len(tri_indices), target=34963)
+            mesh_prims.append(prim_dict)
+        mesh_index_by_name[cache_key] = len(meshes)
+        # The variant gets its own name so `zone import` (which keys meshes by
+        # exact DAT name) ignores it instead of mistaking it for the base mesh.
+        meshes.append({"name": f"{name}~mir" if mirrored else name, "primitives": mesh_prims})
+        return mesh_index_by_name[cache_key]
 
     # --- one node per placement (instanced), positioned by its TRS matrix ---
     nodes: List[dict] = []
@@ -672,8 +745,21 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
         placed_mesh_names.add(resolved)
         name_counts[plc.mesh_id] = name_counts.get(plc.mesh_id, 0) + 1
         node_name = plc.mesh_id if name_counts[plc.mesh_id] == 1 else f"{plc.mesh_id}.{name_counts[plc.mesh_id]:03d}"
-        mat = trs_matrix(plc.position, plc.rotation, plc.scale)
-        nodes.append({"name": node_name, "mesh": mesh_for(resolved), "matrix": mat})
+        # FFXI reuses terrain tiles mirrored: a placement with an odd number of
+        # negative scale components (West Sarutabaruta: 246 of 4153, ~40% of the
+        # ground tiles). A reflection reverses the triangle winding for that one
+        # instance, so no winding in the shared mesh suits both, and the
+        # Blender -> FBX -> Unreal/Unity path does not compensate: the mirrored
+        # tiles come out black in a checkerboard. For game engines, bake the
+        # reflection into a mirrored mesh variant and hand the node the matching
+        # un-mirrored scale (T·R·S·X with geometry X·v is the same surface), so
+        # no negative-determinant transform ever reaches the engine.
+        scale = plc.scale
+        mirrored = right_handed and sum(1 for s in scale if s < 0) % 2 == 1
+        if mirrored:
+            scale = (-scale[0], scale[1], scale[2])
+        mat = trs_matrix(plc.position, plc.rotation, scale)
+        nodes.append({"name": node_name, "mesh": mesh_for(resolved, mirrored), "matrix": mat})
         placed_nodes.append(len(nodes) - 1)
 
     # --- meshes never placed (skybox / environment) -> at origin, grouped ---
@@ -1166,7 +1252,8 @@ def export_objects(dat_path: Path, output_dir: Path,
                    raw: bool = False, right_handed: bool = False,
                    alpha_scale: float = DEFAULT_ALPHA_SCALE,
                    skip_sky: bool = False, drop_names: Optional[set] = None,
-                   opaque_nonblend: bool = False) -> List[Path]:
+                   opaque_nonblend: bool = False, weld: bool = True,
+                   mesh_merge_dp: int = 4, merge_distance: float = 0.0) -> List[Path]:
     """Export each unique zone mesh as its own ``<meshname>.glb`` (+ ``.fbx`` if
     ``fbx``) into ``output_dir``. Each object is emitted in local space at the
     origin (its raw geometry), oriented by the same ``ffxi_root_correction`` node
@@ -1190,11 +1277,12 @@ def export_objects(dat_path: Path, output_dir: Path,
         out = build_glb(dat_path, output_dir, {name: meshes_by_name[name]}, ident, textures,
                         raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                         write_loose_textures=fbx, out_stem=sanitize_filename(name),
-                        opaque_nonblend=opaque_nonblend)
+                        opaque_nonblend=opaque_nonblend, weld=weld,
+                        mesh_merge_dp=mesh_merge_dp)
         paths.append(out[0])
         if fbx:
             print(f"  [{i}/{len(names)}] {name} -> fbx")
-            paths.append(convert_glb_to_fbx(out[0]))
+            paths.append(convert_glb_to_fbx(out[0], merge_distance=merge_distance))
     return paths
 
 
@@ -1203,13 +1291,23 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                 collision: bool = False, alpha_scale: float = DEFAULT_ALPHA_SCALE,
                 as_json: bool = False, no_vfx: bool = False, objects: bool = False,
                 collision_proxies: bool = False, far_lod: bool = False,
-                sub_areas: bool = True, opaque_nonblend: bool = False) -> List[Path]:
+                sub_areas: bool = True, opaque_nonblend: bool = False,
+                weld: bool = True, weld_seams: bool = False,
+                mesh_merge_dp: int = 4) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
     src = source or dat_path
     meshes_by_name, placements, textures = parse_zone(src)
     if not meshes_by_name:
         raise ValueError("No zone mesh (0x2E) geometry found in this DAT")
+    # --weld-seams fuses the UV-seam vertex splits a glTF forces, but keeps the
+    # per-corner UVs — only possible in the FBX (Blender merge-by-distance), since
+    # a GLB stores one UV per vertex. So it is a merge distance handed to the FBX
+    # step, not a GLB change; without --fbx there is nothing to apply it to.
+    merge_distance = 10.0 ** (-mesh_merge_dp) if weld_seams else 0.0
+    if weld_seams and not fbx:
+        print("Note: --weld-seams merges points in Blender (keeps UVs) and needs --fbx; "
+              "a GLB can't hold merged points with split UVs, so the .glb is unchanged.")
     # Default to what the client actually draws — see filter_placements.
     kept = filter_placements(meshes_by_name, placements,
                              collision_proxies=collision_proxies,
@@ -1231,15 +1329,17 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
         paths = export_objects(dat_path, output_dir, meshes_by_name, textures, fbx=fbx,
                                raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                                skip_sky=skip_sky, drop_names=drop_names,
-                               opaque_nonblend=opaque_nonblend)
+                               opaque_nonblend=opaque_nonblend, weld=weld,
+                               mesh_merge_dp=mesh_merge_dp, merge_distance=merge_distance)
         if as_json:
             paths.append(export_zone_json(dat_path, output_dir, source=source))
         return paths
     paths = build_glb(dat_path, output_dir, meshes_by_name, placements, textures,
                       skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
-                      drop_names=drop_names, opaque_nonblend=opaque_nonblend)
+                      drop_names=drop_names, opaque_nonblend=opaque_nonblend,
+                      weld=weld, mesh_merge_dp=mesh_merge_dp)
     if fbx:
-        fbx_path = convert_glb_to_fbx(paths[0])
+        fbx_path = convert_glb_to_fbx(paths[0], merge_distance=merge_distance)
         paths.append(fbx_path)
         paths.append(_write_ue5_mat_script(fbx_path))
     if collision:
@@ -1267,7 +1367,7 @@ def main() -> int:
     parser.add_argument("--no-vfx", dest="no_vfx", action="store_true", help="Omit unplaced (non-world) meshes: effect-placed VFX (water jets, light glows, lcut/lightstp) + dead/unreferenced geometry (cyst, sh-u)")
     parser.add_argument("--objects", dest="objects", action="store_true", help="Export each mesh as its own <meshname>.glb/.fbx into <stem>_objects/ (local space, at origin) instead of one combined zone file")
     parser.add_argument("--raw", action="store_true", help="Omit the orientation-correction node (raw FFXI coords; view-only, do not re-import)")
-    parser.add_argument("--right-handed", action="store_true", help="Bake the handedness flip into geometry (for game engines like Godot/Unreal that drop negative node-scale -> un-mirrored, collidable)")
+    parser.add_argument("--right-handed", action="store_true", help="Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into geometry (engines drop negative node-scale -> un-mirrored, collidable) and flip winding to CCW-front so single-sided engines light the terrain top instead of culling it black")
     parser.add_argument("--base", action="store_true", help="Export from the pristine original instead of your edited DAT")
     parser.add_argument("--collision", action="store_true", help="Also dump the player-collision mesh (0x1C MZB) to <stem>.collision.obj")
     parser.add_argument("--json", action="store_true", dest="as_json",
@@ -1282,6 +1382,16 @@ def main() -> int:
                         help="Multiply texture alpha by this factor before export, clamped to 255 "
                              "(default 2.0 = opaque texels become fully opaque, matching the game; "
                              "pass 1.0 for the raw, faint FFXI alpha)")
+    parser.add_argument("--no-weld", dest="weld", action="store_false", default=True,
+                        help="Keep the original per-triangle vertices instead of welding coincident "
+                             "corners into a shared, indexed mesh (welding is on by default)")
+    parser.add_argument("--weld-seams", dest="weld_seams", action="store_true", default=False,
+                        help="Also fuse the UV-seam vertex splits the default weld leaves (tiled "
+                             "terrain). Needs --fbx: the merge runs in Blender and keeps per-corner "
+                             "UVs, so geometry connects with the texture intact. Radius = "
+                             "--mesh-merge-dp")
+    parser.add_argument("--mesh-merge-dp", dest="mesh_merge_dp", type=int, default=4,
+                        help="Decimal places for the weld position threshold (default 4 = 0.0001 units)")
     args = parser.parse_args()
     dat_path = resolve_dat_path(args.dat_path)
     if args.base:
@@ -1297,7 +1407,8 @@ def main() -> int:
                             collision=args.collision, alpha_scale=args.alpha_scale,
                             as_json=args.as_json, no_vfx=args.no_vfx, objects=args.objects,
                             collision_proxies=args.collision_proxies, far_lod=args.far_lod,
-                            sub_areas=args.sub_areas):
+                            sub_areas=args.sub_areas, weld=args.weld,
+                            weld_seams=args.weld_seams, mesh_merge_dp=args.mesh_merge_dp):
         print(f"Exported: {path}")
     return 0
 
@@ -1332,7 +1443,12 @@ import click as _click  # noqa: E402
 @_click.option("--raw", is_flag=True,
                help="Omit the orientation-correction node — raw FFXI coords (view-only; a raw export is not meant to be re-imported)")
 @_click.option("--right-handed", "right_handed", is_flag=True,
-               help="Bake the handedness flip into geometry for game engines (Godot/Unreal drop negative node-scale, which mirrors the zone and breaks collision); un-mirrored and collidable")
+               help="Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into "
+                    "geometry instead of a negative node-scale those engines drop (which mirrors the "
+                    "zone and breaks collision), AND flip triangle winding to CCW-front. FFXI terrain "
+                    "is clockwise-front and relies on two-sided rendering; a single-sided engine culls "
+                    "it, so the ground reads as black / see-through from above and only lights from "
+                    "below. This makes it render right-side-up and lit. Un-mirrored, correctly lit, collidable.")
 @_click.option("--base", "use_base", is_flag=True,
                help="Export from the pristine original instead of your edited DAT — handy to regenerate a clean model after editing")
 @_click.option("--collision", is_flag=True,
@@ -1369,9 +1485,23 @@ import click as _click  # noqa: E402
                     "whole floors and walls into a checkerboard. Only real alpha-blend "
                     "submeshes (flag 0x8000) stay BLEND and '_'-named foliage stays MASK; "
                     "the 0x2000 double-sided bit no longer implies transparency.")
+@_click.option("--weld/--no-weld", default=True, show_default=True,
+               help="Weld coincident triangle corners into a shared, indexed vertex buffer per "
+                    "mesh — a joined, editable mesh (like Noesis / `gear export --weld`) instead of "
+                    "loose triangle soup. Dedup is by position + UV + baked colour (first corner wins "
+                    "the normal). Use --no-weld to keep the original per-triangle vertices.")
+@_click.option("--weld-seams", "weld_seams", is_flag=True, default=False,
+               help="Also fuse the UV-seam vertex splits the default weld leaves (tiled terrain "
+                    "reuses one spot with many UVs, so it stays split). Needs --fbx: the merge "
+                    "runs in Blender (merge-by-distance), which keeps the per-corner UVs — so you "
+                    "get connected geometry AND the texture intact, unlike collapsing UVs in the "
+                    "GLB. The merge radius follows --mesh-merge-dp.")
+@_click.option("--mesh-merge-dp", "mesh_merge_dp", type=int, default=4, show_default=True,
+               help="Decimal places for the weld position threshold (4 = 0.0001 unit tolerance). "
+                    "Lower it if adjacent polys stay unjoined; raise it to weld only exact matches.")
 def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool, use_base: bool,
         collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool, alpha_scale: float,
-        opaque_nonblend: bool):
+        opaque_nonblend: bool, weld: bool, weld_seams: bool, mesh_merge_dp: int):
     """Export a zone's static mesh + textures to a self-contained .glb.
 
     DAT_PATH may be a ROM-relative spec like ROM/1/41. Zone meshes are decrypted
@@ -1403,7 +1533,8 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
                             collision=collision, alpha_scale=alpha_scale, as_json=as_json,
                             no_vfx=no_vfx, objects=objects,
                             collision_proxies=collision_proxies, far_lod=far_lod,
-                            sub_areas=sub_areas, opaque_nonblend=opaque_nonblend)
+                            sub_areas=sub_areas, opaque_nonblend=opaque_nonblend,
+                            weld=weld, weld_seams=weld_seams, mesh_merge_dp=mesh_merge_dp)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:

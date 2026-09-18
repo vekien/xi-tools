@@ -185,6 +185,8 @@ xi zone fx list
 # zone export defaults to what the client draws; add the filtered classes back:
 xi zone export ROM/23/95 --with-collision-proxies --with-far-lod
 xi zone export ROM/1/41 --no-subareas
+# for Unreal/Unity/Godot: un-mirrored, CCW winding, mirrored tiles baked, terrain welded across UV seams
+xi zone export ROM/0/127 --fbx --right-handed --weld-seams
 
 xi object json
 xi object export

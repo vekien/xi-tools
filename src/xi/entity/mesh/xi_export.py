@@ -822,7 +822,8 @@ def _inject_fbx_textures(fbx_path: Path, tex_dir: Path) -> None:
     fbx_path.write_bytes(bytes(data))
 
 
-def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False) -> Path:
+def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
+                       merge_distance: float = 0.0) -> Path:
     """Convert a .glb to an FBX via headless Blender.
 
     The Blender script rewires packed GLB images to the loose PNG files that
@@ -832,6 +833,12 @@ def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False) -> Path:
 
     ``bake_anim`` carries a GLB that embeds skeletal clips (a full-animation pose export)
     through to the FBX; a plain mesh export has none, so it stays off by default.
+
+    ``merge_distance`` > 0 merges coincident vertices in Blender before export
+    (mesh merge-by-distance), fusing the UV-seam splits a glTF forces while
+    keeping the per-corner UVs — used by ``zone export --weld-seams``. FBX stores
+    UVs per polygon-vertex, so this connects the topology without smearing the
+    texture the way collapsing UVs in the GLB would.
     """
     blender = Path(BLENDER_PATH)
     if not blender.is_file():
@@ -843,7 +850,8 @@ def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False) -> Path:
     tex_dir = str(glb_path.parent.resolve())
     completed = subprocess.run(
         [str(blender), "-b", "--python", str(_GLB_TO_FBX_SCRIPT),
-         "--", str(glb_path), str(fbx_path), tex_dir, "1" if bake_anim else "0"],
+         "--", str(glb_path), str(fbx_path), tex_dir, "1" if bake_anim else "0",
+         repr(float(merge_distance))],
         capture_output=True,
         text=True,
     )
