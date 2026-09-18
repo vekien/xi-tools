@@ -25,7 +25,11 @@
         "animation": {
           "$ref": "common.json#/$defs/autoOrInteger",
           "default": "auto",
-          "description": "Animation number the server row will carry. auto = the first free one: job abilities from 339, spells the first unregistered from 1012, weapon skills the first extended slot (264–271) whose DAT is a retail dummy on every race."
+          "description": "Animation number the server row will carry. auto = the first free one: job abilities from 339, spells the first unregistered from 1012, weapon skills the first extended slot (264–271) whose DAT is a retail dummy on every race — then, for each kind, the custom band a client running a band plugin loads (xi_config FX_*_BAND_*: weapon skills 272–527 with cexislots)."
+        },
+        "animation_from": {
+          "type": "integer", "minimum": 0, "maximum": 4095,
+          "description": "Where an auto animation number starts: the first free one at or above this, instead of the first free one of all (e.g. 272 to go straight to the weapon-skill custom band). A rebuild keeps the number it already has unless that is now below this."
         },
         "subdir": {"type": "integer", "minimum": 0, "maximum": 511, "default": 20, "description": "ROM10 folder the DAT(s) are placed in (first free file numbers)."}
       }

@@ -99,7 +99,8 @@ def game(tmp_path: Path, monkeypatch):
 
 def _stub_compose(monkeypatch, animation=339):
     """Stand in for compose: one job-ability DAT of 64 bytes at file_id 4412 + animation."""
-    def fake_plan(recipe, root, *, kind=None, animation=None, subdir=20, force=False, previous=None):
+    def fake_plan(recipe, root, *, kind=None, animation=None, subdir=20, force=False, previous=None,
+                  animation_from=None):
         anim = animation if animation is not None else ((previous or {}).get("animation") or 339)
         prev = {(p.get("race"), p.get("role")): p for p in (previous or {}).get("placements") or []}
         place = (prev.get((None, "body")) or {}).get("dat") or f"ROM10/{subdir}/0.DAT"

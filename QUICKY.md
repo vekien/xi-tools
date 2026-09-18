@@ -99,7 +99,8 @@ xi ability inspect ws:N[:RACE]   # weapon-skill animation N (per race)
 xi ability inspect ROM/x/y       # any DAT; --routine TAG, --all, --json
 xi ability recipe SPEC           # starter recipe reproducing one source
 xi ability compose recipe.json   # recipe -> new DAT(s) (motion A + vfx B + sound C)
-xi ability publish recipe.json   # = dats prepare --type ability + dats build (--dry-run first)
+xi ability publish recipe.json   # = dats prepare --type ability + dats build (--dry-run first; --animation-from N)
+xi ability slots [--pivot]       # weapon-skill numbers 264–271 + the custom band 272–527: free, or what holds each
 xi dats new                      # wizard: "Ability" content type; or: xi dats prepare recipe.json --project P
 xi mv update --only abilities    # the mixer's pick list (mv/lists/abilities.json)
 ```

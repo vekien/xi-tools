@@ -5,7 +5,7 @@ from datetime import datetime
 import click
 from xi.xi_config import (FFXI_DIR, FFXI_PIVOT_DIR, XI_TOOLS_DIR, CUSTOM_ROM, CUSTOM_ROM_IDX,
                             editable_dat, output_path_for, read_path_for,
-                            MAX_ENTITY_MODELID)
+                            MAX_ENTITY_MODELID, fx_band_floor)
 from xi.entity.xi_core import MODEL_FILE_OFFSET
 
 DEFAULT_TARGET = MAX_ENTITY_MODELID
@@ -68,7 +68,14 @@ def table_entry_sizes(include_pivot: bool = True) -> dict:
             # in place, so read it directly.
             p = read_path_for(ft) if tag == 'game' else ft
             if os.path.exists(p):
-                sizes[f'{tag}:{label}'] = os.path.getsize(p) // 2
+                entries = os.path.getsize(p) // 2
+                # A pivot ROM pair grown for the custom animation bands (xi_dats.
+                # _make_room_for_band) runs past its peers on purpose: the client plugin
+                # merges that tail into a table it grows in memory. Size it without the tail.
+                floor = fx_band_floor()
+                if tag == 'pivot' and floor and entries > floor:
+                    entries = floor
+                sizes[f'{tag}:{label}'] = entries
     return sizes
 
 
@@ -177,12 +184,14 @@ def sync_pivot_from_base(dry_run: bool = False) -> list[str]:
         # Base itself is retail-sized -> no custom region to propagate.
         if base_entries <= RETAIL_ENTRIES:
             continue
-        new_ft = piv_ft[:RETAIL_ENTRIES * 2] + base_ft[RETAIL_ENTRIES * 2:]
-        new_vt = piv_vt[:RETAIL_ENTRIES] + base_vt[RETAIL_ENTRIES:]
+        # Past the end of the base table the pivot's own entries stay: that tail holds the
+        # custom animation bands, which are registered in the overlay alone.
+        new_ft = piv_ft[:RETAIL_ENTRIES * 2] + base_ft[RETAIL_ENTRIES * 2:] + piv_ft[len(base_ft):]
+        new_vt = piv_vt[:RETAIL_ENTRIES] + base_vt[RETAIL_ENTRIES:] + piv_vt[len(base_vt):]
         if new_ft == piv_ft and new_vt == piv_vt:
             continue  # already in sync
         cur = len(piv_vt)
-        click.echo(f'  pivot {label}: {cur:,} -> {base_entries:,} entries '
+        click.echo(f'  pivot {label}: {cur:,} -> {len(new_vt):,} entries '
                    f'(custom region synced from base, retail range kept)')
         if not dry_run:
             for p in (pft, pvt):

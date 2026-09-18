@@ -340,21 +340,51 @@ CUSTOM_ROM_IDX = int(CUSTOM_ROM[3:])   # 'ROM10' -> 10
 # ids by number rather than by race keeps WS_SLOTS out of the arithmetic, so
 # raising it later moves nothing already published.
 #
-# Unset (the default) means retail bands only: the publisher behaves exactly as
-# it always has, and a client without such a plugin is unaffected either way.
-def _band(name: str) -> int:
+# Unset, each takes cexislots' value (cexidats src/cexislots/sites.h), so the
+# publisher assumes a client running that plugin. The numbers a stock client can
+# load are still handed out first; the band is only reached once they are used
+# up, and the build says when a number needs the plugin. Set a band's FIRST to 0
+# to switch it off for a stock client (the model viewer sends 0 when Settings ›
+# XI Tools › Custom animation bands is off); a different plugin sets its own.
+def _band(name: str, default: int) -> int:
     try:
-        return max(0, int(os.environ.get(name, '0')))
+        return max(0, int(os.environ.get(name, default)))
     except ValueError:
-        return 0
+        return default
 
-FX_SPELL_BAND_FIRST = _band('FX_SPELL_BAND_FIRST')
-FX_SPELL_BAND_BASE  = _band('FX_SPELL_BAND_BASE')
-FX_JA_BAND_FIRST    = _band('FX_JA_BAND_FIRST')
-FX_JA_BAND_BASE     = _band('FX_JA_BAND_BASE')
-FX_WS_BAND_FIRST    = _band('FX_WS_BAND_FIRST')
-FX_WS_BAND_BASE     = _band('FX_WS_BAND_BASE')
-FX_WS_BAND_SLOTS    = _band('FX_WS_BAND_SLOTS')
+FX_SPELL_BAND_FIRST = _band('FX_SPELL_BAND_FIRST', 1612)
+FX_SPELL_BAND_BASE  = _band('FX_SPELL_BAND_BASE', 423152)
+FX_JA_BAND_FIRST    = _band('FX_JA_BAND_FIRST', 500)
+FX_JA_BAND_BASE     = _band('FX_JA_BAND_BASE', 427248)
+FX_WS_BAND_FIRST    = _band('FX_WS_BAND_FIRST', 272)
+FX_WS_BAND_BASE     = _band('FX_WS_BAND_BASE', 431344)
+FX_WS_BAND_SLOTS    = _band('FX_WS_BAND_SLOTS', 256)
+
+
+def fx_band_ends() -> list:
+    """``(first file id, one past the last)`` of every custom band that is on."""
+    ends = []
+    for first, base in ((FX_SPELL_BAND_FIRST, FX_SPELL_BAND_BASE), (FX_JA_BAND_FIRST, FX_JA_BAND_BASE)):
+        if first and base:
+            ends.append((base, base + 4096))
+    if FX_WS_BAND_FIRST and FX_WS_BAND_BASE and FX_WS_BAND_SLOTS:
+        ends.append((FX_WS_BAND_BASE, FX_WS_BAND_BASE + 24 * FX_WS_BAND_SLOTS))
+    return ends
+
+
+def fx_band_floor() -> int:
+    """The first file id the custom bands reserve (0 when every band is off). They sit
+    past the end of the expanded tables, so a table longer than this is a DAT overlay's
+    ROM pair carrying band registrations, not a table out of step with its peers."""
+    return min((lo for lo, _hi in fx_band_ends()), default=0)
+
+
+def fx_band_ceiling() -> int:
+    """Table entries a DAT overlay's ROM pair needs to register any band file id —
+    cexislots' FX_CEILING (437,488) with its values. The plugin grows the client's one
+    table to this in memory and merges the overlay's pair into it, so only the overlay
+    grows on disk; the install's tables stay as they are."""
+    return max((hi for _lo, hi in fx_band_ends()), default=0)
 
 # ── Local dev server DB (LandSandBoat — xidb) ───────────────────────────────
 # Used by `xi zone new` to auto-apply the generated zone-migration.sql to the

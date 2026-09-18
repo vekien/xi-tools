@@ -75,7 +75,9 @@ def test_resolution_rule_primary_vs_extended():
         mt.weapon_skill_slot(banks, 'TaruFemale', 5).file_id
 
 
-def test_out_of_bank_numbers_are_errors_not_masked():
+def test_out_of_bank_numbers_are_errors_not_masked(monkeypatch):
+    import xi.xi_config as cfg
+    monkeypatch.setattr(cfg, "FX_WS_BAND_FIRST", 0)    # the retail banks alone: no custom band above them
     banks = mt.weapon_skill_banks(_fake_dll())
     for bad in (272, 300, 4095):
         with pytest.raises(ValueError):

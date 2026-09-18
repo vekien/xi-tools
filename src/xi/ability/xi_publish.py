@@ -4,7 +4,7 @@ the ``xi ability publish`` shortcut, which is that same action prepared and buil
 one go::
 
     xi ability publish recipe.json [--project NAME] [--kind ja|spell|ws] [--animation N]
-                                   [--subdir S] [--force] [--dry-run]
+                                   [--animation-from N] [--subdir S] [--force] [--dry-run]
 
 is exactly::
 
@@ -21,6 +21,11 @@ Kinds and where the client looks (docs/ability/inspect.md, docs/anim/weapon-skil
                                            only unregistered ids (others live in between)
     ws     per-race extended bank slots    256..271; 264..271 are dummies on retail
            (body + companion A at +16 + companion B at +32, all per race)
+
+Past those, each kind has a custom band only a client running a band plugin loads
+(xi_config FX_*_BAND_*, cexislots' values unless set): spells 1612+, job abilities 500+,
+weapon skills 272..527. The stock numbers are handed out first; ``xi ability slots``
+lists the weapon-skill ones and what holds each.
 
 The client has no spell table of its own: ``spell_list.animation`` rides in the action
 packet (category 4, magic finish) and the client opens file id 0xAF0 + that number — the
@@ -135,7 +140,8 @@ def _is_dummy(root: Path, rel: Optional[str]) -> bool:
     for base in (root, Path(FFXI_DIR)):
         p = base / rel
         if p.exists():
-            return b"dumm" in p.read_bytes()[:4096]
+            with open(p, "rb") as f:
+                return b"dumm" in f.read(4096)
     return True
 
 
@@ -157,15 +163,54 @@ def infer_kind(recipe: dict, kind: Optional[str] = None) -> str:
     return kind
 
 
+def _band_off_hint(kind: str) -> str:
+    """For a "no free number" error: the custom band was not tried because it is off."""
+    name = f"FX_{kind.upper()}_BAND_FIRST"
+    return (f"The custom band is switched off ({name}=0), so only the numbers a stock client "
+            "loads were tried. A client running a band plugin (cexislots) reaches hundreds "
+            "more: tick Settings › XI Tools › Custom animation bands in the model viewer, or "
+            f"take {name}=0 out of the environment / .env.")
+
+
+def ws_band() -> Optional[tuple]:
+    """``(first, last)`` of the custom weapon-skill band, or None when it is off."""
+    import xi.xi_config as cfg
+    if not (cfg.FX_WS_BAND_FIRST and cfg.FX_WS_BAND_BASE and cfg.FX_WS_BAND_SLOTS):
+        return None
+    return cfg.FX_WS_BAND_FIRST, min(ANIMATION_MAX, cfg.FX_WS_BAND_FIRST + cfg.FX_WS_BAND_SLOTS - 1)
+
+
+def needs_plugin(kind: str, animation: int) -> bool:
+    """True when ``animation`` sits in ``kind``'s custom band, which a stock client cannot load."""
+    if kind == "ws":
+        band = ws_band()
+        return bool(band) and animation > WS_CUSTOM_LAST and band[0] <= animation <= band[1]
+    first, _base = custom_band(kind)
+    return bool(first) and animation >= first
+
+
+def ws_candidates(start: Optional[int] = None) -> List[int]:
+    """Weapon-skill numbers Publish hands out, in order: the extended bank's dummies any
+    client loads, then the custom band. ``start`` drops the numbers below it."""
+    band = ws_band()
+    nums = list(range(WS_CUSTOM_FIRST, WS_CUSTOM_LAST + 1))
+    if band:
+        nums += [n for n in range(band[0], band[1] + 1) if n > WS_CUSTOM_LAST]
+    return [n for n in nums if start is None or n >= start]
+
+
 def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool,
-                    ours: Optional[set] = None) -> int:
+                    ours: Optional[set] = None, start: Optional[int] = None) -> int:
     """First animation number the client would read as new, or ``wanted`` when it is
     free. A slot registered to one of ``ours`` (a previous build of the same action)
-    counts as free, so rebuilds land on the same number."""
+    counts as free, so rebuilds land on the same number. ``start`` is where the search
+    begins (``target.animation_from``): nothing below it is handed out."""
     ours = ours or set()
     if kind in _SINGLE_DAT_KINDS:
         offset, first, last, _col = _SINGLE_DAT_KINDS[kind]
         cands = [wanted] if wanted is not None else _candidates(kind)
+        if wanted is None and start is not None:
+            cands = range(max(cands.start, start), cands.stop)
         for n in cands:
             if last < n < (custom_band(kind)[0] or n):
                 continue                     # the gap between the retail band and a custom one
@@ -178,39 +223,57 @@ def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool,
                 f"{kind} animation {wanted} (file id {file_id_for(kind, wanted)}) is already "
                 f"registered to {_placement(root, file_id_for(kind, wanted))}; pass --force to repoint it")
         band_first, _b = custom_band(kind)
-        where = (f"between {first} and {band_first + 4095}" if band_first
-                 else f"between {first} and {last} (set a custom band in .env for more — "
-                      "needs a client-side ceiling plugin)")
-        raise click.ClickException(f"no free {kind} animation number {where}")
-    import xi.xi_config as cfg
-    ws_band_last = (cfg.FX_WS_BAND_FIRST + cfg.FX_WS_BAND_SLOTS - 1
-                    if cfg.FX_WS_BAND_FIRST and cfg.FX_WS_BAND_SLOTS else 0)
-    cands = ([wanted] if wanted is not None
-             else range(WS_CUSTOM_FIRST, (ws_band_last + 1) or (WS_CUSTOM_LAST + 1)))
+        lo = max(first, start or first)
+        if band_first:
+            raise click.ClickException(f"no free {kind} animation number between {lo} and {ANIMATION_MAX}")
+        raise click.ClickException(
+            f"no free {kind} animation number between {lo} and {last}. " + _band_off_hint(kind))
+    from xi.entity.anim.xi_motion_tables import load_maindll
+    dll = load_maindll()                     # read once: a full band is hundreds of lookups
+    band = ws_band()
+    last_tried = band[1] if band else WS_CUSTOM_LAST
+    cands = [wanted] if wanted is not None else ws_candidates(start)
     for n in cands:
-        slots = resolve_weapon_skill(n)
-        free = all(_is_dummy(root, _placement(root, s.file_id))
-                   or (_placement(root, s.file_id) or "").upper() in ours for s in slots)
-        if force or free:
+        if force or not _ws_taken(root, resolve_weapon_skill(n, dll=dll), ours):
             return n
-    last_tried = ws_band_last or WS_CUSTOM_LAST
     if wanted is not None:
         raise click.ClickException(
-            f"Weapon-skill slot {wanted} isn't free — some race already has a real motion DAT "
-            f"there (a slot is free only when every race's body DAT is a retail dummy). Pass "
-            f"--force to overwrite it, pick another slot in {WS_CUSTOM_FIRST}–{last_tried}, "
-            f"or publish the mix as a job ability / spell instead.")
+            f"Weapon-skill number {wanted} isn't free — some race already has a real motion DAT "
+            f"there (a number is free only when every race's body DAT is a retail placeholder). "
+            f"Pass --force to overwrite it, pick another in {WS_CUSTOM_FIRST}–{last_tried} "
+            f"(`xi ability slots` lists them), or publish the mix as a job ability / spell instead.")
+    lo = max(WS_CUSTOM_FIRST, start or WS_CUSTOM_FIRST)
+    if lo > last_tried:
+        raise click.ClickException(
+            f"--animation-from {start} is past the last weapon-skill number this setup reaches "
+            f"({last_tried}).")
+    from xi.xi_config import FFXI_PIVOT_DIR
+    in_pivot = bool(FFXI_PIVOT_DIR) and Path(FFXI_PIVOT_DIR).resolve() == Path(root).resolve()
+    ways = ["  • --animation N --force — take a number anyway, overwriting the skill on it "
+            "(`xi ability slots` shows what each one holds)"]
+    if band:
+        ways.append("  • raise FX_WS_BAND_SLOTS, and WS_SLOTS in the client plugin to match")
+    if FFXI_PIVOT_DIR and not in_pivot:
+        ways.append("  • --pivot — build into FFXI_PIVOT_DIR instead; its tables may have room")
+    ways.append("  • publish as a job ability or spell instead, which have far more numbers")
     raise click.ClickException(
-        f"Every weapon-skill animation slot this install can reach ({WS_CUSTOM_FIRST}–{last_tried}) "
-        "is taken — none is a retail dummy on every race, so there's nowhere free to place a "
-        "per-race weapon-skill motion. Ways forward:\n"
-        + ("" if ws_band_last else
-           "  • set FX_WS_BAND_FIRST / _BASE / _SLOTS in .env — a client-side plugin (cexislots) "
-           "adds a third motion bank with hundreds more slots, and the publisher allocates there "
-           "once it knows where that band is;\n")
-        + "  • --animation N --force — overwrite one slot (clobbers the custom skill on it);\n"
-          "  • --pivot — build into FFXI_PIVOT_DIR instead, if it has room;\n"
-          "  • publish as a job ability or spell instead, which have far more room.")
+        f"No free weapon-skill animation number in {lo}–{last_tried}: on every one of them some "
+        "race already has a real motion DAT.\n"
+        + ("" if band else _band_off_hint("ws") + "\n")
+        + "Otherwise:\n" + "\n".join(ways))
+
+
+def _ws_taken(root: Path, slots, ours: Optional[set] = None) -> List[tuple]:
+    """``(race, dat)`` for every race whose body DAT under this weapon-skill number is a
+    real motion: registered, not a retail placeholder and not one of ``ours``. Empty means
+    the number is free — the rule a weapon-skill number is allocated by."""
+    ours = ours or set()
+    taken = []
+    for s in slots:
+        cur = _placement(root, s.file_id)
+        if cur and cur.upper() not in ours and not _is_dummy(root, cur):
+            taken.append((s.race, cur))
+    return taken
 
 
 def _free_files(root: Path, subdir: int, count: int, reserved: Optional[set] = None) -> List[int]:
@@ -250,13 +313,18 @@ def _source_ws_animation(recipe: dict) -> Optional[int]:
 
 
 def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Optional[int] = None,
-         subdir: int = DEFAULT_SUBDIR, force: bool = False, previous: Optional[dict] = None) -> dict:
+         subdir: int = DEFAULT_SUBDIR, force: bool = False, previous: Optional[dict] = None,
+         animation_from: Optional[int] = None) -> dict:
     """Compose the recipe and decide where every DAT goes in ``root``: the animation
     number, and per file its file id and ``ROM10/<subdir>/<n>.DAT`` placement.
 
+    ``animation_from`` is where an automatic number starts (``target.animation_from``):
+    the first free number at or above it, instead of the first free one of all.
+
     ``previous`` is the action's last recorded result (``{animation, placements}``): a
     rebuild keeps its animation number and DAT paths, so the manifest stays a stable
-    description of where the ability lives. Nothing is written here except the composed
+    description of where the ability lives — unless that number is now below
+    ``animation_from``, which asks for a new one. Nothing is written here except the composed
     DAT bytes, which are returned on each file (``composed``) or as ``copy_from``."""
     kind = infer_kind(recipe, kind)
     # A job ability or spell may carry skeleton clips baked from one race's copy (compose
@@ -265,9 +333,10 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
     prev_places = {(p.get("race"), p.get("role")): p for p in (previous or {}).get("placements") or []}
     ours = {str(p.get("dat", "")).upper() for p in prev_places.values()}
     prev_anim = (previous or {}).get("animation")
-    if animation is None and isinstance(prev_anim, int) and (previous or {}).get("kind", kind) == kind:
+    if (animation is None and isinstance(prev_anim, int) and (previous or {}).get("kind", kind) == kind
+            and (animation_from is None or prev_anim >= animation_from)):
         animation = prev_anim
-    anim = _pick_animation(root, kind, animation, force, ours)
+    anim = _pick_animation(root, kind, animation, force, ours, start=animation_from)
 
     def place_for(race, role, pool: List[int]) -> str:
         prev = prev_places.get((race, role))
@@ -310,6 +379,9 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
     for f in files:
         f["current"] = _placement(root, f["file_id"])
     warnings = list(dict.fromkeys(w for c in composed for w in c.warnings))
+    if needs_plugin(kind, anim):
+        warnings.append(f"{kind} animation {anim} is in the custom band: only a client running "
+                        "the band plugin (cexislots) loads it")
     return {"root": root, "kind": kind, "animation": anim, "subdir": subdir, "files": files,
             "warnings": warnings}
 
@@ -378,6 +450,107 @@ def permission_hint(root: Path, e: PermissionError) -> str:
     return hint + "\nNothing was registered; any DAT already copied is unreferenced and harmless."
 
 
+# ── `xi ability slots` — what every weapon-skill number holds today ─────────────────
+
+def _root_name(root: Path) -> str:
+    from xi.xi_config import FFXI_PIVOT_DIR
+    return "pivot" if FFXI_PIVOT_DIR and Path(FFXI_PIVOT_DIR).resolve() == Path(root).resolve() else "dir"
+
+
+def _ability_owners(root: Path) -> Dict[str, str]:
+    """``{DAT path (upper): "project: action id"}`` for the abilities the dats projects
+    here have built into ``root`` — what names the skill sitting on a taken number."""
+    import json
+    target = _root_name(root)
+    out: Dict[str, str] = {}
+    for mf in sorted(Path("projects").glob("*.json")):
+        try:
+            actions = json.loads(mf.read_text(encoding="utf-8")).get("actions") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        for a in actions:
+            res = a.get("result") if isinstance(a, dict) and a.get("type") == "ability" else None
+            if not res or target not in (res.get("targets") or [target]):
+                continue
+            for pl in res.get("placements") or []:
+                if pl.get("dat"):
+                    out[str(pl["dat"]).upper()] = f"{mf.stem}: {a.get('id')}"
+    return out
+
+
+def ws_slots(root: Path, first: Optional[int] = None, last: Optional[int] = None) -> dict:
+    """The weapon-skill numbers Publish hands out in ``root`` and what each holds today:
+    the extended bank's dummies any client loads, then the custom band (``index`` is the
+    number's place inside its bank — 0..255 across cexislots' band). ``free`` is the rule
+    ``_pick_animation`` allocates by: no race has a real motion DAT on the number."""
+    from xi.entity.anim.xi_motion_tables import load_maindll
+    dll = load_maindll()
+    band = ws_band()
+    owners = _ability_owners(root)
+    rows = []
+    for n in ws_candidates(first):
+        if last is not None and n > last:
+            break
+        slots = resolve_weapon_skill(n, dll=dll)
+        taken = _ws_taken(root, slots)
+        dats = list(dict.fromkeys(d for _race, d in taken))
+        rows.append({
+            "animation": n, "bank": slots[0].bank, "index": slots[0].index,
+            "file_id": slots[0].file_id, "plugin": needs_plugin("ws", n), "free": not taken,
+            "races": [race for race, _d in taken], "dats": dats,
+            "owner": next((owners[d.upper()] for d in dats if d.upper() in owners), None),
+        })
+    return {"kind": "ws", "root": str(root), "target": _root_name(root),
+            "stock": [WS_CUSTOM_FIRST, WS_CUSTOM_LAST], "band": list(band) if band else None,
+            "slots": rows}
+
+
+@click.command("slots")
+@click.option("--from", "first", type=int, default=None, help="First animation number to list (default: all).")
+@click.option("--to", "last", type=int, default=None, help="Last animation number to list.")
+@click.option("--free", "only_free", is_flag=True, help="List only the free numbers.")
+@click.option("--pivot", is_flag=True, help="Look in FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
+@click.option("--json", "as_json", is_flag=True, help="Print the listing as JSON.")
+def slots_cmd(first: Optional[int], last: Optional[int], only_free: bool, pivot: bool, as_json: bool):
+    """List the weapon-skill animation numbers a mix can publish to, and what holds each.
+
+    \b
+    The numbers any client loads (264–271) come first, then the custom band a client
+    running a band plugin reaches (cexislots: 272–527, bank index 0–255). A number is
+    free when no race has a real motion DAT on it — the rule `dats build` allocates by.
+      xi ability slots --pivot            # what the pivot folder's tables hold
+      xi ability slots --free --json      # the free numbers, for a script
+    """
+    import json
+    from xi.xi_config import FFXI_DIR, FFXI_PIVOT_DIR
+    if pivot and not FFXI_PIVOT_DIR:
+        raise click.ClickException("FFXI_PIVOT_DIR is not configured.")
+    report = ws_slots(Path(FFXI_PIVOT_DIR if pivot else FFXI_DIR), first, last)
+    total = len(report["slots"])
+    n_free = sum(1 for r in report["slots"] if r["free"])
+    if only_free:
+        report["slots"] = [r for r in report["slots"] if r["free"]]
+    if as_json:
+        click.echo(json.dumps(report, ensure_ascii=False))
+        return
+    band = report["band"]
+    click.echo(f"Weapon-skill numbers in {report['root']} ({report['target']})")
+    click.echo(f"  any client: {report['stock'][0]}–{report['stock'][1]}"
+               + (f" · custom band (needs the client plugin): {band[0]}–{band[1]}" if band
+                  else " · custom band: off (FX_WS_BAND_FIRST=0)"))
+    click.echo(f"  {n_free} free of {total}\n")
+    click.echo(f"  {'anim':>5}  {'bank':<8} {'#':>3}  {'file id':>7}  holds")
+    for r in report["slots"]:
+        if r["free"]:
+            holds = "free"
+        else:
+            races = "every race" if len(r["races"]) >= 8 else ", ".join(r["races"])
+            holds = ", ".join(r["dats"][:2]) + (" …" if len(r["dats"]) > 2 else "") + f"  ({races})"
+            if r["owner"]:
+                holds = f"{r['owner']} — {holds}"
+        click.echo(f"  {r['animation']:>5}  {r['bank']:<8} {r['index']:>3}  {r['file_id']:>7}  {holds}")
+
+
 # ── `xi ability publish` — the dats action, prepared and built in one command ────────
 
 @click.command("publish")
@@ -387,12 +560,14 @@ def permission_hint(root: Path, e: PermissionError) -> str:
 @click.option("--kind", type=click.Choice(["auto", "ja", "spell", "ws"]), default="auto", show_default=True,
               help="Publish as a job ability, spell or weapon skill (auto = from the recipe).")
 @click.option("--animation", type=int, default=None, help="Animation number to use (default: next free).")
+@click.option("--animation-from", type=int, default=None,
+              help="Where an automatic number starts: the first free one at or above this.")
 @click.option("--subdir", type=int, default=DEFAULT_SUBDIR, show_default=True, help="ROM10 folder to place DATs in.")
 @click.option("--force", is_flag=True, help="Repoint a file id that is already registered.")
 @click.option("--dry-run", is_flag=True, help="Show the plan; write nothing.")
 @click.option("--pivot", is_flag=True, help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
 def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation: Optional[int],
-                subdir: int, force: bool, dry_run: bool, pivot: bool = False):
+                animation_from: Optional[int], subdir: int, force: bool, dry_run: bool, pivot: bool = False):
     """Publish RECIPE_PATH through `xi dats`: prepare an ability action, then build it.
 
     \b
@@ -407,7 +582,7 @@ def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation:
     project = project or recipe["name"]
     ctx = click.get_current_context()
     ctx.invoke(prepare_cmd, source=recipe_path, project=project, action_type="ability", replace=True,
-               ability_kind=kind, animation=animation, subdir=subdir)
+               ability_kind=kind, animation=animation, animation_from=animation_from, subdir=subdir)
     click.echo()
     ctx.invoke(build_cmd, project=project, only=(f"ability.{_slug(recipe['name'])}",),
                force=force, dry_run=dry_run, pivot=pivot)

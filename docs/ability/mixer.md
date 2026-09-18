@@ -7,7 +7,8 @@ is the UI; these are the commands it drives, usable on their own.
 ```bash
 uv run xi ability recipe ws:1:HumeMale --out fb.json     # starter recipe from one source
 uv run xi ability compose recipe.json [--out DIR] [--race Mithra] [--json]
-uv run xi ability publish recipe.json [--project NAME] [--kind ja|spell|ws] [--animation N] [--subdir 20] [--dry-run]
+uv run xi ability publish recipe.json [--project NAME] [--kind ja|spell|ws] [--animation N | --animation-from N] [--subdir 20] [--dry-run]
+uv run xi ability slots [--pivot] [--free] [--json]     # the weapon-skill numbers and what holds each
 uv run xi mv update --only abilities                      # the viewer's pick list (mv/lists/abilities.json)
 ```
 
@@ -73,8 +74,16 @@ error, not a silent drop.
 > the animation number becomes a DAT file id through fixed arithmetic per kind, and
 > the ids that arithmetic lands on are mostly taken by other content. A client-side
 > plugin can patch it so numbers at or above a threshold resolve into a reserved
-> region instead; set `FX_*_BAND_*` in `.env` (see `xi_config.py`) and the publisher
-> will allocate there once the retail band is full. Unset, nothing changes.
+> region instead, and the publisher allocates there once the numbers any client loads
+> are used up. The bands are **on by default with cexislots' values** (weapon skills
+> 272–527, job abilities 500+, spells 1612+; `FX_*_BAND_*` in `xi_config.py`): set them
+> in `.env` only for a different plugin, and set a band's `FIRST` to `0` to switch it off
+> for a stock client. The plan prints a `⚠` line when the number it took needs the plugin.
+> Band numbers are built with `--pivot`: their file ids sit past the expanded tables, the
+> plugin merges them from the XIPivot overlay's ROM10 tables, and the build grows that pair
+> (to 437,488 entries) the first time — the install's tables are never touched for it.
+> `xi ability slots [--pivot]` lists every weapon-skill number and what holds it, and
+> `--animation-from N` starts the automatic number at `N` (272 = straight to the band).
 
 Publishing is an **`xi dats` action** (`type: "ability"`, schema
 [`schema/ability.json`](../../schema/ability.json)), so a published ability sits in a
@@ -87,7 +96,7 @@ uv run xi dats new
 
 # 2. straight arguments — every parameter has a default the build fills in
 uv run xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace \
-    [--kind ja|spell|ws] [--animation N] [--subdir 20]
+    [--kind ja|spell|ws] [--animation N | --animation-from N] [--subdir 20]
 uv run xi dats build tiger_fury --dry-run          # the plan: slot, file ids, server SQL
 uv run xi dats build tiger_fury                    # add --pivot to build into FFXI_PIVOT_DIR
 

@@ -961,7 +961,7 @@ ABILITY_DEFAULT_SUBDIR = 20
 
 def _ability_action_from_recipe(source: Path, resource_root: Path, *, action_id: str | None = None,
                                 kind: str | None = None, animation: int | None = None,
-                                subdir: int | None = None) -> dict:
+                                subdir: int | None = None, animation_from: int | None = None) -> dict:
     """Validate a recipe, copy it under ``projects/resources/ability/`` and return the
     manifest action for it (shared by `dats prepare` and the `dats new` wizard)."""
     from xi.ability.xi_compose import load_recipe
@@ -972,6 +972,8 @@ def _ability_action_from_recipe(source: Path, resource_root: Path, *, action_id:
         _copy_file(source, dest)
     target: dict = {"animation": animation if animation is not None else "auto",
                     "subdir": subdir if subdir is not None else ABILITY_DEFAULT_SUBDIR}
+    if animation_from is not None:
+        target["animation_from"] = animation_from
     return {
         "id": action_id, "type": "ability",
         "kind": kind or (recipe.get("target") or {}).get("kind") or "auto",
@@ -1007,14 +1009,17 @@ def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: boo
     anim = target.get("animation", "auto")
     wanted = None if anim in (None, "auto") else int(anim)
     subdir = int(target.get("subdir", ABILITY_DEFAULT_SUBDIR))
+    start = target.get("animation_from")
     force = force or bool((action.get("options") or {}).get("force"))
     root = _active_build_root()
     plan = AP.plan(recipe, root, kind=action.get("kind"), animation=wanted, subdir=subdir,
-                   force=force, previous=action.get("result"))
+                   force=force, previous=action.get("result"),
+                   animation_from=int(start) if start is not None else None)
     sources = AP.write_sources(recipe, plan)
 
     placements = []
     try:
+        _make_room_for_band(root, [f["file_id"] for f in plan["files"]], dry_run)
         for f, src in zip(plan["files"], sources):
             # plan() already applied the slot policy (free job-ability / spell ids;
             # weapon-skill slots only where every race's DAT is a retail dummy; a
@@ -1051,6 +1056,45 @@ def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: boo
         "warnings": plan.get("warnings") or [],
         "registered": f"animation {plan['animation']} -> {len(placements)} DAT(s)",
     }
+
+
+def _make_room_for_band(root: Path, file_ids: list[int], dry_run: bool) -> None:
+    """A custom band's file ids sit past the end of the expanded tables. The client plugin
+    (cexislots) grows the client's table in memory and merges each XIPivot overlay's
+    ROM pair into it, so the overlay's pair is what has to hold the id: grow the pivot
+    folder's to the band ceiling here. The install's tables are never grown for it —
+    the plugin does not read band registrations from them."""
+    import xi.xi_config as cfg
+    from xi.xi_config import CUSTOM_ROM_IDX
+    floor, ceiling = cfg.fx_band_floor(), cfg.fx_band_ceiling()
+    top = max((f for f in file_ids if floor and floor <= f < ceiling), default=None)
+    if top is None:
+        return
+    ft = root / f"ROM{CUSTOM_ROM_IDX}" / f"FTABLE{CUSTOM_ROM_IDX}.DAT"
+    vt = root / f"ROM{CUSTOM_ROM_IDX}" / f"VTABLE{CUSTOM_ROM_IDX}.DAT"
+    if not (ft.exists() and vt.exists()) or _table_holds(ft, vt, ceiling - 1):
+        return                     # missing tables get their own error; big enough already
+    if _root_target_name(root) != "pivot":
+        if _table_holds(ft, vt, top):
+            return
+        raise click.ClickException(
+            f"file_id {top:,} is in a custom animation band. The client plugin (cexislots) reads "
+            "band registrations from an XIPivot overlay's ROM tables, not the install's, so build "
+            "this into the pivot folder: add --pivot (Use Pivot Folder in the model viewer's Manage "
+            "panel). Or take a number any client loads (--animation N; `xi ability slots` lists them).")
+    have = vt.stat().st_size
+    click.echo(f"  {'would grow' if dry_run else 'growing'} {ft.parent.name} tables in the pivot folder "
+               f"{have:,} -> {ceiling:,} entries for the custom animation bands "
+               "(the install's tables are left alone)")
+    if dry_run:
+        return
+    from xi.ftable.xi_core import forget_tables
+    from xi.ftable.xi_expand import _grow_table_file
+    _backup_once(ft)
+    _backup_once(vt)
+    _grow_table_file(str(ft), ceiling, 2, False)
+    _grow_table_file(str(vt), ceiling, 1, False)
+    forget_tables()
 
 
 def _is_own_previous(action: dict, dat: str) -> bool:
@@ -1320,10 +1364,17 @@ def _wizard_ability(slug: str, prev: dict | None, manifest_path: Path, manifest:
     anim_raw = _ask("Animation number (the server row's `animation`; auto = the next free one)",
                     "Enter number or auto", default=str(prev_anim)).strip().lower()
     animation = None if anim_raw in ("", "auto") else int(anim_raw)
+    animation_from = None
+    if animation is None:
+        prev_from = (p.get("target") or {}).get("animation_from")
+        from_raw = _ask("Start auto at (the first free number at or above it; any = the first free of all)",
+                        "Enter number or any", default=str(prev_from if prev_from is not None else "any")).strip().lower()
+        animation_from = None if from_raw in ("", "any") else int(from_raw)
     subdir = _ask("ROM10 folder to place the DAT(s) in", "Enter folder number", type=int,
                   default=int((p.get("target") or {}).get("subdir", ABILITY_DEFAULT_SUBDIR)))
     action = _ability_action_from_recipe(src, resource_root, action_id=f"ability.{slug}",
-                                         kind=kind, animation=animation, subdir=subdir)
+                                         kind=kind, animation=animation, subdir=subdir,
+                                         animation_from=animation_from)
     if p.get("result"):
         action["result"] = p["result"]   # keep the slot a previous build landed on
     return action
@@ -1440,6 +1491,8 @@ def json_cmd(manifest: Path, output: Path | None):
               help="Ability recipes: publish as a job ability, spell or weapon skill (default auto = from the recipe).")
 @click.option("--animation", type=int, default=None,
               help="Ability recipes: the animation number to take (default auto = next free).")
+@click.option("--animation-from", type=int, default=None,
+              help="Ability recipes: where auto starts — the first free number at or above this.")
 @click.option("--subdir", type=int, default=None,
               help=f"Ability recipes: ROM10 folder to place the DAT(s) in (default {ABILITY_DEFAULT_SUBDIR}).")
 @click.option("--record-id", type=int, default=None,
@@ -1449,7 +1502,8 @@ def json_cmd(manifest: Path, output: Path | None):
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
-                record_id: int | None = None, menu_index: int | None = None):
+                record_id: int | None = None, menu_index: int | None = None,
+                animation_from: int | None = None):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -1468,7 +1522,8 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
 
     if kind == "ability":
         action = _ability_action_from_recipe(source, resource_root, action_id=action_id,
-                                             kind=ability_kind, animation=animation, subdir=subdir)
+                                             kind=ability_kind, animation=animation, subdir=subdir,
+                                             animation_from=animation_from)
         action_id = action["id"]
     elif kind in RECORD_TYPES:
         action = _record_action_from_definition(source, resource_root, kind, action_id=action_id,
@@ -1560,7 +1615,8 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         # The recorded allocation (animation number, placements) always survives a
         # re-prepare so a rebuild lands on the same slot; the target block does too
         # unless this run set part of it explicitly.
-        explicit = ability_kind is not None or animation is not None or subdir is not None
+        explicit = (ability_kind is not None or animation is not None or subdir is not None
+                    or animation_from is not None)
         preserve = ("result",) + (() if explicit else ("target", "kind"))
     elif kind in RECORD_TYPES:
         # Same rule: the recorded id survives a re-prepare; the target too unless set here.
@@ -1658,6 +1714,9 @@ def _action_summary(action: dict) -> str:
         return line
     if action.get("type") == "ability":
         anim = (action.get("target") or {}).get("animation", "auto")
+        start = (action.get("target") or {}).get("animation_from")
+        if anim == "auto" and start is not None:
+            anim = f"auto from {start}"
         placements = (action.get("result") or {}).get("placements") or []
         line += f" - {action.get('kind') or 'auto'} animation {anim}"
         line += f": {(action.get('resources') or {}).get('recipe', '?')}"

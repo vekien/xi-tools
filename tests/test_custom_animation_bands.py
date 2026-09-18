@@ -109,3 +109,122 @@ def test_an_incomplete_band_is_ignored(monkeypatch, no_bands):
     monkeypatch.setattr(cfg, "FX_SPELL_BAND_FIRST", 1612)   # no base set
     assert ap.custom_band("spell") == (0, 0)
     assert ap.file_id_for("spell", 2000) == SPELL_RETAIL_BASE + 2000
+
+
+# ── the bands are on unless switched off; weapon-skill numbers and their errors ──────
+
+def test_an_unset_band_takes_the_plugin_default_and_zero_switches_it_off(monkeypatch):
+    monkeypatch.delenv("FX_WS_BAND_FIRST", raising=False)
+    assert cfg._band("FX_WS_BAND_FIRST", 272) == 272
+    monkeypatch.setenv("FX_WS_BAND_FIRST", "0")       # what the model viewer sends when off
+    assert cfg._band("FX_WS_BAND_FIRST", 272) == 0
+    monkeypatch.setenv("FX_WS_BAND_FIRST", "300")
+    assert cfg._band("FX_WS_BAND_FIRST", 272) == 300
+
+
+def test_weapon_skill_candidates_are_the_stock_numbers_then_the_band(bands):
+    nums = ap.ws_candidates()
+    assert nums[:9] == [264, 265, 266, 267, 268, 269, 270, 271, 272]
+    assert nums[-1] == 527 and len(nums) == 8 + 256
+    assert ap.ws_candidates(300)[0] == 300
+    assert ap.needs_plugin("ws", 272) and not ap.needs_plugin("ws", 271)
+
+
+def test_weapon_skill_candidates_without_a_band(no_bands):
+    assert ap.ws_candidates() == list(range(264, 272))
+    assert ap.ws_candidates(272) == []
+    assert not ap.needs_plugin("ws", 300)
+
+
+@pytest.fixture
+def every_number_taken(monkeypatch, tmp_path):
+    monkeypatch.setattr(mt, "load_maindll", lambda: b"")
+    monkeypatch.setattr(ap, "resolve_weapon_skill", lambda n, race=None, dll=None: [])
+    monkeypatch.setattr(ap, "_ws_taken", lambda root, slots, ours=None: [("HumeMale", "ROM10/20/1.DAT")])
+    return tmp_path
+
+
+def test_a_full_weapon_skill_range_with_the_band_off_says_how_to_switch_it_on(no_bands, every_number_taken):
+    with pytest.raises(Exception) as e:
+        ap._pick_animation(every_number_taken, "ws", None, False)
+    msg = str(e.value.message)
+    assert "264–271" in msg and "FX_WS_BAND_FIRST=0" in msg and "Custom animation bands" in msg
+
+
+def test_a_full_weapon_skill_range_with_the_band_on_names_the_whole_range(bands, every_number_taken):
+    with pytest.raises(Exception) as e:
+        ap._pick_animation(every_number_taken, "ws", None, False)
+    msg = str(e.value.message)
+    assert "264–527" in msg and "switched off" not in msg and "FX_WS_BAND_SLOTS" in msg
+
+
+def test_animation_from_starts_the_search_there(bands, monkeypatch, tmp_path):
+    monkeypatch.setattr(mt, "load_maindll", lambda: b"")
+    monkeypatch.setattr(ap, "resolve_weapon_skill", lambda n, race=None, dll=None: [n])
+    monkeypatch.setattr(ap, "_ws_taken", lambda root, slots, ours=None: [] if slots[0] >= 269 else [("x", "y")])
+    assert ap._pick_animation(tmp_path, "ws", None, False) == 269
+    assert ap._pick_animation(tmp_path, "ws", None, False, start=300) == 300
+    with pytest.raises(Exception, match="past the last weapon-skill number"):
+        ap._pick_animation(tmp_path, "ws", None, False, start=600)
+
+
+# ── the band's file ids sit past the expanded tables: the pivot overlay's pair grows ──
+
+def _tables(root, entries, rom=10):
+    d = root / f"ROM{rom}"
+    d.mkdir(parents=True)
+    (d / f"FTABLE{rom}.DAT").write_bytes(b"\0" * entries * 2)
+    (d / f"VTABLE{rom}.DAT").write_bytes(b"\0" * entries)
+    return d / f"FTABLE{rom}.DAT", d / f"VTABLE{rom}.DAT"
+
+
+def test_the_band_bounds_are_the_plugins_ceiling(bands):
+    assert cfg.fx_band_floor() == 423_152
+    assert cfg.fx_band_ceiling() == 437_488            # cexislots FX_CEILING
+
+
+def test_no_band_no_bounds(no_bands):
+    assert cfg.fx_band_floor() == 0 and cfg.fx_band_ceiling() == 0
+
+
+def test_a_band_build_grows_the_pivot_rom_pair_only(bands, monkeypatch, tmp_path):
+    from xi.dats import xi_dats as xd
+    ft, vt = _tables(tmp_path, 423_152)
+    monkeypatch.setattr(xd, "_root_target_name", lambda root: "pivot")
+    xd._make_room_for_band(tmp_path, [432_016, 432_023], dry_run=True)
+    assert vt.stat().st_size == 423_152                # a dry run writes nothing
+    xd._make_room_for_band(tmp_path, [432_016, 432_023], dry_run=False)
+    assert vt.stat().st_size == 437_488 and ft.stat().st_size == 437_488 * 2
+    assert (tmp_path / "ROM10" / "VTABLE10.DAT.base").stat().st_size == 423_152
+    xd._make_room_for_band(tmp_path, [61_464], dry_run=False)      # a stock number: nothing to do
+
+
+def test_a_band_build_into_the_install_says_to_use_the_pivot_folder(bands, monkeypatch, tmp_path):
+    from xi.dats import xi_dats as xd
+    _ft, vt = _tables(tmp_path, 423_152)
+    monkeypatch.setattr(xd, "_root_target_name", lambda root: "dir")
+    with pytest.raises(Exception, match="--pivot"):
+        xd._make_room_for_band(tmp_path, [432_016], dry_run=True)
+    assert vt.stat().st_size == 423_152
+
+
+def test_a_pivot_sync_keeps_the_band_tail(bands, monkeypatch, tmp_path):
+    from xi.ftable import xi_expand as xe
+    game, piv = tmp_path / "game", tmp_path / "pivot"
+    for root in (game, piv):
+        root.mkdir()
+        (root / "FTABLE.DAT").write_bytes(b"\0" * 423_152 * 2)
+        (root / "VTABLE.DAT").write_bytes(b"\0" * 423_152)
+    _tables(game, 423_152)
+    pft, pvt = _tables(piv, 437_488)
+    v = bytearray(pvt.read_bytes()); v[432_016] = 10; pvt.write_bytes(bytes(v))        # a band registration
+    gv = bytearray((game / "ROM10" / "VTABLE10.DAT").read_bytes()); gv[200_000] = 10   # gear, install side
+    (game / "ROM10" / "VTABLE10.DAT").write_bytes(bytes(gv))
+    monkeypatch.setattr(xe, "FFXI_DIR", str(game))
+    monkeypatch.setattr(xe, "pivot_root", lambda: str(piv))
+    monkeypatch.setattr(xe, "read_path_for", lambda p: p)
+    xe.sync_pivot_from_base()
+    out = pvt.read_bytes()
+    assert len(out) == 437_488 and out[432_016] == 10 and out[200_000] == 10
+    # and the longer overlay pair is not a size mismatch
+    assert len(set(xe.table_entry_sizes(include_pivot=True).values())) == 1
