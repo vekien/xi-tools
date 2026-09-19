@@ -99,7 +99,21 @@ xi ability inspect ws:N[:RACE]   # weapon-skill animation N (per race)
 xi ability inspect ROM/x/y       # any DAT; --routine TAG, --all, --json
 xi ability recipe SPEC           # starter recipe reproducing one source
 xi ability compose recipe.json   # recipe -> new DAT(s) (motion A + vfx B + sound C)
+                                 #   a weapon skill: one DAT per race in retail's folders, hf_1 { <dir> {…, main}
+                                 #   hf_1 {clips, traces} } (docs/ability/mixer.md#folders)
+                                 #   recipe "generators" / "curves": in-place edits to the carried particle
+                                 #   generators (tint, scale, spawn rate, texture id) and keyframe curves,
+                                 #   by lane + source name (docs/ability/mixer.md#generator-edits)
+                                 #   recipe "textures": a PNG (data: URI, or a .png beside the recipe) in place of a
+                                 #   lane's 0x20 texture (by id, plus its 16-char "name" where a DAT repeats an id),
+                                 #   DXT3 via texconv; --json lists replacements and renames
+                                 #   (docs/ability/mixer.md#textures)
+                                 #   an event with no "from" is a lock, hit or link added by hand: its own "raw"
+                                 #   bytes, in every race's DAT; a link the game won't find is a warning
+                                 #   (docs/ability/mixer.md#locks-hits-and-links)
 xi ability publish recipe.json   # = dats prepare --type ability + dats build (--dry-run first; --animation-from N)
+                                 #   a custom-band weapon skill from non-weapon-skill motion registers retail's
+                                 #   160-byte [dumm] placeholder as each race's two waist companions
 xi ability slots [--pivot]       # weapon-skill numbers 264–271 + the custom band 272–527: free, or what holds each
 xi dats new                      # wizard: "Ability" content type; or: xi dats prepare recipe.json --project P
 xi mv update --only abilities    # the mixer's pick list (mv/lists/abilities.json)

@@ -29,7 +29,7 @@ At least one param flag is required:
 | `--pos X Y Z` (alias `--at-pos`) | local position (`--at-pos` matches the `/xi pos` output) | 3×f32 after the placed-mesh/texture ref |
 | `--scale X Y Z` | scale (width height depth) | opcode `0x0F` ScaleInitializer (tag `0f 04`) |
 | `--scale-mul F` | multiply current scale by F | opcode `0x0F` |
-| `--color RRGGBB` | tint color (or `r,g,b`) | opcode `0x16` ColorSetup (written B,G,R) |
+| `--color RRGGBB` | tint color (or `r,g,b`) | opcode `0x16` ColorSetup (written R,G,B; alpha untouched) |
 | `--range NEAR FAR` | draw distance (sets maxEmitDistance = FAR; NEAR unused) | opcode `0x0A` GeneratorCull |
 | `--spawn-interval FRAMES` | framesPerEmission — frames between spawns (lower = denser) | header u16 `@0x76` |
 | `--count N` | particlesPerEmission (0–255) — particles per spawn | header u8 `@0x78` |
@@ -79,10 +79,20 @@ Each line is a per-effect change log of `field=old->new`.
   a group.
 - **Coordinates: `−Y` is UP** (FFXI is Y-down). A positive `y` buries an effect
   underground. To raise something, make `y` *more negative*.
-- **Color byte order is written B,G,R** (FFXI convention). The color **multiplies**
-  the texture — gray/white tints shift fully; pre-colored textures barely move. The
-  green channel is confirmed in-game (the fountain spray went green); pure red vs blue
-  ordering is assumed.
+- **Color bytes are R,G,B,A**, and `0x80` is neutral (`808080` leaves the texture as it
+  is, `FF` doubles a channel). `--color` writes R,G,B and leaves the alpha byte alone.
+  The order is xim's (`ByteReader.nextRGBA`) and the data's: Fire's `g000` holds
+  `c6 80 33 26`, orange only as R,G,B. The in-game check (the fountain spray went
+  green) could not tell the order, since green sits in the middle either way.
+  The color **multiplies** the texture — gray/white tints shift fully; pre-colored
+  textures barely move.
+- **The opcode locators are a byte search**, not a walk of the op streams, so they can
+  hit the wrong op: a generator with no sec1 `0x0A` GeneratorCull but a sec2 `0x0A`
+  RotationVariance (Cure III's `pk00`) reports that op's first float as
+  `draw_distance`, and `--range` would overwrite it. Check `xi fx json --opcodes`
+  before `--range` on an effect you have not edited before. An ability recipe's
+  `generators` edits walk the streams instead (see
+  [ability/mixer.md](../ability/mixer.md#generator-edits)).
 - **`--range`** writes `0x0A` GeneratorCull `maxEmitDistance` (the real draw-distance
   knob, per xim). `NEAR` is currently unused.
 - **`--autorun`** is the fix for a transplanted effect that doesn't render because it's

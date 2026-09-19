@@ -18,7 +18,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4,
-      "description": "4-char name of the effect directory written around the sections (default: the first four alphanumerics of name)."
+      "description": "4-char name of the effect directory written around the sections (default: the first four alphanumerics of name, padded with _). A job ability or spell is that one directory; for a per-race (weapon-skill) build it is the effect folder inside the race root <tag>_<c> (hf_1: the race's tag, then this name's first character), beside a clip folder of the root's name holding the clips and weapon traces."
     },
     "target": {
       "type": "object",
@@ -32,7 +32,7 @@
     "total": {
       "type": "integer",
       "minimum": 0,
-      "description": "The routine's totalDelay (its end). A recipe from `xi ability recipe` carries the source's own so the header round-trips; otherwise the last event's start + duration is used."
+      "description": "The routine's totalDelay (its end). A recipe from `xi ability recipe` carries the source's own so the header round-trips; otherwise the routine ends where its last window does: start + dur, or start + dur × loops for a clip that plays N times."
     },
     "sources": {
       "type": "object",
@@ -58,6 +58,59 @@
       "type": "array",
       "description": "One command each in the new `main` routine, in any order (sorted by start, then `order`).",
       "items": {"$ref": "#/$defs/event"}
+    },
+    "generators": {
+      "type": "array",
+      "description": "In-place edits to a lane's particle generators (0x05 sections). Compose writes them to the lane's copy of the section before it goes into the output, on every race's copy for a race-bound lane; the source DAT is never touched. One entry per lane + ref. An entry whose generator no event fires is unused; one whose generator is not in the lane's DAT is an error.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane", "ref", "edits"],
+        "properties": {
+          "lane": {"type": "string", "description": "A key of `sources`."},
+          "ref": {"$ref": "#/$defs/sectionId", "description": "The generator's name as the source DAT has it. A rename compose makes to settle a name collision does not change it."},
+          "edits": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/edit"}, "description": "Applied in order."}
+        }
+      }
+    },
+    "curves": {
+      "type": "array",
+      "description": "New keys for a lane's keyframe curves (0x19 ParticleKeyFrameData sections). A curve is shared: every generator of the lane that names it plays the new keys. One entry per lane + ref.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane", "ref", "keys"],
+        "properties": {
+          "lane": {"type": "string", "description": "A key of `sources`."},
+          "ref": {"$ref": "#/$defs/sectionId", "description": "The curve's name as the source DAT has it."},
+          "keys": {
+            "type": "array",
+            "minItems": 1,
+            "description": "[time, value] pairs, as many as the source curve has (the section cannot grow). `time` is a fraction of the particle's life; the last key keeps the source's time (1, which ends the curve) whatever is written here, and no earlier key may have time 1.",
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "prefixItems": [{"type": "number", "minimum": 0, "maximum": 1}, {"$ref": "#/$defs/f32"}]
+            }
+          }
+        }
+      }
+    },
+    "textures": {
+      "type": "array",
+      "description": "PNGs that replace a lane's textures (0x20 sections). Compose encodes each as DXT3 (each side the nearest power of two from 4 to 256, alpha halved) and keeps the section's id, 16-character name and flags, so every mesh and sprite sheet of that lane that names the texture draws it, on every race's copy. An entry is one 0x20 section: the one with that `ref` and `name`, or without `name` the first with that `ref`. One entry per lane + ref + name (no name counts as a value of its own); two entries on one section are an error at compose. An entry whose texture nothing the mix fires draws is unused (the report says so); one whose texture is not in the lane's DAT is an error. When another lane already puts a different texture of that name in the output, this lane's is renamed (and its meshes patched), and the report gives the name it went out under.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane", "ref", "png"],
+        "properties": {
+          "lane": {"type": "string", "description": "A key of `sources`."},
+          "ref": {"$ref": "#/$defs/sectionId", "description": "The texture's 4-character section id as the source DAT has it (its 16-character name goes in `name`)."},
+          "name": {"$ref": "#/$defs/textureName", "description": "The texture's 16-character name as the source DAT stores it, to tell apart textures that share `ref`: ROM/11/21 gives five textures the id `faid` (\"faida01 faida01\" to \"faida01 faida05\"), and a name is never repeated. Without it the entry is the first texture of `ref`, as a recipe written before names were."},
+          "png": {"$ref": "#/$defs/png"}
+        }
+      }
     }
   },
   "$defs": {
@@ -71,14 +124,94 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4,
-      "description": "4-char section id the command names (clip `b00?` with the client's `?` wildcard, generator `g004`, sound pointer `8050`, routine `mdam`)."
+      "pattern": "^[ -~]*[!-~][ -~]*$",
+      "description": "4-char section id the command names (clip `b00?` with the client's `?` wildcard, generator `g004`, sound pointer `8050`, routine `mdam`): 1–4 printable ASCII characters, not only spaces."
+    },
+    "sectionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4,
+      "pattern": "^[ -~]*[!-~][ -~]*$",
+      "description": "A section's name: 1–4 printable ASCII characters. Trailing padding is ignored."
+    },
+    "textureName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16,
+      "pattern": "^[ -~]*[!-~][ -~]*$",
+      "description": "A texture's 16-character name as a 0x20 section stores it at +0x11 (an 8-character namespace and a localName, \"carel3  ho\"): 1–16 printable ASCII characters, not only spaces. Compared with trailing spaces and NULs dropped, as a mesh's binding compares it."
+    },
+    "opcode": {
+      "oneOf": [
+        {"type": "integer", "minimum": 0, "maximum": 255},
+        {"type": "string", "pattern": "^(0x)?[0-9A-Fa-f]{1,2}$"}
+      ]
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sec", "at", "type", "value"],
+      "description": "One same-size, little-endian write inside a generator, addressed by where the bytes sit in the format (never by file offset, so it holds on every race's copy). Values are absolute: applying an edit twice changes nothing. The 16-byte section header, the stream-offset table at +0x80..0x8F and an op's config dword are never writable. Layouts: docs/fx/effects.md, docs/ability/mixer.md.",
+      "properties": {
+        "sec": {"type": "integer", "minimum": 0, "maximum": 4, "description": "0 = the generator header; 1–4 = an op stream (1 generator updaters, 2 initializers, 3 updaters, 4 expiration handlers)."},
+        "op": {"$ref": "#/$defs/opcode", "description": "sec 1–4: the opcode to write into, found by walking the stream (config dword: op = & 0xFF, size in dwords = (>> 8) & 0x1F, op 0 ends the stream). Left out when sec is 0."},
+        "nth": {"type": "integer", "minimum": 0, "default": 0, "description": "Which occurrence of that opcode in the stream, from 0."},
+        "at": {"type": "integer", "minimum": 0, "description": "Byte offset of the write. sec 0: from the section start (the spawn interval is at 118 = 0x76), 16 <= at and at + size <= 128. sec 1–4: from the op's config dword, 4 <= at and at + size <= the op's own size."},
+        "type": {"type": "string", "enum": ["u8", "u16", "u32", "i16", "i32", "f32", "datid"], "description": "`datid` writes a 4-character section id, padded the way the DAT pads it; the section (a texture, mesh, sprite sheet, curve or sound pointer) must be in the lane's DAT, and compose carries it and what it names."},
+        "value": {"description": "One value, or a list of consecutive ones (an RGBA colour is four `u8`, a scale three `f32`)."},
+        "mask": {"type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Integer types only: just these bits are written, the rest stay as the source has them (a flag in a bitfield). Must fit the type."}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["sec"], "properties": {"sec": {"const": 0}}},
+          "then": {"not": {"required": ["op"]}, "properties": {"nth": {"const": 0}, "at": {"minimum": 16, "maximum": 127}}},
+          "else": {"required": ["op"], "properties": {"at": {"minimum": 4, "maximum": 123}}}
+        },
+        {"if": {"required": ["type"], "properties": {"type": {"const": "u8"}}}, "then": {"properties": {"value": {"$ref": "#/$defs/u8s"}, "mask": {"maximum": 255}}}},
+        {"if": {"required": ["type"], "properties": {"type": {"const": "u16"}}}, "then": {"properties": {"value": {"$ref": "#/$defs/u16s"}, "mask": {"maximum": 65535}}}},
+        {"if": {"required": ["type"], "properties": {"type": {"const": "u32"}}}, "then": {"properties": {"value": {"$ref": "#/$defs/u32s"}}}},
+        {"if": {"required": ["type"], "properties": {"type": {"const": "i16"}}}, "then": {"properties": {"value": {"$ref": "#/$defs/i16s"}, "mask": {"maximum": 65535}}}},
+        {"if": {"required": ["type"], "properties": {"type": {"const": "i32"}}}, "then": {"properties": {"value": {"$ref": "#/$defs/i32s"}}}},
+        {"if": {"required": ["type"], "properties": {"type": {"const": "f32"}}}, "then": {"not": {"required": ["mask"]}, "properties": {"value": {"$ref": "#/$defs/f32s"}}}},
+        {"if": {"required": ["type"], "properties": {"type": {"const": "datid"}}}, "then": {"not": {"required": ["mask"]}, "properties": {"value": {"$ref": "#/$defs/ids"}}}}
+      ]
+    },
+    "u8s": {"oneOf": [{"$ref": "#/$defs/u8"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/u8"}}]},
+    "u16s": {"oneOf": [{"$ref": "#/$defs/u16"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/u16"}}]},
+    "u32s": {"oneOf": [{"$ref": "#/$defs/u32"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/u32"}}]},
+    "i16s": {"oneOf": [{"$ref": "#/$defs/i16"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/i16"}}]},
+    "i32s": {"oneOf": [{"$ref": "#/$defs/i32"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/i32"}}]},
+    "f32s": {"oneOf": [{"$ref": "#/$defs/f32"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/f32"}}]},
+    "ids": {"oneOf": [{"$ref": "#/$defs/sectionId"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sectionId"}}]},
+    "u8": {"type": "integer", "minimum": 0, "maximum": 255},
+    "u16": {"type": "integer", "minimum": 0, "maximum": 65535},
+    "u32": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "i16": {"type": "integer", "minimum": -32768, "maximum": 32767},
+    "i32": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647},
+    "f32": {"type": "number", "minimum": -3.4028234663852886e38, "maximum": 3.4028234663852886e38},
+    "png": {
+      "description": "The PNG, alpha at full scale (255 = opaque, as the model viewer shows textures). The validator also decodes a data URI: at most 2 MiB, a PNG signature, and an IHDR with each side 1–4096.",
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 2796226,
+          "pattern": "^data:image/png;base64,(?=iVBORw0KGgo)(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "description": "The file's bytes as a data URI, standard padded base64 (what the model viewer writes)."
+        },
+        {
+          "type": "string",
+          "pattern": "^(?![A-Za-z]:|[\\\\/])(?!data:).*\\.[Pp][Nn][Gg]$",
+          "description": "A path relative to the recipe file's folder, inside it. load_recipe reads the file and puts its data URI in its place; `dats prepare` stores that self-contained recipe."
+        }
+      ]
     },
     "event": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["from", "op", "start"],
+      "required": ["op", "start"],
+      "anyOf": [{"required": ["from"]}, {"required": ["raw"]}],
       "properties": {
-        "from": {"type": "string", "description": "Lane (a key of `sources`) the command and its sections come from."},
+        "from": {"type": "string", "description": "Lane (a key of `sources`) the command and its sections come from. Left out, the event is a command of no lane — a lock, a hit, a link to a shared (ROM/0/0.DAT) or actor routine added by hand — which carries its own `raw` bytes: compose writes them as given (delay, `dur` and a named routine's `ref` stamped in), gathers nothing for them and renames nothing in them, and every race's DAT has them. Such a command cannot be a generator, sound, clip or weapon trace (0x02 0x1E 0x2D 0x3F, 0x0A 0x0B 0x4A 0x53 0x60, 0x05, 0x2C): those name a section of their lane's DAT. A link to a routine of a lane's own DAT keeps that lane, so compose carries the routine."},
         "op": {
           "oneOf": [
             {"type": "integer", "minimum": 0, "maximum": 255},
@@ -98,10 +231,11 @@
           "description": "Clip (0x05) only: [transIn, transOut] in ticks."
         },
         "loops": {"type": "integer", "minimum": 0, "description": "Clip (0x05) only: 0 = loop forever, N = play N times then hold."},
-        "raw": {"type": "string", "pattern": "^([0-9A-Fa-f]{2})+$", "description": "Exact source command bytes (from `inspect --json`). Wins over routine/offset and op/ref lookup."},
+        "raw": {"type": "string", "pattern": "^([0-9A-Fa-f]{2})+$", "description": "Exact command bytes (from `inspect --json`, or built by the model viewer for a command of no lane). Wins over routine/offset and op/ref lookup. The validator also reads them as the client walks a routine: whole dwords, 8 bytes at least, as many as the size in byte +1 says (low 5 bits, in dwords), and byte 0 the event's `op`. A command that names a routine, sound or generator (the links 0x03 0x09 0x3B 0x3C 0x57, 0x30, 0x5F, 0x73, 0x85; the sounds; the generators) is 16 bytes at least with 0 at +0xC, where the client keeps a pointer once it has looked the name up, and without a `ref` its name at +8 is 1–4 printable ASCII characters, padded with NULs."},
         "routine": {"type": "string", "description": "With `offset`: the source routine the command is copied from."},
         "offset": {"type": "integer", "minimum": 0, "description": "With `routine`: byte offset of the command inside that routine's sec2."},
-        "name": {"type": "string", "description": "Display label (the mixer keeps the inspector's command name, e.g. PlayClip). Compose ignores it."}
+        "name": {"type": "string", "description": "Display label (the mixer keeps the inspector's command name, e.g. PlayClip). Compose ignores it."},
+        "row": {"type": "integer", "minimum": 0, "description": "Mixer layout only: which row of its track the event's pill sits in (0 = the top row). Compose ignores it; timing comes from `start` alone."}
       }
     }
   },
@@ -120,6 +254,79 @@
         {"from": "vfx", "op": 2, "ref": "g004", "start": 60, "dur": 100},
         {"from": "sound", "op": 10, "ref": "5112", "start": 60},
         {"from": "motion", "op": 3, "ref": "mdam", "start": 100}
+      ]
+    },
+    {
+      "schema": "xi.ability.v1",
+      "name": "blue_fire",
+      "description": "Fire's flame recoloured and widened: generator g000's tint, scale and spawn interval, and the curve its height follows.",
+      "target": {"kind": "spell", "animation": null},
+      "sources": {
+        "vfx": {"spec": "spell:144", "routine": "main"}
+      },
+      "events": [
+        {"from": "vfx", "op": 2, "ref": "g000", "start": 1, "dur": 10},
+        {"from": "vfx", "op": 2, "ref": "g004", "start": 50, "dur": 100}
+      ],
+      "generators": [
+        {
+          "lane": "vfx",
+          "ref": "g000",
+          "edits": [
+            {"sec": 2, "op": "0x16", "at": 4, "type": "u8", "value": [51, 128, 198, 38]},
+            {"sec": 2, "op": "0x0F", "nth": 0, "at": 8, "type": "f32", "value": [0.75, 1.5]},
+            {"sec": 0, "at": 118, "type": "u16", "value": 1},
+            {"sec": 0, "at": 121, "type": "u8", "value": 0, "mask": 16}
+          ]
+        }
+      ],
+      "curves": [
+        {"lane": "vfx", "ref": "k001", "keys": [[0, 0], [0.5, 0.8], [1, 0]]}
+      ]
+    },
+    {
+      "schema": "xi.ability.v1",
+      "name": "golden_cure",
+      "description": "Cure III's glow drawn with a small gold dot: texture `ho` (\"carel3  ho\"), which the `ho` mesh of ho00 and the `hp` mesh of sh01 both name.",
+      "target": {"kind": "spell", "animation": null},
+      "sources": {
+        "vfx": {"spec": "spell:3", "routine": "main"}
+      },
+      "events": [
+        {"from": "vfx", "op": 2, "ref": "ho00", "start": 0, "dur": 60},
+        {"from": "vfx", "op": 2, "ref": "sh01", "start": 10, "dur": 60}
+      ],
+      "textures": [
+        {
+          "lane": "vfx",
+          "ref": "ho",
+          "name": "carel3  ho",
+          "png": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAbUlEQVR42oXPIQ7CUBCE4Q+yrgiSSmrQHKGmx+cWGJpgXvJE0SC6LzSpYOzM/jN7+NwnOOGMzqo3KpZI84IBfQYKnpgjLwfccM3Ao5EisX2ao59e6I7+KHJQ2WBbRWkVNQc17HZkDSyYk7R78wvKiByZnNA9pwAAAABJRU5ErkJggg=="
+        }
+      ]
+    },
+    {
+      "schema": "xi.ability.v1",
+      "name": "fast_blade_by_hand",
+      "description": "Fast Blade's swings, trace, hit sparks and sounds from its own DAT, and the locks, activation flash, hit and added effect retail puts around them added by hand: commands of no lane, each its own bytes. The local hit1 / hit2 links keep their lane, so compose carries those routines.",
+      "target": {"kind": "ws", "animation": null},
+      "sources": {
+        "motion": {"spec": "ws:1", "routine": "main"}
+      },
+      "events": [
+        {"op": 32, "start": 0, "dur": 100, "raw": "200300000000640000000000", "name": "LockActorStatus"},
+        {"op": 89, "start": 0, "dur": 90, "raw": "5902000000005a00", "name": "LockCasterMagic"},
+        {"op": 46, "start": 0, "dur": 90, "raw": "2e02000000005a00", "name": "LockCasterControl"},
+        {"from": "motion", "op": 5, "ref": "b00?", "start": 1, "dur": 35},
+        {"op": 3, "ref": "eis1", "start": 10, "raw": "03040000000000006569733100000000", "name": "LinkRoutine(source)"},
+        {"from": "motion", "op": 5, "ref": "b02?", "start": 35, "dur": 70},
+        {"from": "motion", "op": 44, "ref": "b0a?", "start": 35, "dur": 70},
+        {"from": "motion", "op": 10, "ref": "8050", "start": 55},
+        {"from": "motion", "op": 3, "ref": "hit1", "start": 60},
+        {"from": "motion", "op": 11, "ref": "8051", "start": 60},
+        {"from": "motion", "op": 3, "ref": "hit2", "start": 65},
+        {"op": 3, "ref": "mdam", "start": 80, "raw": "03040000000000006d64616d00000000", "name": "LinkRoutine(source)"},
+        {"op": 3, "ref": "proc", "start": 100, "raw": "030400000000000070726f6300000000", "name": "LinkRoutine(source)"}
       ]
     }
   ]

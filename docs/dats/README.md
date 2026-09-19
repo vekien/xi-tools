@@ -136,8 +136,8 @@ Point it at a **recipe** (`*.recipe.json`, [schema](../../schema/ability_recipe.
 — the wizard lists the ones under `exports/ability/` — then choose what to publish it
 as (auto reads it off the recipe: a `ws:` motion lane is a weapon skill, a `spell:` one
 a spell, else a job ability), the animation number (auto = the next free one) and the
-ROM10 folder. The recipe is copied to `projects/resources/ability/` and the build
-composes it, places the DAT(s) and registers the file id(s); the number it took is
+ROM10 folder. The recipe is copied to `projects/resources/ability/` (a texture it gives as
+a PNG file is inlined, so the copy stands alone) and the build composes it, places the DAT(s) and registers the file id(s); the number it took is
 recorded on the action and the server SQL lands in `projects/server/abilities/`. The
 same action from arguments, with every parameter defaulted:
 

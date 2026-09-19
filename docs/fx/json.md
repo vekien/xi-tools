@@ -70,6 +70,11 @@ histogram.
 - Effect labels come from [`src/xi/fx/fx_library.json`](../../src/xi/fx/fx_library.json).
 - A missing library match is reported as unidentified; a tentative match keeps `verified: false`.
 - `params` are located by opcode tag or fixed header field and validated against xim's parser.
+- `color_rgb` is the sec2 `0x16` ColorSetup tint as `RRGGBB`, the order the bytes are stored in
+  (R,G,B,A; `80` is neutral). It is what [`xi fx set --color`](set.md) takes and writes.
+- `draw_distance` comes from a byte search for the `0x0A` tag, so on a generator with no sec1
+  `0x0A` GeneratorCull it can show a float of sec2 `0x0A` RotationVariance instead. `--opcodes`
+  lists the streams as they are.
 - `--opcodes` adds the full instruction stream decoded by [`src/xi/fx/xi_opcodes.py`](../../src/xi/fx/xi_opcodes.py).
 
 ---

@@ -103,7 +103,7 @@ Each effect entry:
 | field | source | meaning |
 |---|---|---|
 | `attach` | attachFlags low 4 bits (section-start `+0x10` = data-start `+0x00`) | how it binds — `None` = world-positioned, else actor/sun/moon |
-| `color_rgb` | sec2 `0x16` ColorSetup | particle tint (BGR in bytes) |
+| `color_rgb` | sec2 `0x16` ColorSetup | particle tint as `RRGGBB` (the bytes are R,G,B,A; `80` is neutral) |
 | `scale` | sec2 `0x0F` ScaleInitializer | x,y,z particle size |
 | `draw_distance` | sec1 `0x0A` GeneratorCull | max emit distance (cull range) |
 | `emission_variance` | `@0x74` | random jitter on the spawn interval |
@@ -161,7 +161,7 @@ uv run xi fx set ROM/1/41 grid --pos -16 -0.4 5
 | `--pos X Y Z` (alias `--at-pos`) | local position (`--at-pos` matches `/xi pos`) | 3×f32 after the placed-mesh/texture ref |
 | `--scale X Y Z` | scale (width height depth) | tag `0f 04` |
 | `--scale-mul F` | multiply current scale by F | tag `0f 04` |
-| `--color RRGGBB` | tint colour (or `r,g,b`) | opcode `0x16` ColorSetup (written B,G,R) |
+| `--color RRGGBB` | tint colour (or `r,g,b`) | opcode `0x16` ColorSetup (written R,G,B; alpha untouched) |
 | `--range NEAR FAR` | draw distance (sets maxEmitDistance = FAR; NEAR unused) | opcode `0x0A` GeneratorCull |
 | `--spawn-interval N` | framesPerEmission — frames between spawns | header u16 `@0x76` |
 | `--flow F` | multiply texture/position flow speed by F (observed; opcode TBD) | `02e4`/`0708` (.Y) |
@@ -174,8 +174,8 @@ Notes:
   fine across a group.
 - In-place, unencrypted, keeps `<dat>.base`. Confirmed in-game on the fountain:
   green spray, 4× taller/wider, visible from far.
-- Colour byte order is written **B,G,R** (FFXI convention) — the green channel is
-  confirmed; pure red vs blue ordering is assumed, not yet verified.
+- Colour bytes are **R,G,B,A** with `0x80` neutral (xim's `nextRGBA`; Fire's `g000` holds
+  `c6 80 33 26`, orange only in that order). `--color` writes R,G,B and leaves alpha alone.
 
 ---
 

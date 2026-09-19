@@ -933,8 +933,10 @@ def encode_png_to_texture_section(section_id: str, tex_name: str, png_path: Path
                                   force_format: Optional[str] = None,
                                   max_size: Optional[int] = None,
                                   alpha_scale: float = 1.0,
-                                  force_opaque: bool = False) -> Optional[bytes]:
-    """PNG -> DXT (via texconv) -> 0x20 texture section. Returns None on failure.
+                                  force_opaque: bool = False,
+                                  raise_errors: bool = False) -> Optional[bytes]:
+    """PNG -> DXT (via texconv) -> 0x20 texture section. Returns None on failure
+    (raise_errors re-raises texconv's own error instead, so a caller can report why).
 
     The game only reads DXT1 (1TXD) and DXT3 (3TXD) — NOT DXT5 — so we force
     DXT3 when the PNG has an alpha channel (the engine alpha-tests entity meshes,
@@ -957,6 +959,8 @@ def encode_png_to_texture_section(section_id: str, tex_name: str, png_path: Path
     try:
         convert_png_to_dds(png_path, dds_path, requested_format=fmt)
     except (FileNotFoundError, RuntimeError, ValueError):
+        if raise_errors:
+            raise
         return None
     info = parse_dds_info(dds_path)
     dxt1 = info.fourcc == "DXT1"

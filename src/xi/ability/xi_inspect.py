@@ -63,7 +63,11 @@ ROUTINE_OPS: Dict[int, Tuple[str, str]] = {
     0x10: ("ScreenFade", "screen"),
     0x12: ("BackJump", "move"),
     0x14: ("BackJump", "move"),
-    0x16: ("SpawnDoll", "actor"),
+    # A doll is a stand-in XiDollActor made from the caster or target, which the rest of
+    # the routine then plays on: 0x15 / 0x16 a still copy, 0x22 / 0x23 one that tracks
+    # the real actor; 0x17 / 0x18 hand the routine back to the real one.
+    0x15: ("SpawnDoll(caster)", "actor"),
+    0x16: ("SpawnDoll(target)", "actor"),
     0x17: ("SetCaster", "actor"),
     0x18: ("SetTarget", "actor"),
     0x19: ("NestedSpell", "link"),
@@ -71,17 +75,26 @@ ROUTINE_OPS: Dict[int, Tuple[str, str]] = {
     0x1F: ("LockActorStatus", "lock"),
     0x20: ("LockActorStatus", "lock"),
     0x21: ("Flinch", "hit"),
-    0x23: ("SpawnDoll", "actor"),
+    0x22: ("TrackingDoll(caster)", "actor"),
+    0x23: ("TrackingDoll(target)", "actor"),
     0x24: ("SuspendOnResult", "flow"),
     0x25: ("Flinch", "hit"),
     0x27: ("FollowPath", "move"),
+    0x28: ("ReturnToIdle", "motion"),
     0x29: ("ActorFade", "fade"),
     0x2A: ("ActorFade", "fade"),
-    0x2B: ("StatusMessage", "message"),
+    # The hit: shows the next result not shown yet (the damage or heal line and its
+    # number). The shared `mdam` a retail ability links is one of these.
+    0x2B: ("ShowResult", "message"),
     0x2C: ("WeaponTrace", "trace"),
     0x2D: ("StopGenerator", "vfx-stop"),
     0x2E: ("LockCasterControl", "lock"),
     0x2F: ("LockCasterRotation", "lock"),
+    0x30: ("LinkRoutine(each target)", "link"),
+    # A loop over the result's targets: at 0x32 the client moves to the next target and
+    # goes back to just after the last 0x31.
+    0x31: ("EachTarget", "target"),
+    0x32: ("NextTarget", "target"),
     0x3B: ("LinkRoutine(blocking)", "link"),
     0x3C: ("LinkRoutine(blocking)", "link"),
     0x3D: ("RandomChildOpen", "flow"),
@@ -105,6 +118,7 @@ ROUTINE_OPS: Dict[int, Tuple[str, str]] = {
     0x58: ("Camera", "camera"),
     0x59: ("LockCasterMagic", "lock"),
     0x5E: ("Knockback", "hit"),
+    0x5F: ("StopRoutine", "link"),
     0x60: ("SoundPlay", "sound"),
     0x62: ("IdleAdjustDir", "move"),
     0x64: ("Branch", "flow"),
@@ -138,9 +152,11 @@ ROUTINE_OPS: Dict[int, Tuple[str, str]] = {
 }
 LINK_OPS = frozenset({0x03, 0x09, 0x3B, 0x3C, 0x57})
 SOUND_OPS = frozenset({0x0A, 0x0B, 0x4A, 0x53, 0x60})
-# ops whose +8 DatId is a real reference (others carry numeric args there)
-REF_OPS = LINK_OPS | SOUND_OPS | frozenset({0x02, 0x05, 0x1E, 0x27, 0x2C, 0x2D, 0x3F,
-                                             0x40, 0x41, 0x73, 0x85, 0x8A, 0x8B})
+# ops whose +8 DatId is a real reference (others carry numeric args there: 0x19's is a
+# spell animation index). 0x30 runs a routine once per target and 0x5F stops every
+# running copy of one, each by name.
+REF_OPS = LINK_OPS | SOUND_OPS | frozenset({0x02, 0x05, 0x1E, 0x27, 0x2C, 0x2D, 0x30, 0x3F,
+                                             0x40, 0x41, 0x5F, 0x73, 0x85, 0x8A, 0x8B})
 
 
 # ── Target resolution ────────────────────────────────────────────────────────────

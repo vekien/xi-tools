@@ -963,12 +963,19 @@ def _ability_action_from_recipe(source: Path, resource_root: Path, *, action_id:
                                 kind: str | None = None, animation: int | None = None,
                                 subdir: int | None = None, animation_from: int | None = None) -> dict:
     """Validate a recipe, copy it under ``projects/resources/ability/`` and return the
-    manifest action for it (shared by `dats prepare` and the `dats new` wizard)."""
+    manifest action for it (shared by `dats prepare` and the `dats new` wizard). A
+    recipe whose textures name PNG files is stored as load_recipe read it, each PNG
+    inlined as its data URI, so the copy rebuilds on its own; any other is copied
+    byte for byte."""
     from xi.ability.xi_compose import load_recipe
-    recipe = load_recipe(source)
+    inlined: list = []
+    recipe = load_recipe(source, inlined=inlined)
     action_id = action_id or f"ability.{_slug(recipe['name'])}"
     dest = resource_root / "ability" / f"{action_id.removeprefix('ability.')}.recipe.json"
-    if source.resolve() != dest.resolve():
+    if inlined:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(recipe, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    elif source.resolve() != dest.resolve():
         _copy_file(source, dest)
     target: dict = {"animation": animation if animation is not None else "auto",
                     "subdir": subdir if subdir is not None else ABILITY_DEFAULT_SUBDIR}

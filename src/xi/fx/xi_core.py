@@ -31,7 +31,7 @@ _LIBRARY_PATH = Path(__file__).with_name("fx_library.json")
 # Opcode locators (opcode = low byte of the sub-section's u32 config; payload +4).
 # Validated against xim ParticleGeneratorParser: 0x16 ColorSetup (sec2),
 # 0x0F ScaleInitializer (sec2), 0x0A GeneratorCull (sec1; first float = maxEmitDistance).
-_TAG_COLOR = b"\x16\x02"   # +4: B,G,R,A bytes (sec2 0x16 ColorSetup)
+_TAG_COLOR = b"\x16\x02"   # +4: R,G,B,A bytes, 0x80 = neutral (sec2 0x16 ColorSetup)
 _TAG_SCALE = b"\x0f\x04"   # +4: 3x f32 (x,y,z) (sec2 0x0F ScaleInitializer)
 _TAG_CULL = b"\x0a\x04"    # +4: f32 maxEmitDistance, f32 unk, u32 (sec1 0x0A GeneratorCull = draw distance)
 _TAG_FLOW = (b"\x02\xe4", b"\x07\x08")  # +4: 3x f32; .Y animates texture/position flow (observed; opcode TBD)

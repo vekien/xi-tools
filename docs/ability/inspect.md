@@ -82,6 +82,13 @@ generators: TargetActor: g004 g000 g001 g002 g003 g010 g011 g012 g013
 - **external routine**: a link whose target is not in this DAT (`mdam` damage numbers,
   `proc`, `eis1`, the shared cast routines `shbk`/`shwh`). They live in the caster's own
   or a shared DAT and are resolved by the client at runtime.
+- **locks, hits and target loops**: `0x2B` *ShowResult* is the hit (the damage or heal line
+  and its number; the shared `mdam` is one), `0x1F` / `0x20` / `0x56` and `0x2E` / `0x2F` /
+  `0x59` are locks, `0x31` *EachTarget* … `0x32` *NextTarget* repeat what lies between them
+  for each target of the result, and `0x15` / `0x16` / `0x22` / `0x23` put a stand-in doll of
+  the caster or target in its place. A `0x30` (a link run once per target) and a `0x5F`
+  (*StopRoutine*) show the routine they name; `0x19`'s argument is a spell animation index.
+  What they do in game: [mixer.md](mixer.md#locks-hits-and-links).
 - Unknown opcodes print as `opNN` with kind `other`; `--json` includes each command's raw
   bytes (`raw`) so nothing is lost.
 

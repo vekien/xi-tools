@@ -87,7 +87,7 @@ to this effect type** — re-derive per effect by diffing its instances.
 |--------|-----|------|---------|--------|
 | +0xD4 / +0xD8 / +0xDC | (after `sibj` ref) | 3×f32 | **position** x / y / z | ✅ confirmed |
 | +0x134 / +0x138 / +0x13C | `0f04` @+0x130 | 3×f32 | **scale** (width, height, depth); jets ~(0.3–0.5, 1.5, 0.3–0.5) | ✅ confirmed (×4 → big tall columns in-game) |
-| +0x164..+0x167 | `0216` @+0x160 | 4×u8 | **color** B,G,R,A tint (jets ~`50 50 50 00` grey) | ✅ confirmed (set to `00 FF 00` → green spray in-game) |
+| +0x164..+0x167 | `0216` @+0x160 | 4×u8 | **color** R,G,B,A tint, `0x80` neutral (jets ~`50 50 50 00` grey) | ✅ confirmed (set to `00 FF 00` → green spray in-game; the order is xim's `nextRGBA`, and Fire's `g000` holds `c6 80 33 26`, orange only as R,G,B) |
 | +0x184 / +0x188 | `2e04` @+0x180 | 2×f32 | ~~draw distance~~ **mislabeled** — xim says `2e04` is a texcoord keyframe; the real draw-distance knob is `0a04` GeneratorCull (see +0x94 row and the correction table below). xi's `--range` writes only `0a04`. | ❌ retracted |
 | **+0x76** | — (header field) | u16 | **spawn interval** (frames between spawns); jets 39/44 | ✅ confirmed (240 → ~1.3s gaps; 2 → continuous gush) |
 | +0xF0 (.Y), +0x100 (.Y) | `02e4`, `0708` | f32 | **flow / texture-scroll speed** (Y component; how fast the texture streams up the mesh). NOT particle launch velocity | ✅ confirmed (×10 → texture whips past; 0.05× → slow stream) |
@@ -101,7 +101,7 @@ flow/direction) are located by their opcode tag, so those edits work on any effe
 that shares the format — header-field offsets may be more effect-specific.
 
 These params are located by their **opcode tag** (not fixed offset), so the same
-edit works on any effect sharing the format: color = tag `16 02` (+4 → BGRA),
+edit works on any effect sharing the format: color = tag `16 02` (+4 → RGBA),
 scale = tag `0f 04` (+4 → 3×f32), range = tag `0a 04` GeneratorCull (+4 →
 `maxEmitDistance` f32; NEAR unused), position = the 3×f32 after the placed-mesh
 FourCC reference.
@@ -168,7 +168,7 @@ really `opCode` (the low byte of the config word) inside a specific sub-section.
 | my finding | xim truth | verdict |
 |------------|-----------|---------|
 | spawn interval `@0x76` | `framesPerEmission` (+1) | ✅ right |
-| color `0216` → `+0x164` | sec2 opcode **0x16 ColorSetup** (BGRA) | ✅ right (it's an opcode, not a free tag) |
+| color `0216` → `+0x164` | sec2 opcode **0x16 ColorSetup** (RGBA) | ✅ right (it's an opcode, not a free tag) |
 | scale `0f04` | sec2 opcode **0x0F ScaleInitializer** | ✅ right |
 | draw distance = `0a04` (LOD gate) | sec1 opcode **0x0A GeneratorCull** → first float = `maxEmitDistance` | ✅ right — this is THE draw distance |
 | draw distance = `2e04` near/far (10,15) | 0x2E in sec2 = a **TexCoord.u keyframe**, not distance | ❌ mislabeled — `0a04` did the work in that test; `2e04` was incidental |

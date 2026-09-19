@@ -352,6 +352,13 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
                       "place": place_for(None, "body", pool), "composed": c})
     else:
         src_anim = _source_ws_animation(recipe)
+        # Companion (waist) DATs come from the motion source's slot for the same race.
+        # Motion that is not a weapon skill has no such slot: its waist clips ride in the
+        # body DAT. On a retail slot the slot's own companions (retail's placeholders)
+        # stay; a custom-band slot has none, so it gets retail's placeholder, slot 0's
+        # companions (a 160-byte `dumm` DAT on every race), and its waist ids are
+        # registered as every retail slot's are.
+        comp_src = src_anim if src_anim is not None else (0 if needs_plugin(kind, anim) else None)
         from xi.xi_config import FFXI_DIR
         from xi.ftable.xi_core import scan_file_ids
         pool = _free_files(root, subdir, 3 * len(composed))
@@ -363,12 +370,9 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
             seen_ids.add(ids["body"])
             files.append({"race": c.race, "role": "body", "file_id": ids["body"],
                           "place": place_for(c.race, "body", pool), "composed": c})
-            # Companion (waist) DATs come from the motion source's slot for the same race.
-            # Motion that is not a weapon skill has no such slot: its waist clips ride in
-            # the body DAT, and the slot's own companions (retail's placeholders) stay.
-            if src_anim is None:
+            if comp_src is None:
                 continue
-            src_ids = _ws_file_ids(src_anim, c.race)
+            src_ids = _ws_file_ids(comp_src, c.race)
             for role in ("companion_a", "companion_b"):
                 hits = scan_file_ids([src_ids[role]])
                 if not hits:

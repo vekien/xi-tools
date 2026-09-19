@@ -79,7 +79,9 @@ Wrote: <output DAT path>
 - The earlier failure mode for transplants was a **missing dependency** (a missed
   `0x21` SpriteSheetMesh = nothing to draw), not the trigger layer. `fx copy --from`
   now brings the full `_DEP_TYPES` set (`0x20, 0x21, 0x1F, 0x19, 0x2E`), including the
-  textures referenced by any copied mesh. It does **not** bring the `0x07`
+  textures referenced by any copied mesh — the `0x20` whose 16-character name the mesh
+  binds (Fire's `fai0` sheet draws section `fai2`), as well as any whose id appears in
+  the mesh ([particle_mesh.md](particle_mesh.md)). It does **not** bring the `0x07`
   EffectRoutine that might trigger the effect — see
   [effect_system.md](effect_system.md#3-0x07-effectroutine--the-sequencer--trigger-layer).
 - Keeps a `<dat>.base` backup; the DAT grows (rebuilt, all sections preserved).

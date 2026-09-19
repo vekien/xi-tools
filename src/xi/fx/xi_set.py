@@ -52,8 +52,10 @@ def set_effect_params(dat_path: Path, names, *, pos=None, scale=None, scale_mul=
             off = _tag_payload(body, _TAG_COLOR)
             if off is not None:
                 a = s.start + off
-                changes["color"] = (bytes(data[a:a + 3]).hex(), bytes((color[2], color[1], color[0])).hex())
-                data[a], data[a + 1], data[a + 2] = color[2], color[1], color[0]  # B,G,R
+                # R,G,B,A in the file (xim ByteReader.nextRGBA; Fire's g000 holds
+                # c6 80 33 26, orange only in that order). Alpha stays as it is.
+                changes["color"] = (bytes(data[a:a + 3]).hex(), bytes(color).hex())
+                data[a:a + 3] = bytes(color)
         if scale is not None or scale_mul is not None:
             off = _tag_payload(body, _TAG_SCALE)
             if off is not None:

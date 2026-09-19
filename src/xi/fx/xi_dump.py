@@ -30,8 +30,7 @@ def _read_params(body: bytes) -> Dict:
         params["attach"] = ATTACH_TYPES.get(struct.unpack("<H", body[_OFF_ATTACH:_OFF_ATTACH + 2])[0] & 0x0F, "unknown")
     o = _tag_payload(body, _TAG_COLOR)
     if o is not None:
-        b, g, r = body[o], body[o + 1], body[o + 2]
-        params["color_rgb"] = f"{r:02X}{g:02X}{b:02X}"
+        params["color_rgb"] = body[o:o + 3].hex().upper()      # stored R,G,B,A
     o = _tag_payload(body, _TAG_SCALE)
     if o is not None:
         params["scale"] = [round(v, 4) for v in struct.unpack("<3f", body[o:o + 12])]

@@ -17,17 +17,62 @@ from xi.fx.xi_core import (parse_sections, resolve_dat_path, EFFECT_TYPE, _fourc
 
 _DEP_TYPES = (0x20, 0x21, 0x1F, 0x19, 0x2E, 0x3D)  # Texture / SpriteSheetMesh / ParticleMesh / ParticleKeyFrameData / ZoneMesh / SoundEffectPointer
 _MESH_TYPES = {0x2E, 0x1F, 0x21}                    # the dependency types that name a texture of their own
+TEXTURE_NAME_AT = 0x11                              # a 0x20 section's 16-char name (8-char namespace + localName)
 
 
-def _effect_deps(data: bytes, sections, eff) -> List[bytes]:
+def texture_key(name16: bytes) -> bytes:
+    """A 16-character texture name as the key both sides of a binding compare: trailing
+    spaces and NULs dropped. Retail pads with spaces and some writers with NULs, and a
+    mesh's copy of the name may be padded differently from the texture's own."""
+    return bytes(name16).rstrip(b" \0")
+
+
+def texture_name_fields(sec: bytes, names=()) -> List[int]:
+    """Section-relative offsets of the 16-byte texture names a mesh-type section binds.
+
+    A 0x1F ParticleMesh (marker 5/6) holds one per textured material after its count
+    table, and a 0x21 SpriteSheetMesh one at payload +0x08 (docs/fx/particle_mesh.md).
+    Anything else — a 0x2E ZoneMesh names one per submesh inside its stream, a 0x1F of
+    another marker — is searched for ``names`` (texture_key values): a field counts when
+    its own 16 bytes come to that key."""
+    sec = bytes(sec)
+    tc = struct.unpack_from("<I", sec, 4)[0] & 0x7F if len(sec) >= 8 else None
+    if tc == 0x21:
+        return [0x18] if len(sec) >= 0x28 else []
+    if tc == 0x1F and len(sec) >= 0x18 and sec[0x10] & 0xF in (5, 6):
+        # xi_particle_mesh._material_table_offset: the count table's length is rounded
+        # down to a multiple of 4 plus 3, not up to 16 bytes.
+        n = sec[0x14] + sec[0x15]
+        at = 0x18 + 2 * (n if n % 4 == 0 else n - n % 4 + 3)
+        return [at + 16 * i for i in range(sec[0x14]) if at + 16 * (i + 1) <= len(sec)]
+    found = set()
+    for key in names:
+        i = sec.find(key, 16) if key else -1
+        while i >= 0:
+            if i + 16 <= len(sec) and texture_key(sec[i:i + 16]) == key:
+                found.add(i)
+            i = sec.find(key, i + 1)
+    return sorted(found)
+
+
+def _effect_deps(data: bytes, sections, eff, body: Optional[bytes] = None) -> List[bytes]:
     """FourCCs referenced in the effect body that name a dependency section
     (texture/0x21/sub-resource/mesh), plus textures referenced by any referenced
-    mesh. FourCC-keyed (a name may map to several sections, e.g. a 0x20 + 0x21)."""
+    mesh. FourCC-keyed (a name may map to several sections, e.g. a 0x20 + 0x21).
+
+    ``body`` stands in for the effect's own bytes when the caller has edited them
+    (`xi ability compose` re-points a texture or mesh id): the walk then follows what
+    the edited generator names, not what the DAT's copy does."""
     types_by_cc: Dict[bytes, set] = {}
+    tex_by_name: Dict[bytes, List[bytes]] = {}
     for s in sections:
         types_by_cc.setdefault(bytes(data[s.start:s.start + 4]), set()).add(s.type_code)
+        if s.type_code == 0x20:
+            key = texture_key(data[s.start + TEXTURE_NAME_AT:s.start + TEXTURE_NAME_AT + 16])
+            if key:
+                tex_by_name.setdefault(key, []).append(bytes(data[s.start:s.start + 4]))
     self_cc = bytes(data[eff.start:eff.start + 4])
-    body = bytes(data[eff.start:eff.start + eff.size])
+    body = bytes(data[eff.start:eff.start + eff.size]) if body is None else bytes(body)
     deps: List[bytes] = []
     for off in range(0x10, len(body) - 3):
         cc = body[off:off + 4]
@@ -58,6 +103,15 @@ def _effect_deps(data: bytes, sections, eff) -> List[bytes]:
                     c2 = mb[off:off + 4]
                     if c2 not in deps and 0x20 in types_by_cc.get(c2, set()):
                         deps.append(c2)
+                # The client binds the texture by the 16-character name the mesh holds,
+                # and a name need not contain its section's id: Fire's `fai0` sheet
+                # draws "fai01   fai01", which is section `fai2`, and its `fa04` mesh
+                # "fai01   fai04" = `fai3`. The id scan above finds only textures whose
+                # name happens to spell their id (Cure III's "carel3  ho" is `ho␣␣`).
+                for off in texture_name_fields(mb, tex_by_name):
+                    for c2 in tex_by_name.get(texture_key(mb[off:off + 16]), ()):
+                        if c2 not in deps:
+                            deps.append(c2)
     return deps
 
 

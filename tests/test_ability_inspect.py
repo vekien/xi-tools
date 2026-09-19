@@ -96,6 +96,32 @@ def test_wildcard_refs_match_sibling_clips():
     assert ai._match_refs("cm0?", ["b000"]) == []
 
 
+def test_op_names_follow_the_client():
+    # PS2 ExecuteTag: 0x2B shows the next result (the hit; the shared `mdam` is one),
+    # 0x31 / 0x32 loop over the result's targets, 0x15 / 0x16 put a still stand-in of the
+    # caster / target in its place and 0x22 / 0x23 one that tracks it, 0x28 blends the
+    # caster back to idle.
+    assert {op: ai.ROUTINE_OPS[op][0] for op in (0x15, 0x16, 0x22, 0x23, 0x28, 0x2B, 0x30, 0x31, 0x32, 0x5F)} == {
+        0x15: "SpawnDoll(caster)", 0x16: "SpawnDoll(target)", 0x22: "TrackingDoll(caster)",
+        0x23: "TrackingDoll(target)", 0x28: "ReturnToIdle", 0x2B: "ShowResult", 0x30: "LinkRoutine(each target)",
+        0x31: "EachTarget", 0x32: "NextTarget", 0x5F: "StopRoutine"}
+
+
+def test_a_stop_names_its_routine_and_a_spell_link_its_index(tmp_path: Path):
+    # 0x5F stops every running copy of the routine it names at +8 (the casting circle
+    # `ner1`, in ROM/0/0's `stbk`), so its +8 is a ref. 0x19's +8 is a spell animation
+    # index, never a name, even when its bytes happen to be printable.
+    main = (_cmd(0x01, 0, 0) + _cmd(0x5F, 1, 0, b"ner1") + _cmd(0x19, 1, 0, struct.pack("<I", 0x31337473))
+            + _cmd(0x00, 0, 0))
+    p = tmp_path / "stop.DAT"
+    p.write_bytes(_section(b"root", ai.T_DIR, b"") + _section(b"main", ai.T_ROUTINE, _routine(main, 2))
+                  + _section(b"end", ai.T_END, b""))
+    ev = ai.flatten(ai.Model.load(p), "main")
+    assert [(e["op"], e["name"], e["ref"]) for e in ev] == [(0x5F, "StopRoutine", "ner1"), (0x19, "NestedSpell", None)]
+    assert ev[1]["summary"] == f"spell animation {0x31337473}"
+    assert {0x30, 0x5F} <= ai.REF_OPS and 0x19 not in ai.REF_OPS
+
+
 FAST_BLADE_HM = "ROM/76/30.DAT"   # ws:1 Hume male (docs/anim/weapon-skills.md)
 
 
