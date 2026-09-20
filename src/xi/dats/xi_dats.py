@@ -962,16 +962,19 @@ ABILITY_DEFAULT_SUBDIR = 20
 def _ability_action_from_recipe(source: Path, resource_root: Path, *, action_id: str | None = None,
                                 kind: str | None = None, animation: int | None = None,
                                 subdir: int | None = None, animation_from: int | None = None) -> dict:
-    """Validate a recipe, copy it under ``projects/resources/ability/`` and return the
-    manifest action for it (shared by `dats prepare` and the `dats new` wizard). A
-    recipe whose textures name PNG files is stored as load_recipe read it, each PNG
-    inlined as its data URI, so the copy rebuilds on its own; any other is copied
-    byte for byte."""
+    """Validate a recipe (a mix file, ``*.mix.json``, or a legacy ``*.recipe.json``), copy
+    it to ``projects/resources/ability/<slug>.mix.json`` and return the manifest action for
+    it (shared by `dats prepare` and the `dats new` wizard). The action id comes from the
+    recipe's ``name``, never the file name, so the viewer's ``check.LOVE.mix.json`` makes
+    ``ability.love`` like ``LOVE.mix.json`` does. A recipe whose textures name PNG files is
+    stored as load_recipe read it, each PNG inlined as its data URI, so the copy rebuilds on
+    its own; any other is copied byte for byte. An older ``<slug>.recipe.json`` copy is
+    left where it is (the action just stops pointing at it)."""
     from xi.ability.xi_compose import load_recipe
     inlined: list = []
     recipe = load_recipe(source, inlined=inlined)
     action_id = action_id or f"ability.{_slug(recipe['name'])}"
-    dest = resource_root / "ability" / f"{action_id.removeprefix('ability.')}.recipe.json"
+    dest = resource_root / "ability" / f"{action_id.removeprefix('ability.')}.mix.json"
     if inlined:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(json.dumps(recipe, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -990,14 +993,27 @@ def _ability_action_from_recipe(source: Path, resource_root: Path, *, action_id:
     }
 
 
-def _ability_result(built: dict | None) -> dict:
-    """The inline ``result`` recorded for an ability action, from its build result."""
+#: What the server pass recorded on an ability action (the database row it owns, the
+#: client menu record it placed, the Lua stub it wrote). A build keeps them whether or
+#: not it runs the pass, so a binding is never lost (schema/ability.json result.db/menu/lua).
+ABILITY_SERVER_KEYS = ("db", "menu", "lua")
+
+
+def _ability_result(built: dict | None, previous: dict | None = None) -> dict:
+    """The inline ``result`` recorded for an ability action, from its build result, with
+    ``previous``'s ``db`` / ``menu`` / ``lua`` carried over (``undone`` is not: a build
+    after a partial undo owns its DATs again)."""
     b = built or {}
-    return {"kind": b.get("kind"), "animation": b.get("animation"),
-            "placements": [{"race": p.get("race"), "role": p.get("role"),
-                            "file_id": p.get("file_id"), "dat": p.get("dat")}
-                           for p in b.get("placements") or []],
-            "server": b.get("server")}
+    res = {"kind": b.get("kind"), "animation": b.get("animation"),
+           "placements": [{"race": p.get("race"), "role": p.get("role"),
+                           "file_id": p.get("file_id"), "dat": p.get("dat")}
+                          for p in b.get("placements") or []],
+           "server": b.get("server")}
+    if isinstance(previous, dict):
+        for key in ABILITY_SERVER_KEYS:
+            if previous.get(key) is not None:
+                res[key] = previous[key]
+    return res
 
 
 def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
@@ -1010,6 +1026,8 @@ def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: boo
     resources = action.get("resources", {})
     if not resources.get("recipe"):
         raise click.ClickException(f"{action.get('id')}: ability action needs resources.recipe.")
+    # Named first: an id that cannot name its publish folder fails before anything is placed.
+    folder = AP.publish_folder(action["id"])
     recipe_path = _resolve_raw_source(resources["recipe"], manifest_path, manifest)
     recipe = AP.load_recipe(recipe_path)
     target = action.get("target") or {}
@@ -1049,18 +1067,29 @@ def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: boo
         raise click.ClickException(AP.permission_hint(root, e))
 
     sql = AP.server_snippet(recipe, plan["kind"], plan["animation"])
-    server_path = None
+    # The publish folder (projects/abilities/<slug>/) takes the SQL, a copy of each DAT
+    # just placed and placements.json, so the publish can be handed on as one folder.
+    # Written after placement, so a failed build leaves the last publish's folder as it was.
+    server_name = None
     if (action.get("server") or {}).get("emit", True):
-        server_path = Path("projects") / "server" / "abilities" / \
-            f"{action['id'].split('.')[-1]}_{plan['animation']}.sql"
-        if not dry_run:
-            server_path.parent.mkdir(parents=True, exist_ok=True)
-            server_path.write_text(sql + "\n", encoding="utf-8")
+        server_name = f"{folder.name}_{plan['animation']}.sql"
+    warnings = list(plan.get("warnings") or [])
+    if not dry_run:
+        record = AP.publish_record(action["id"], recipe["name"], plan["kind"], plan["animation"],
+                                   placements, server_name)
+        # The DATs are placed and registered by now, so a folder that cannot be written (a
+        # read-only copy, a file in use) is a warning: the build still returns and its result
+        # is recorded, which is what undo and the next build go by.
+        try:
+            AP.write_publish_folder(folder, record, [Path(p["source"]) for p in placements], sql)
+        except (OSError, ValueError) as e:
+            warnings.append(f"publish folder not updated: {e}")
     return {
         "id": action["id"], "type": "ability", "kind": plan["kind"], "animation": plan["animation"],
-        "recipe": str(recipe_path), "placements": placements,
-        "server": str(server_path) if server_path else None, "sql": sql,
-        "warnings": plan.get("warnings") or [],
+        "name": recipe["name"],
+        "recipe": str(recipe_path), "placements": placements, "folder": str(folder),
+        "server": str(folder / server_name) if server_name else None, "sql": sql,
+        "warnings": warnings,
         "registered": f"animation {plan['animation']} -> {len(placements)} DAT(s)",
     }
 
@@ -1320,6 +1349,19 @@ def _wizard_record(kind: str, slug: str, prev: dict | None, manifest_path: Path,
     return action
 
 
+def _mix_files(folder: Path) -> list[Path]:
+    """Mix files in ``folder`` and one level down: ``*.mix.json`` and the legacy
+    ``*.recipe.json``, the ``.mix.json`` winning when both exist for one name."""
+    if not folder.is_dir():
+        return []
+    found: dict = {}
+    for pattern in ("*.recipe.json", "*/*.recipe.json", "*.mix.json", "*/*.mix.json"):
+        for p in folder.glob(pattern):
+            stem = p.name[:-len(".mix.json")] if p.name.endswith(".mix.json") else p.name[:-len(".recipe.json")]
+            found[(p.parent, stem.lower())] = p       # .mix.json globbed last, so it wins
+    return sorted(found.values())
+
+
 def _wizard_ability(slug: str, prev: dict | None, manifest_path: Path, manifest: dict) -> dict:
     """`dats new` → Ability: pick a recipe, how to publish it and (optionally) the
     animation number; the build allocates the rest."""
@@ -1327,10 +1369,10 @@ def _wizard_ability(slug: str, prev: dict | None, manifest_path: Path, manifest:
     from xi.ability.xi_publish import KINDS, infer_kind
     p = prev or {}
     resource_root = _resource_root(manifest_path, manifest)
-    # Recipes the mixer and `xi ability recipe --out` leave under exports/ability.
-    found = sorted({*Path("exports/ability").glob("*.recipe.json"),
-                    *Path("exports/ability").glob("*/*.recipe.json")}) if Path("exports/ability").is_dir() else []
-    click.echo("\n>> Which recipe? (a .recipe.json from the Ability Mixer or `xi ability recipe --out`)")
+    # Mix files the mixer and `xi ability recipe --out` leave under exports/ability.
+    found = _mix_files(Path("exports/ability"))
+    click.echo("\n>> Which mix? (a .mix.json — formerly .recipe.json — from the Ability Mixer "
+               "or `xi ability recipe --out`)")
     if found:
         click.echo("   Found:")
         for i, f in enumerate(found[:20], 1):
@@ -1514,10 +1556,11 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
-    An ability recipe (from `xi ability recipe` or the model viewer's Ability Mixer)
-    becomes an `ability` action — the recipe is copied under projects/resources/ability/
-    and `dats build` composes it, places the DAT(s) in ROM10 and registers the file ids:
-      xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace
+    An ability recipe — a mix file, *.mix.json (formerly *.recipe.json), from `xi ability
+    recipe` or the model viewer's Ability Mixer — becomes an `ability` action: it is copied
+    to projects/resources/ability/<slug>.mix.json and `dats build` composes it, places the
+    DAT(s) in ROM10 and registers the file ids:
+      xi dats prepare exports/ability/mixer/tiger_fury.mix.json --project tiger_fury --replace
       xi dats build tiger_fury --dry-run
     """
     manifest = _resolve_manifest_path(manifest, project)
@@ -1796,8 +1839,28 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
               help="Print the trailing 'Dry run — nothing written' note (the wizard suppresses it).")
 @click.option("--pivot", is_flag=True, default=False,
               help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
+@click.option("--apply-db", is_flag=True, default=False,
+              help="Database Update: after the DATs are placed, update the server row named after each ability "
+                   "(or insert one cloned from --clone-from). With --dry-run: a read-only preview.")
+@click.option("--db-row", type=int, default=None,
+              help="Confirm, once, the existing row the build found by name (its id). Needs --apply-db.")
+@click.option("--clone-from", default=None,
+              help="Override the donor a new row / menu record / Lua stub clones: an id or a server name "
+                   "(fire, fast_blade). Default: the kind's donor — cure (spell), berserk (ja), fast_blade (ws).")
+@click.option("--server-id", type=int, default=None,
+              help="Server id for an insert / a menu record with no row yet (default: the highest blank one).")
+@click.option("--menu-record", is_flag=True, default=False,
+              help="Client Menu Record: place the client spell/command record at the row's id (ROM/118/114.DAT + "
+                   "names). Finds the row with SELECTs only when a server is configured.")
+@click.option("--menu-name", default=None,
+              help="Name the menu shows (default: the mix name, _ as a space). No control characters or line breaks.")
+@click.option("--lua-stub", is_flag=True, default=False,
+              help="Lua Stub: write the server script for a row this mix created into XI_SERVER_DIR/scripts/actions.")
 def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...], verbose: bool,
-              force: bool, dry_run: bool, dry_note: bool = True, pivot: bool = False):
+              force: bool, dry_run: bool, dry_note: bool = True, pivot: bool = False,
+              apply_db: bool = False, db_row: int | None = None, clone_from: str | None = None,
+              server_id: int | None = None, menu_record: bool = False, menu_name: str | None = None,
+              lua_stub: bool = False):
     """Build a manifest into the base install (FFXI_DIR), or FFXI_PIVOT_DIR with --pivot.
 
     DATs are placed and their file_ids registered straight into the target's tables
@@ -1806,8 +1869,19 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     custom region of FFXI_PIVOT_DIR's tables so the sizes match; a --pivot build
     registers in that folder's own tables and skips the sync. Each action records the
     target it was built into, which `undo`, `package` and `release` follow.
+
+    \b
+    For ability actions, once the DATs are placed (docs/ability/mixer.md):
+      --apply-db     update / insert the server row (xi-tools' .env XI_DB_*)
+      --menu-record  the client menu record at the same id (a blank retail row only)
+      --lua-stub     the server script for a row this mix created (XI_SERVER_DIR)
+    Their outcome never fails the build: each prints a db: / menu: / lua: line.
     """
     import xi.xi_config as cfg
+    from xi.server import xi_server_pass as SP
+    opts = SP.ServerOpts(apply_db=apply_db, db_row=db_row,
+                         clone_from=(clone_from.strip() or None) if isinstance(clone_from, str) else None,
+                         server_id=server_id, menu_record=menu_record, menu_name=menu_name, lua_stub=lua_stub)
 
     manifest = _resolve_manifest_path(manifest, project)
     if not manifest.exists():
@@ -1905,6 +1979,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
     results = []
+    server_pairs = []           # (action, build result) of the ability actions, for the server pass
     for action in active_actions:
         kind = action.get("type")
         if kind == "zone":
@@ -1920,6 +1995,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                 _set_target_root(root)
                 result = _dispatch(action, kind)
         results.append(result)
+        if kind == "ability" and isinstance(result, dict):
+            server_pairs.append((action, result))
         # Record the allocation INLINE on the action (idempotent — overwrites the
         # same key), so the manifest itself is the single source of truth. Track
         # every target the DATs have been built into (union across builds).
@@ -1930,7 +2007,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             # decided by the build against the live tables, not by the definition
             # alone, so it is taken from the build result rather than re-planned.
             if kind == "ability":
-                res = _ability_result(result)
+                res = _ability_result(result, action.get("result"))
             elif kind in RECORD_TYPES:
                 res = _record_result(result)   # the id is decided against the live table too
             else:
@@ -1940,7 +2017,14 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
 
     _set_target_root(None)
 
+    # The server pass (Database Update, Client Menu Record, Lua Stub) runs after every DAT
+    # is placed. It never raises: each step's outcome is a db: / menu: / lua: line.
+    server_kw = dict(root=target_roots[0][1], target=target, manifest_path=manifest,
+                     manifest=manifest_data, project=manifest_data.get("name") or manifest.stem)
+
     if dry_run:
+        if opts.any() and server_pairs:
+            SP.run(server_pairs, opts, dry_run=True, **server_kw)     # SELECT-only, reads files
         _print_placements(results, "Planned actions:")
         if any(a.get("type") != "zone" for a in active_actions):
             click.echo("\nWould build into: " + ", ".join(str(r) for _n, r in target_roots))
@@ -1968,11 +2052,24 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             click.echo(f"  synced {len(synced)} pivot table(s)" if synced
                        else "  (pivot tables already in sync)")
 
+    if opts.any() and server_pairs:
+        changed = SP.run(server_pairs, opts, dry_run=False, **server_kw)
+        if changed:
+            # The placements were recorded above, so a manifest that cannot be written now
+            # only loses what the pass did — which each step that wrote something says.
+            try:
+                _write_manifest(manifest, manifest_data)
+            except Exception as e:                  # noqa: BLE001 — the DATs are placed: exit 0
+                SP.warn_unrecorded(results, manifest, e)
+
     click.echo()
     if results:
         _print_placements(results, "Placed DATs:")
     for _name, root in target_roots:
         click.echo(click.style(f"\n✓ Built into {root}", fg="green"))
+    db_line = SP.database_line(results)
+    if db_line:
+        click.echo(db_line)
 
 
 def _project_built_targets(manifest_data: dict) -> list[str]:
@@ -1980,8 +2077,16 @@ def _project_built_targets(manifest_data: dict) -> list[str]:
     canonical order — read from each action's recorded ``result.targets``."""
     built: set[str] = set()
     for a in manifest_data.get("actions", []):
+        if _undone(a):
+            continue            # its DATs were cleared by an earlier undo that kept the manifest
         built.update((a.get("result") or {}).get("targets") or [])
     return [n for n in ("pivot", "dir", "hd") if n in built]
+
+
+def _undone(action: dict) -> bool:
+    """An action a `dats undo` already cleared (DATs, table entries, menu records) but kept
+    in the manifest because a database row or Lua stub it made is still there."""
+    return bool((action.get("result") or {}).get("undone"))
 
 
 def _action_placements(action: dict) -> list[tuple[int, str]]:
@@ -2045,10 +2150,20 @@ def _project_dat_rels(manifest_data: dict, target: str | None = None) -> tuple[l
     for action in manifest_data.get("actions", []):
         typ = action.get("type")
         res = action.get("result") or {}
+        if _undone(action):
+            continue
         if target is not None and target not in _action_targets(action):
             continue
         if typ in ("gear", "ability"):
             rels += [_rom_rel(p["dat"]) for p in res.get("placements", []) if p.get("dat")]
+            menu = res.get("menu") if typ == "ability" else None
+            roots = (menu or {}).get("roots") or {}
+            if isinstance(menu, dict) and roots and (target is None or target in roots):
+                # The Client Menu Record: the shared menu table and the name/help tables it
+                # edited ship with the ability, or players get it with no menu entry.
+                from xi.menu.xi_menu_table import string_tables
+                rk = menu.get("record_kind") or ("spell" if menu.get("kind") == "spell" else "command")
+                rels += [_rom_rel("ROM/118/114.DAT")] + [_rom_rel(s) for s in string_tables(rk)]
         elif typ in RECORD_TYPES:
             # The shared menu table plus the name/help tables the build edited.
             rels += [_rom_rel(res.get("dat") or "ROM/118/114.DAT")]
@@ -2242,16 +2357,28 @@ def release_cmd(project: str | None, release_root: Path | None, no_dll: bool):
 @click.option("--yes", is_flag=True, default=False, help="Skip the confirmation prompt.")
 @click.option("--keep-json", is_flag=True, default=False,
               help="Undo the built DATs + table entries but keep the manifest JSON.")
-def undo_cmd(project: str | None, yes: bool, keep_json: bool):
+@click.option("--apply-db", is_flag=True, default=False,
+              help="Also revert the database rows and delete the Lua stubs the project's abilities wrote.")
+def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = False):
     """Undo a project's build and remove it.
 
     With no PROJECT, lists the dats/*.json projects to pick from. For every target
     the project was built into (recorded on each action's `result.targets`): delete
     the DAT files it placed, clear their file_id entries from that target's
-    FTABLE/VTABLE, and (for mounts) blank the name/help/key-item strings. Then delete
-    the `dats/<project>.json` manifest unless `--keep-json`.
+    FTABLE/VTABLE, (for mounts) blank the name/help/key-item strings, and put back
+    the client menu record an ability placed (only while the row still holds what the
+    build wrote). With --apply-db, also revert the database row an ability inserted or
+    changed and delete the Lua stub it wrote (only while it is unedited). Then delete
+    the `dats/<project>.json` manifest — unless `--keep-json`, or a database row or stub
+    is still there, or a menu record couldn't be put back (a locked 114.DAT while the game
+    runs): then the manifest is kept (the cleared actions marked `undone`), so a later
+    undo (`--apply-db` for the server side) can finish the job.
     """
     from xi.mount import xi_core as M
+    from xi.server import xi_db_apply as DBA
+    from xi.server import xi_lua_stub as LS
+    from xi.server import xi_server_pass as SP
+    from xi.server.xi_step import DASH, current_server_dir, now_iso, q
 
     if not project:
         project = _pick_project("undo")
@@ -2261,21 +2388,70 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool):
         raise click.ClickException(f"No manifest at {manifest_path}.")
     manifest_data = _read_manifest(manifest_path)
     actions = manifest_data.get("actions", [])
+    live = [a for a in actions if not _undone(a)]      # what this run clears
+    live_ids = {id(a) for a in live}
     built = _project_built_targets(manifest_data)
-    n_placements = sum(len(_action_placements(a)) for a in actions)
+    n_placements = sum(len(_action_placements(a)) for a in live)
+    proj_name = manifest_data.get("name") or manifest_path.stem
+    abilities = [a for a in actions if a.get("type") == "ability" and isinstance(a.get("result"), dict)]
+    db_acts = [(a, a["result"]["db"]) for a in abilities if SP.db_needs_undo(a["result"].get("db"))]
+    lua_acts = [(a, a["result"]["lua"]) for a in abilities
+                if isinstance(a["result"].get("lua"), dict) and a["result"]["lua"].get("path")]
 
+    # Menu records an earlier undo couldn't put back (a locked 114.DAT): it kept them on
+    # the action it marked undone, so this run tries them again (menu only; no --apply-db
+    # needed — the DATs and table entries went last time).
+    retry = [a for a in abilities if _undone(a) and isinstance(a["result"].get("menu"), dict)
+             and a["result"]["menu"].get("roots")]
+    retry_ids = {id(a) for a in retry}
     click.echo(f"\nUndo {manifest_path.stem}:")
-    click.echo(f"  built into: {', '.join(built) if built else '(none recorded — nothing to remove in-game)'}")
+    none_built = ("(its DATs went with an earlier undo)" if retry else "(none recorded — nothing to remove in-game)")
+    click.echo(f"  built into: {', '.join(built) if built else none_built}")
     click.echo(f"  DATs:       {n_placements} file(s) in each target")
-    click.echo(f"  manifest:   {manifest_path}" + ("  (kept)" if keep_json else "  (deleted)"))
+    for a in abilities:
+        res = a["result"]
+        if isinstance(res.get("db"), dict):
+            click.echo(f"  database:   {SP.describe_db(res['db'])}")
+        menu = res.get("menu")
+        if isinstance(menu, dict) and (id(a) in live_ids or id(a) in retry_ids):
+            label = DBA.KIND_LABEL.get(menu.get("kind"), menu.get("record_kind") or "record")
+            again = "" if id(a) in live_ids else "; it couldn't be last time"
+            for rname in (menu.get("roots") or {}):
+                click.echo(f"  menu:       {label} {menu.get('server_id')} in {rname} "
+                           f"(the placeholder is put back{again})")
+        if isinstance(res.get("lua"), dict) and res["lua"].get("path"):
+            click.echo(f"  lua stub:   {res['lua']['path']} (removed with --apply-db)")
+    has_menu = any(isinstance(a["result"].get("menu"), dict) and a["result"]["menu"].get("roots")
+                   for a in abilities if id(a) in live_ids or id(a) in retry_ids)
+    manifest_note = ("kept" if keep_json else "deleted once nothing is left" if (db_acts or lua_acts or has_menu)
+                     else "deleted")
+    click.echo(f"  manifest:   {manifest_path}  ({manifest_note})")
     if not yes and not click.confirm("\nProceed?", default=False):
         click.echo("Aborted — nothing changed.")
         return
 
     removed = cleared = 0
+    menu_err: dict = {}             # id(action) -> {root name: label}: restores that failed (kept, retried)
+
+    def undo_menu_in(action: dict, rname: str, root, warns: list) -> int:
+        """Put back ``action``'s menu record in root ``rname`` (only while the row still
+        holds what the build wrote). 1 when it was restored now. A failure (a locked
+        114.DAT) is remembered in ``menu_err`` so the manifest keeps it for the next undo."""
+        menu = (action.get("result") or {}).get("menu")
+        rs = ((menu or {}).get("roots") or {}).get(rname) if isinstance(menu, dict) else None
+        if not (isinstance(rs, dict) and isinstance(rs.get("record_id"), int)):
+            return 0
+        outcome, warn = SP.undo_menu(menu, rname, root)
+        if outcome == "error":
+            menu_err.setdefault(id(action), {})[rname] = SP.menu_record_label(menu, rname)
+        if warn:
+            warns.append(warn)
+        return 1 if outcome == "restored" else 0
+
     for name in built:
         root = _target_root(name)
-        for action in actions:
+        menu_left = []
+        for action in live:
             if name not in _action_targets(action):
                 continue   # never built here: whatever this folder holds at those paths is not ours
             for file_id, dat in _action_placements(action):
@@ -2298,15 +2474,174 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool):
                     from xi.menu.xi_menu_table import restore_record
                     restore_record(action["type"], root, res["record_id"], res.get("replaced"))
                     cleared += 1
+            if action.get("type") == "ability":
+                # The Client Menu Record: put back the placeholder, only while the row still
+                # holds the bytes the build wrote (a retail update may have taken it since).
+                cleared += undo_menu_in(action, name, root, menu_left)
         click.echo(f"  ✓ {name}: DATs deleted + table entries cleared")
+        for w in menu_left:
+            click.echo(click.style(f"  ⚠ menu: {w}", fg="yellow"))
 
-    if not keep_json:
+    # The menu records an earlier undo couldn't put back.
+    for name in [n for n in ("pivot", "dir", "hd")
+                 if any(n in a["result"]["menu"]["roots"] for a in retry)]:
+        menu_left = []
+        try:
+            root = _target_root(name)
+        except click.ClickException as e:           # e.g. FFXI_PIVOT_DIR unset since
+            for a in retry:
+                if name in a["result"]["menu"]["roots"]:
+                    lbl = SP.menu_record_label(a["result"]["menu"], name)
+                    menu_err.setdefault(id(a), {})[name] = lbl
+                    menu_left.append(f"couldn't put back {lbl} ({e.format_message()})")
+            root = None
+        n = 0
+        if root is not None:
+            for a in retry:
+                n += undo_menu_in(a, name, root, menu_left)
+        cleared += n
+        if n:
+            click.echo(f"  ✓ {name}: {n} menu record{'s' if n != 1 else ''} put back")
+        for w in menu_left:
+            click.echo(click.style(f"  ⚠ menu: {w}", fg="yellow"))
+
+    # The server side: the database rows and Lua stubs the abilities wrote.
+    left_db: dict = {}              # action id -> "spell_list #1023"
+    left_lua: dict = {}             # action id -> path
+    reverted: set = set()
+    stub_gone: set = set()
+    if apply_db:
+        if db_acts:
+            conn, why = None, None
+            if DBA.configured() is None:
+                why = DBA.NOT_CONFIGURED
+            else:
+                try:
+                    conn = DBA.connect()
+                except DBA.DbUnavailable as e:
+                    why = str(e)
+            n_db = 0
+            for a, db in db_acts:
+                what = f"{db.get('table')} #{db.get('id')}"
+                if conn is None:
+                    click.echo(click.style(f"  db: left {what} {DASH} {why}", fg="yellow"))
+                    left_db[a.get("id")] = what
+                    continue
+                try:
+                    op, now = DBA.revert(conn, db)
+                except Exception as e:              # noqa: BLE001
+                    click.echo(click.style(f"  db: left {what} {DASH} {DBA.friendly_db_error(e)}", fg="yellow"))
+                    left_db[a.get("id")] = what
+                    continue
+                if op in ("deleted", "reverted"):
+                    tail = ("" if op == "deleted" else
+                            f" animation {db.get('animation')} -> {(db.get('before') or {}).get('animation')}")
+                    click.echo(f"  db: {op} {what} {q(db.get('name') or '')}{tail}")
+                    n_db += 1
+                elif op == "gone":                  # a dbtool re-import, a hand delete: nothing to do
+                    click.echo(f"  db: {what} is already gone")
+                elif op == "already":
+                    click.echo(f"  db: {what} already has animation {now['animation']}")
+                elif op == "other":
+                    click.echo(click.style(f"  db: {what} now holds {q(now['name'])}, not {q(db.get('name') or '')} "
+                                           f"{DASH} not this mix's row; left as it is", fg="yellow"))
+                elif op not in DBA.REVERT_DONE:     # "changed": still there with other values
+                    held = (f"; it holds animation {now['animation']} now"
+                            if now and now.get("animation") is not None else "")
+                    click.echo(click.style(f"  db: left {what} (it changed since{held})", fg="yellow"))
+                    left_db[a.get("id")] = what
+                    continue
+                reverted.add(a.get("id"))           # nothing of this mix is left in that row
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:                   # noqa: BLE001
+                    pass
+            if n_db:
+                click.echo("  restart the map server (xi_map) to load the change")
+        server_dir = current_server_dir()
+        n_lua = 0
+        for a, lua in lua_acts:
+            path = lua["path"]
+            if not server_dir:
+                click.echo(click.style(f"  lua: left {path} {DASH} no server folder", fg="yellow"))
+                left_lua[a.get("id")] = path
+                continue
+            outcome, why = LS.remove_stub(server_dir, lua, project=proj_name, action=a.get("id"))
+            if outcome == "removed":
+                click.echo(f"  lua: removed {path}")
+                stub_gone.add(a.get("id"))
+                n_lua += 1
+            elif outcome == "missing":
+                click.echo(f"  lua: {path} is already gone")
+                stub_gone.add(a.get("id"))
+            else:
+                click.echo(click.style(f"  lua: left {path} {DASH} {why}", fg="yellow"))
+                left_lua[a.get("id")] = path
+        if n_lua:
+            click.echo("  restart the map server to unload it")
+    elif db_acts or lua_acts:
+        for a, db in db_acts:
+            try:
+                sql = DBA.revert_sql(db)
+            except (ValueError, KeyError, TypeError):
+                sql = None
+            click.echo(click.style(f"  db: {sql or SP.describe_db(db)}", fg="yellow"))
+            left_db[a.get("id")] = f"{db.get('table')} #{db.get('id')}"
+        server_dir = current_server_dir()
+        for a, lua in lua_acts:
+            where = f" (in {server_dir})" if server_dir else ""
+            click.echo(click.style(f"  lua stub: {lua['path']}{where}", fg="yellow"))
+            left_lua[a.get("id")] = lua["path"]
+        click.echo(click.style("  database and server scripts left as they are; run again with --apply-db "
+                               "to revert them", fg="yellow"))
+
+    left_menu = [lbl for a in actions for lbl in (menu_err.get(id(a)) or {}).values()]
+    left = [*left_db.values(), *left_lua.values(), *left_menu]
+    kept = keep_json or bool(left)
+    if not kept:
         manifest_path.unlink()
+    elif not keep_json:
+        # Something is still there: keep the manifest so a later undo can remove it, with
+        # what this run cleared marked (and no longer counted). A menu record that couldn't
+        # be put back stays on its action (only the roots that failed) for the next undo.
+        now = now_iso()
+        for a in actions:
+            res = a.get("result")
+            if not isinstance(res, dict):
+                continue
+            if id(a) in live_ids:
+                res["undone"] = now
+            if (id(a) in live_ids or id(a) in retry_ids) and isinstance(res.get("menu"), dict):
+                failed = menu_err.get(id(a)) or {}
+                roots = {k: v for k, v in (res["menu"].get("roots") or {}).items() if k in failed}
+                if roots:
+                    res["menu"] = {**res["menu"], "roots": roots}
+                else:
+                    res.pop("menu", None)
+            if a.get("id") in reverted:
+                res.pop("db", None)
+            if a.get("id") in stub_gone:
+                res.pop("lua", None)
+        try:
+            _write_manifest(manifest_path, manifest_data)
+        except OSError as e:
+            click.echo(click.style(f"  ⚠ couldn't update {manifest_path} ({e}); the next undo repeats this "
+                                   "one (what's already gone is skipped)", fg="yellow"))
 
-    tail = "" if keep_json else f", removed {manifest_path.name}"
+    tail = "" if kept else f", removed {manifest_path.name}"
     click.echo(click.style(
         f"\n✓ Undone. Deleted {removed} DAT{'s' if removed != 1 else ''}, "
         f"cleared {cleared} table entr{'ies' if cleared != 1 else 'y'}{tail}.", fg="green"))
+    if left and not keep_json:
+        what = " and ".join(left)
+        verb = "is" if len(left) == 1 else "are"
+        if left_db or left_lua:
+            how = f"run xi dats undo {manifest_path.stem} --apply-db to remove them"
+        else:
+            how = (f"close the game and run xi dats undo {manifest_path.stem} again to put "
+                   f"{'it' if len(left) == 1 else 'them'} back")
+        click.echo(click.style(f"manifest kept: {what} {verb} still there; {how}", fg="yellow"))
 
 
 def _print_placements(results: list[dict], title: str) -> None:
@@ -2360,11 +2695,26 @@ def _print_placements(results: list[dict], title: str) -> None:
                 click.echo(f"     - {mark}file_id {p['file_id']:>6}  {who:<26} -> {p['dat']}{note}")
                 if occ:
                     collisions += 1
+            if r.get("folder"):
+                holds = ["the server SQL"] if r.get("server") else []
+                holds += [f"a copy of {'each' if len(files) != 1 else 'the'} DAT", "placements.json"]
+                click.echo(f"     folder: {r['folder']}  ({', '.join(holds)})")
             if r.get("server"):
                 click.echo(f"     server: {r['server']}")
             if r.get("sql"):
                 for line in r["sql"].splitlines():
                     click.echo(f"       {line}")
+            # The server pass (design2 §1.2): one line per step, then its warnings. The
+            # model viewer parses these lines; keep their form.
+            sp = r.get("server_pass") or {}
+            for key in ("db", "menu", "lua"):
+                step = sp.get(key)
+                if step is not None:
+                    click.echo(f"     {step.line(key)}")
+            for key in ("db", "menu", "lua"):
+                step = sp.get(key)
+                for w in (step.warnings if step is not None else []):
+                    click.echo(click.style(f"     ⚠ {key}: {w}", fg="yellow"))
         else:
             src = r.get("source")
             size = f", {r['bytes']:,} B" if r.get("bytes") else ""

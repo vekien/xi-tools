@@ -621,6 +621,129 @@ def read_names(kind: str, root, lang: str = 'en') -> List[str]:
     return [D.get_text(b, 0) for b in t.blocks]
 
 
+# ── retail placeholder rows (the ability build's Client Menu Record) ─────────
+#
+# The retail tables are full to their last row (1024 ``mgc_``, 2816 ``comm``), so a new
+# spell / job ability / weapon skill the server can use (spell < 1024, ability < 512,
+# weapon skill < 256) only fits a retail *placeholder*: a reserved, unnamed row. The
+# ability build writes only over such a row, or over a record it wrote itself, and never
+# reads ``--force`` for it (xi.server.xi_server_pass).
+
+def _blank(t: Optional[str]) -> bool:
+    return (t or '').strip() in ('', '.')
+
+
+def is_placeholder(kind: str, idx: int, rec: bytes, name_en: str, name_jp: str) -> bool:
+    """A retail row that is reserved and unnamed (strict): both names '.', and the band's
+    canonical placeholder shape. Never true for a named row or one carrying retail data
+    (the unnamed blue-magic rows, the ability gap rows, dev-named weapon skills)."""
+    if not (_blank(name_en) and _blank(name_jp)) or is_empty(rec):
+        return False
+    f = read_fields(kind, rec)
+    if kind == 'spell':          # the trust-placeholder shape
+        return not f['levels'] and f['kind'] == 8 and f['mp'] == 0 and f['skill'] == 0 and f['icon2'] == 0xFFFF
+    if 512 <= idx < 1024:        # job abilities (comm = ability id + 512)
+        return (f['type'] == 1 and f['icon'] == 46 and f['icon2'] == 46 and f['range'] == 0
+                and f['tp'] == 0xFFFF and struct.unpack_from('<H', rec, 0x08)[0] == 0)
+    if 1 <= idx < 256:           # weapon skills (comm = weapon skill id)
+        return f['type'] == 3 and f['icon'] == 46 and f['icon2'] == 46 and f['aoe'] == 0 and f['radius'] == 0
+    return False
+
+
+def record_at(menu: MenuDat, kind: str, idx: int) -> Optional[bytes]:
+    """The decoded record ``idx`` of ``menu``, or None past the section's end."""
+    k = KINDS[kind]
+    body = menu.section(k.tag).body
+    if idx < 0 or (idx + 1) * k.stride > len(body):
+        return None
+    return decode_record(bytes(body[idx * k.stride:(idx + 1) * k.stride]))
+
+
+def _names_at(names, idx: int) -> tuple:
+    en, jp = names
+    return (en[idx] if idx < len(en) else '', jp[idx] if idx < len(jp) else '')
+
+
+def row_names(kind: str, root) -> tuple:
+    """``(en names, jp names)`` as ``root`` sees them, for :func:`row_state`."""
+    return read_names(kind, root, 'en'), read_names(kind, root, 'jp')
+
+
+def row_state(kind: str, root, idx: int, own_written_hex: Optional[str] = None, *,
+              menu: Optional[MenuDat] = None, names: Optional[tuple] = None) -> tuple:
+    """``(state, en_name)`` of record ``idx`` as ``root`` sees it (114.DAT and the names):
+    ``past-end`` (the section is shorter than ``idx``), ``own`` (its bytes equal
+    ``own_written_hex``, the record this build wrote earlier), ``empty`` (all zero),
+    ``placeholder`` (:func:`is_placeholder`) or ``taken`` (anything else)."""
+    menu = menu if menu is not None else load_menu(root)
+    names = names if names is not None else row_names(kind, root)
+    rec = record_at(menu, kind, idx)
+    en, jp = _names_at(names, idx)
+    if rec is None:
+        return ('past-end', en)
+    if own_written_hex and rec.hex() == own_written_hex:
+        return ('own', en)
+    if is_empty(rec):
+        return ('empty', en)
+    if is_placeholder(kind, idx, rec, en, jp):
+        return ('placeholder', en)
+    return ('taken', en)
+
+
+def row_is_restored(kind: str, idx: int, replaced: Optional[dict], *, menu: MenuDat, names: tuple) -> bool:
+    """Whether row ``idx`` already holds what a write replaced: the ``replaced`` record,
+    or (``replaced`` None) an empty row or a placeholder."""
+    rec = record_at(menu, kind, idx)
+    if rec is None:
+        return replaced is None
+    if replaced:
+        return rec.hex() == replaced.get('record')
+    en, jp = _names_at(names, idx)
+    return is_empty(rec) or is_placeholder(kind, idx, rec, en, jp)
+
+
+def place_record(kind: str, root, idx: int, d: dict, *, menu_index: Optional[int] = None,
+                 prev_root: Optional[dict] = None, dry_run: bool = False) -> dict:
+    """Write the record ``d`` describes (``like``, ``text``) at ``idx`` in ``root`` —
+    the body of the record action's build without its ``--force`` rules; the caller has
+    checked the row is empty, a placeholder or its own. ``prev_root`` is what the last
+    placement in this root recorded (``record_id``, ``replaced``, ``written``):
+
+    - the same id and still its own bytes: rewritten, keeping the ``replaced`` it
+      captured the first time;
+    - another id: that old row is put back (record and names) only while it still holds
+      the bytes written there (``own``); a row that already holds its ``replaced`` bytes
+      is done; anything else is left as it is and reported in ``left``.
+
+    Every name table is checked before anything is written. Returns ``{record_id,
+    menu_index, replaced, written, moved_from, left, dat, strings}``; ``left`` is
+    ``{record_id, name}`` or None."""
+    menu = load_menu(root)
+    names = row_names(kind, root)
+    moved_from = left = None
+    old = (prev_root or {}).get('record_id')
+    if isinstance(old, int) and old != idx:
+        st, nm = row_state(kind, root, old, prev_root.get('written'), menu=menu, names=names)
+        if st == 'own':
+            restore_row(kind, menu, old, prev_root.get('replaced'))
+            moved_from = old
+        elif not row_is_restored(kind, old, prev_root.get('replaced'), menu=menu, names=names):
+            left = {'record_id': old, 'name': nm}
+    own = (bool(prev_root) and old == idx
+           and row_state(kind, root, idx, prev_root.get('written'), menu=menu, names=names)[0] == 'own')
+    replaced = prev_root.get('replaced') if own else capture_record(kind, root, idx, menu)
+    rec = build_record(kind, menu, d, idx, menu_index)
+    menu.set_record(kind, idx, rec)
+    set_texts(kind, root, idx, d['text'], dry_run=True)
+    dat = save_menu(root, menu, dry_run=dry_run)
+    if moved_from is not None:
+        restore_texts(kind, root, moved_from, prev_root.get('replaced'), dry_run=dry_run)
+    set_texts(kind, root, idx, d['text'], dry_run=dry_run)
+    return {'record_id': idx, 'menu_index': read_fields(kind, rec).get('menu_index') if kind == 'spell' else None,
+            'replaced': replaced, 'written': rec.hex(), 'moved_from': moved_from, 'left': left,
+            'dat': str(dat), 'strings': string_tables(kind)}
+
+
 # ── server side ──────────────────────────────────────────────────────────────
 
 _SPELL_COLUMNS = {'mp': 'mpCost', 'element': 'element', 'skill': 'skill'}
@@ -649,6 +772,11 @@ def server_snippet(kind: str, d: dict, new_id: int, donor: int) -> str:
         return (f"-- {name}: spell {new_id}, cloned from spell {donor} (edit jobs/animation as needed)\n"
                 f"INSERT INTO `spell_list` ({', '.join(f'`{c}`' for c in cols)})\n"
                 f"SELECT {sel} FROM `spell_list` WHERE `spellid` = {donor};")
+    if new_id < 512:
+        # Commands 0–511 are weapon skills (weaponskillid = the command id), never an
+        # abilities row: subtracting 512 would name a negative id in the wrong table.
+        return (f"-- command {new_id} is a weapon skill (weapon_skills.weaponskillid {new_id}), not an "
+                "abilities row; clone one with xi dats build --apply-db --clone-from")
     # The server's ability ids are the client's command ids minus 512 (Provoke: 547 in
     # the client, 35 on the server), so both the new id and the donor shift.
     server_id, server_donor = new_id - 512, donor - 512

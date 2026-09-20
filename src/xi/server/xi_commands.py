@@ -9,11 +9,13 @@ import click
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 
-# Last-resort fallback, used only when no server checkout is configured and no XI_DB_*
-# override is set — in which case any guess is likely to fail anyway. "xidb" is the
-# name LandSandBoat's Quick Start Guide creates; "tpzdb" was the legacy Topaz name.
-# There is no meaningful cross-platform default for user/password (the guide uses
-# root on Windows and xi/password on Linux), so network.lua is the real source.
+# Last-resort fallback for any field no XI_DB_* key sets — in which case a guess is
+# likely to fail anyway. "xidb" is the name LandSandBoat's Quick Start Guide creates;
+# "tpzdb" was the legacy Topaz name. There is no meaningful cross-platform default
+# for user/password (the guide uses root on Windows and xi/password on Linux), so the
+# XI_DB_* keys in xi-tools' .env (Settings › Local Server in the model viewer, or the
+# zone editor's setup) are the real source. The server's settings/network.lua is
+# never read for credentials: only the zone editor's setup offers it as a pre-fill.
 _DEFAULTS = dict(host="127.0.0.1", port=3306, user="root", password="", database="xidb")
 
 #: ``XI_DB_*`` env var per credential field, for :func:`_env_creds`.
@@ -26,6 +28,9 @@ _ENV_KEYS = {
 def lua_config_path() -> Path | None:
     """``<XI_SERVER_DIR>/settings/network.lua``, or ``None`` when unconfigured.
 
+    Only the zone editor's setup wizard reads it (``env.serverCreds``, a pre-fill the
+    user asks for); no credential resolver does.
+
     Resolved per call rather than at import: the zone-editor setup writes ``.env`` and
     hot-reloads :mod:`xi.xi_config` in the running bridge, so a module-level constant
     would pin whatever XI_SERVER_DIR happened to be at startup."""
@@ -34,9 +39,9 @@ def lua_config_path() -> Path | None:
 
 
 def _env_creds() -> dict:
-    """Explicit ``XI_DB_*`` overrides. Blank/unset keys are omitted, not defaulted —
-    otherwise an unset password would masquerade as a deliberate choice and shadow
-    network.lua."""
+    """The ``XI_DB_*`` values that are set (the real environment, which includes what
+    xi-tools' ``.env`` loaded with ``setdefault``). Blank/unset keys are omitted, not
+    defaulted, so a field nobody set falls back to :data:`_DEFAULTS`."""
     import os
     out: dict = {}
     for field, env in _ENV_KEYS.items():
@@ -67,6 +72,9 @@ _LUA_PATTERNS = {
 
 
 def _read_lua_creds(path: Path | None) -> dict:
+    """The SQL_* settings of a server's ``settings/network.lua``. Used only by the
+    zone editor's setup wizard to pre-fill its fields (``env.serverCreds``); the
+    resolvers below never call it."""
     if path is None:                       # XI_SERVER_DIR not configured
         return {}
     try:
@@ -84,13 +92,12 @@ def _read_lua_creds(path: Path | None) -> dict:
 def _resolve(host, port, user, password, database) -> tuple:
     """Resolve DB credentials. Precedence, last wins:
 
-    hardcoded defaults → ``<XI_SERVER_DIR>/settings/network.lua`` → ``XI_DB_*`` env
-    → explicit arguments.
+    hardcoded :data:`_DEFAULTS` → non-blank ``XI_DB_*`` (the environment, which holds
+    what xi-tools' ``.env`` set) → explicit arguments.
 
-    network.lua sits above the defaults because a server checkout is the authoritative
-    source for its own database; ``XI_DB_*`` sits above network.lua because setting it
-    is a deliberate act (the zone-editor setup writes it only when you fill the field)."""
-    creds = {**_DEFAULTS, **_read_lua_creds(lua_config_path()), **_env_creds()}
+    The server's ``settings/network.lua`` is not a layer: xi-tools' ``.env`` is the one
+    place credentials live (Settings › Local Server in the model viewer edits it)."""
+    creds = {**_DEFAULTS, **_env_creds()}
     return (
         host     or creds["host"],
         port     or creds["port"],
@@ -100,25 +107,55 @@ def _resolve(host, port, user, password, database) -> tuple:
     )
 
 
-def resolved_creds() -> dict:
-    """``{host, port, user, database, source}`` for the setup UI — no password.
-
-    ``source`` names where the effective values came from, so the wizard can say "read
-    from network.lua" rather than showing defaults that may not work.
-
-    An ``XI_DB_*`` value only counts as an override when it actually *differs* from
-    what network.lua declares. ``.env`` keys are loaded with ``os.environ.setdefault``
-    and the shipped ``.env.sample`` pre-fills XI_DB_*, so presence alone would label
-    every install "custom" and hide the fact that network.lua is really in charge."""
-    lua = _read_lua_creds(lua_config_path())
+def field_sources() -> dict:
+    """Where each credential field's effective value comes from: ``"env"`` when its
+    ``XI_DB_*`` key is set (from the shell, the viewer or xi-tools' ``.env``), else
+    ``"default"``. Keys: host, port, user, password, database. Never a value."""
     env = _env_creds()
-    differs = {k: v for k, v in env.items() if not lua or lua.get(k) != v}
+    return {k: ("env" if k in env else "default") for k in _ENV_KEYS}
+
+
+def db_configured() -> bool:
+    """True when a database is set up: at least one of ``XI_DB_HOST``, ``XI_DB_USER``
+    or ``XI_DB_NAME`` is set non-blank. A port or password alone is not a server."""
+    env = _env_creds()
+    return any(k in env for k in ("host", "user", "database"))
+
+
+def resolved_creds() -> dict:
+    """``{host, port, user, database, source, …}`` for setup UIs — no password.
+
+    ``source`` is ``"env"`` when any ``XI_DB_*`` key is set non-blank, else
+    ``"default"``. The other keys keep the names the zone editor's bridge reads:
+    ``hasOverride`` (source is env), ``overriddenFields`` (the fields an ``XI_DB_*``
+    key sets) and ``luaPath`` (always ``None``: network.lua is not read)."""
+    env = _env_creds()
     h, p, u, _pw, db = _resolve(None, None, None, None, None)
-    source = "override" if differs else ("network.lua" if lua else "default")
+    source = "env" if env else "default"
     return {"host": h, "port": p, "user": u, "database": db, "source": source,
-            "luaPath": str(lua_config_path() or ""),
-            "hasOverride": bool(differs),
-            "overriddenFields": sorted(differs)}
+            "luaPath": None,
+            "hasOverride": source == "env",
+            "overriddenFields": sorted(env)}
+
+
+def friendly_db_error(exc: Exception) -> str:
+    """Translate pymysql connection failures into something a user can act on.
+
+    MariaDB answers a wrong username/password with ``auth_gssapi_client not
+    configured`` rather than "access denied" (it avoids confirming whether an account
+    exists). Taken at face value that reads like a missing Kerberos dependency, which
+    is exactly the wrong thing to go fix."""
+    msg = str(exc)
+    if "auth_gssapi_client" in msg:
+        return ("Wrong username or password. (MariaDB reports a failed login as an "
+                "'auth_gssapi_client' plugin error rather than access denied.)")
+    if "Access denied" in msg:
+        return "Access denied — check the username and password."
+    if "Unknown database" in msg:
+        return "That database does not exist on the server."
+    if any(s in msg for s in ("Can't connect", "Connection refused", "timed out", "WinError 10061")):
+        return "Could not reach the server — is it running, and are the host and port right?"
+    return msg
 
 
 def _connect(host, port, user, password, database):
@@ -159,11 +196,11 @@ def _fmt_table(columns: list, rows: list):
 
 def _cred_opts(f):
     for opt in reversed([
-        click.option("--host",     default=None, help="DB host  [default: from network.lua]"),
-        click.option("--port",     default=None, type=int, help="DB port  [default: 3306]"),
-        click.option("--user", "-u", default=None, help="DB user  [default: root]"),
-        click.option("--password", "-p", default=None, help="DB password"),
-        click.option("--database", "--db", default=None, help="DB schema  [default: from network.lua, else xidb]"),
+        click.option("--host",     default=None, help="DB host  [default: XI_DB_HOST, else 127.0.0.1]"),
+        click.option("--port",     default=None, type=int, help="DB port  [default: XI_DB_PORT, else 3306]"),
+        click.option("--user", "-u", default=None, help="DB user  [default: XI_DB_USER, else root]"),
+        click.option("--password", "-p", default=None, help="DB password  [default: XI_DB_PASSWORD]"),
+        click.option("--database", "--db", default=None, help="DB schema  [default: XI_DB_NAME, else xidb]"),
     ]):
         f = opt(f)
     return f

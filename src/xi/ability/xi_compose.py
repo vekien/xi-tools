@@ -84,8 +84,10 @@ everything, as retail's are.
 
 A lane read from a PC race's own motion file is race-bound the same way: the client's
 per-race motion tables (xi_motion_tables) map an emote, battle pack, dance or weapon-skill
-DAT to every race's copy, and each race's DAT carries that race's clips (an emote's waist
-part from its +6 sibling included). A race without a copy, or without the clip, is built
+DAT to every race's copy, and each race's DAT carries that race's clips. A motion's waist
+(part 2, from an emote's +6 sibling) goes to the weapon-skill body's companion DAT, not the
+body — retail keeps parts 0/1 in the body and part 2 in the +256/+512 companions, and the
+client reads a weapon skill's waist from the companion (``Composed.companion``). A race without a copy, or without the clip, is built
 without that motion and the composed result says so in ``warnings``. The race base (the
 ``movement`` table: idle, walk, cast and job-ability motions) is always loaded on a
 character, so its clips are named, not carried, and a job ability or spell can use them. A
@@ -159,6 +161,15 @@ _TEMPLATES = {
     0x2C: None,
 }
 
+# 0x75 ShowHideWeapon, verbatim from ROM/0/0.DAT `hwmg` (hide main+sub if engaged) — the
+# tag every spell cast runs to stow the weapon while it plays. An emote or dance never
+# moves the weapon hand (skeleton reference 127; HumeMale joint 68), so the client hangs a
+# drawn weapon at rest when it plays one as a weapon skill. Emitting these hides main (slot
+# 0) and sub (slot 1) for the action; the idle motion that resumes when the skill ends
+# shows them again (xisklactor ShowWeapon), so nothing has to turn them back on.
+_HIDE_WEP_MAIN = bytes.fromhex("75040000000000000100000000000100")
+_HIDE_WEP_SUB = bytes.fromhex("75040000000000000100000001000100")
+
 
 @dataclass
 class Lane:
@@ -197,6 +208,10 @@ class Composed:
     total: int
     warnings: List[str] = field(default_factory=list)
     textures: List[dict] = field(default_factory=list)   # replaced and renamed textures (_texture_report)
+    # A weapon-skill body's waist (part-2) clips as a companion DAT: retail keeps parts 0/1
+    # in the body and part 2 in the +256/+512 companions, and the client reads a WS's waist
+    # from the companion. Set when a non-weapon motion (an emote) carried a +6 waist sibling.
+    companion: Optional[bytes] = None
 
 
 # ── Recipe loading ───────────────────────────────────────────────────────────────
@@ -1619,15 +1634,35 @@ def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str],
         ref_out = _lane_ref(bag, carried, ev.get("from"), op, ev.get("ref"))
         commands.append(_stamp(cmd, delay=nxt - start, ev=ev, ref=ref_out))
         timeline.append({"start": start, "op": op, "ref": ref_out, "dur": ev.get("dur"), "from": ev.get("from")})
-    main = build_routine("main", commands, total, lead=starts[0] if starts else 0)
+    # A weapon skill built from a motion that never moves the weapon hand (an emote or
+    # dance — see _HIDE_WEP_*) leaves a drawn weapon hanging at rest in game. Stow main+sub
+    # for the action the way a spell cast does, so the pose reads as it does in the mixer
+    # (which hides them too). WS only (race is not None); the two tags fire at frame 0.
+    routine_commands = commands
+    if race is not None and any(
+            l.slot is not None and l.slot.category in ("emote", "dance") for l in loaded.values()):
+        routine_commands = [_HIDE_WEP_MAIN, _HIDE_WEP_SUB, *commands]
+    main = build_routine("main", routine_commands, total, lead=starts[0] if starts else 0)
     in_dat = {name for name, tc in bag.items if tc == T_ROUTINE} | {"main"}
     warnings += _link_warnings([(start, c) for start, c in zip(starts, commands)], in_dat,
                                on_caster=race is not None)
 
     dir_name = recipe.get("dir") or re.sub(r"[^A-Za-z0-9]", "", recipe["name"])[:4].ljust(4, "_")
     ordered = sorted(bag.order, key=lambda k: (_TYPE_ORDER.get(k[1], 99), bag.order.index(k)))
+    # The part-2 (waist) clips a lane's +6 sibling brought (an emote's), by their final name
+    # after any rename. Retail keeps these in the companion DATs, not the body; the client
+    # reads a WS's waist from the companion, so they go there or the mid-body tears.
+    waist_names: Set[str] = set()
+    for lane in loaded.values():
+        if lane.waist is None:
+            continue
+        for s in lane.waist.sections:
+            if s.type_code == T_CLIP:
+                orig = _clean(s.name)
+                waist_names.add(bag.renames.get((lane.name, orig), orig))
     out = bytearray()
     names: List[str] = []
+    companion: Optional[bytes] = None
 
     def put(keys) -> None:
         for key in keys:
@@ -1648,21 +1683,32 @@ def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str],
         # whole tree, and a routine's own lookups widen from its folder to the root, so the
         # nesting changes no lookup.
         root = _ws_root(race, dir_name)
-        motion = [k for k in ordered if k[1] in (T_CLIP, T_TRACE)]
+        # Parts 0/1 and weapon traces stay in the body's clip folder; the waist (part 2)
+        # goes to the companion DAT, as retail lays it out (Fast Blade: b*0/b*1 in the body,
+        # b*2 in the +256/+512 companions). `main` names clips by wildcard, so the client
+        # resolves each part across the body and the companion it loads alongside it.
+        body_motion = [k for k in ordered if k[1] in (T_CLIP, T_TRACE) and k[0] not in waist_names]
+        waist_motion = [k for k in ordered if k[1] == T_CLIP and k[0] in waist_names]
         out += _dir(root, _DIR_PLAIN) + _dir(dir_name, _DIR_DATA)
         put(k for k in ordered if k[1] not in (T_CLIP, T_TRACE))
         out += main + _END_SECTION
         names.append("main(0x07)")
-        if motion:
+        if body_motion:
             out += _dir(root, _DIR_PLAIN)
-            put(motion)
+            put(body_motion)
             out += _END_SECTION
         out += _END_SECTION
+        if waist_motion:
+            comp = bytearray(_dir(root, _DIR_PLAIN))
+            for key in waist_motion:
+                comp.extend(bag.items[key])
+            comp += _END_SECTION
+            companion = bytes(comp)
     renames = {f"{lane}:{old}": new for (lane, old), new in bag.renames.items()}
     for name, n in left_out.items():
         warnings.append(f"{loaded[name].missing}; built without its {n} event{'s' if n != 1 else ''}")
     return Composed(race, bytes(out), names, renames, timeline, total, list(dict.fromkeys(warnings)),
-                    _texture_report(bag, loaded))
+                    _texture_report(bag, loaded), companion=companion)
 
 
 def compose(recipe: dict, race: Optional[str] = None, kind: Optional[str] = None) -> List[Composed]:

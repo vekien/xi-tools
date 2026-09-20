@@ -47,11 +47,14 @@ WebSocket at `ws://HOST:PORT/ws`. Used by xi-zone-editor; exits after idle-secs 
 xi dats json
 xi dats prepare
 xi dats build                    # --pivot: into FFXI_PIVOT_DIR instead of FFXI_DIR
+                                 # abilities: --apply-db [--db-row ID] --clone-from X --server-id ID
+                                 #   --menu-record [--menu-name T] --lua-stub (docs/dats/README.md)
 xi dats new                      # --pivot: the same for the wizard
-xi dats package
+xi dats package                  # an ability's client menu record ships with it (114.DAT + names)
 xi dats release
 xi dats changelog
-xi dats undo
+xi dats undo                     # --apply-db: also revert an ability's DB row and delete its Lua stub;
+                                 #   without it the manifest is kept (actions marked undone) while they remain
 ```
 
 ### Example: custom mesh end-to-end
@@ -111,11 +114,18 @@ xi ability compose recipe.json   # recipe -> new DAT(s) (motion A + vfx B + soun
                                  #   an event with no "from" is a lock, hit or link added by hand: its own "raw"
                                  #   bytes, in every race's DAT; a link the game won't find is a warning
                                  #   (docs/ability/mixer.md#locks-hits-and-links)
-xi ability publish recipe.json   # = dats prepare --type ability + dats build (--dry-run first; --animation-from N)
+xi ability publish L.mix.json    # = dats prepare --type ability + dats build (--dry-run first; --animation-from N)
+                                 #   a mix file: *.mix.json (the old *.recipe.json is still read everywhere)
                                  #   a custom-band weapon skill from non-weapon-skill motion registers retail's
                                  #   160-byte [dumm] placeholder as each race's two waist companions
+                                 #   leaves projects/abilities/<slug>/: the SQL, a copy of every DAT
+                                 #   placed at its ROM path, placements.json (docs/ability/mixer.md#the-publish-folder)
+                                 #   --apply-db --clone-from fire: update / insert the server row (xi-tools .env XI_DB_*)
+                                 #   --menu-record: the client menu record at the same id (blank retail rows only)
+                                 #   --lua-stub: the server script for a row it created (XI_SERVER_DIR)
+                                 #   (docs/ability/mixer.md#database-update-client-menu-record-lua-stub)
 xi ability slots [--pivot]       # weapon-skill numbers 264–271 + the custom band 272–527: free, or what holds each
-xi dats new                      # wizard: "Ability" content type; or: xi dats prepare recipe.json --project P
+xi dats new                      # wizard: "Ability" content type; or: xi dats prepare L.mix.json --project P
 xi mv update --only abilities    # the mixer's pick list (mv/lists/abilities.json)
 ```
 
@@ -562,4 +572,8 @@ xi misc navmesh-prep
 xi server db
 xi server status
 xi server npc-snapshot      # bake the offline npc_list fallback the editor uses without a DB
+xi server check             # the local server setup, read-only: folder, DB (--no-db), tables, weapon-skill
+                            #   widening (--no-binary skips the PDB probe); --json (docs/server/README.md)
+xi server ws-widen          # write the C++ patch + SQL + README for weapon-skill animations above 255
+                            #   into projects/patches/ws_animation_16bit/ (--out, --print, --json); edits nothing
 ```

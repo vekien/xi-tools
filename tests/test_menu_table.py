@@ -308,3 +308,93 @@ def test_pivot_root_is_used_only_when_asked(tmp_path: Path, monkeypatch):
     assert MT.is_empty(MT.load_menu(pivot).records("spell")[4095])
     assert MT.read_names("spell", pivot)[4095] == "."
     assert not (pivot / "ROM" / "181" / "69.DAT").exists()
+
+
+# ── retail placeholders (the ability build's Client Menu Record) ──────────────
+
+def _ph_spell(i: int) -> bytes:
+    return spell_record(i, kind=8, mp=0, skill=0, icon2=0xFFFF, levels={}, menu_index=0)
+
+
+def _ph_ja(i: int) -> bytes:
+    return command_record(i, type=1, icon=46, icon2=46, range=0, tp=0xFFFF, level=0)
+
+
+def _ph_ws(i: int) -> bytes:
+    return command_record(i, type=3, icon=46, icon2=46, aoe=0, radius=0, range=0)
+
+
+def test_is_placeholder_takes_only_the_canonical_blank_rows():
+    assert MT.is_placeholder("spell", 1023, _ph_spell(1023), ".", ".")
+    assert MT.is_placeholder("command", 1023, _ph_ja(1023), ".", "")
+    assert MT.is_placeholder("command", 237, _ph_ws(237), ".", ".")
+    assert not MT.is_placeholder("spell", 1023, _ph_spell(1023), "Cornelia", ".")          # named
+    assert not MT.is_placeholder("spell", 1002, _ph_spell(1002), ".", "\u30b3\u30fc\u30cd\u30ea\u30a2")  # a JP name
+    assert not MT.is_placeholder("spell", 1023, MT.write_fields("spell", _ph_spell(1023), {"levels": {"WHM": 1}}),
+                                 ".", ".")                                                  # a job can learn it
+    assert not MT.is_placeholder("spell", 600, spell_record(600, kind=6, skill=43), ".", ".")  # unnamed blue magic
+    recast = bytearray(_ph_ja(900))
+    recast[0x08] = 7
+    for bad in (MT.write_fields("command", _ph_ja(900), {"range": 12}), bytes(recast),
+                MT.write_fields("command", _ph_ja(900), {"icon2": 12})):
+        assert not MT.is_placeholder("command", 900, bad, ".", ".")
+    assert not MT.is_placeholder("command", 211, MT.write_fields("command", _ph_ws(211), {"aoe": 1}), ".", ".")
+    assert not MT.is_placeholder("command", 1500, _ph_ja(1500), ".", ".")     # outside the ja / ws bands
+    assert not MT.is_placeholder("spell", 5, bytes(0x64), ".", ".")           # an empty row is not one
+
+
+def _install_with(tmp_path: Path, monkeypatch, rows: dict, names: dict) -> Path:
+    import xi.xi_config as cfg
+    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", None, raising=False)
+    root = install(tmp_path / "game")
+    monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
+    m = MT.load_menu(root)
+    for i, rec in rows.items():
+        m.set_record("spell", i, rec)
+    MT.save_menu(root, m)
+    for i, text in names.items():
+        for rom in ("ROM/181/73.DAT", "ROM/181/69.DAT"):
+            MT.set_string(root, rom, i, text)
+    return root
+
+
+def test_row_state(tmp_path: Path, monkeypatch):
+    root = _install_with(tmp_path, monkeypatch, {7: _ph_spell(7), 6: bytes(0x64)}, {7: ".", 6: "."})
+    assert MT.row_state("spell", root, 8) == ("past-end", "")
+    assert MT.row_state("spell", root, 7) == ("placeholder", ".")
+    assert MT.row_state("spell", root, 6)[0] == "empty"
+    assert MT.row_state("spell", root, 3) == ("taken", "Name 3")
+    own = MT.load_menu(root).records("spell")[3].hex()
+    assert MT.row_state("spell", root, 3, own) == ("own", "Name 3")
+    assert MT.row_state("spell", root, 7, own)[0] == "placeholder"            # bytes elsewhere are not "own"
+
+
+def test_place_record_captures_rewrites_and_moves(tmp_path: Path, monkeypatch):
+    root = _install_with(tmp_path, monkeypatch, {5: _ph_spell(5), 6: _ph_spell(6)}, {5: ".", 6: "."})
+    d = {"schema": "xi.spell.v1", "name": "love", "like": 3, "text": {"name_en": "Love"}}
+    first = MT.place_record("spell", root, 6, d, menu_index=50)
+    assert first["replaced"]["record"] == _ph_spell(6).hex() and first["moved_from"] is None
+    assert MT.row_state("spell", root, 6, first["written"]) == ("own", "Love")
+    assert MT.read_fields("spell", MT.load_menu(root).records("spell")[6])["menu_index"] == 50
+    # a rewrite of its own record keeps what it replaced the first time
+    again = MT.place_record("spell", root, 6, dict(d, text={"name_en": "Love Two"}), menu_index=50, prev_root=first)
+    assert again["replaced"] == first["replaced"] and MT.read_names("spell", root)[6] == "Love Two"
+    # a move puts the old row back while it still holds what was written there
+    moved = MT.place_record("spell", root, 5, d, menu_index=50, prev_root=again)
+    assert moved["moved_from"] == 6 and moved["left"] is None
+    assert MT.load_menu(root).records("spell")[6] == _ph_spell(6) and MT.read_names("spell", root, "jp")[6] == "."
+    # ... and leaves one that is no longer ours
+    m = MT.load_menu(root)
+    m.set_record("spell", 5, spell_record(5, mp=77))
+    MT.save_menu(root, m)
+    MT.set_string(root, "ROM/181/73.DAT", 5, "Retail")
+    left = MT.place_record("spell", root, 6, d, menu_index=50, prev_root=moved)
+    assert left["left"] == {"record_id": 5, "name": "Retail"} and left["moved_from"] is None
+    assert MT.read_names("spell", root)[5] == "Retail"
+    assert MT.row_is_restored("spell", 6, None, menu=MT.load_menu(root), names=MT.row_names("spell", root)) is False
+
+
+def test_server_snippet_names_a_weapon_skill_command_below_512():
+    sql = MT.server_snippet("command", COMMAND_EXAMPLE, 237, 32)
+    assert sql.startswith("-- command 237 is a weapon skill (weapon_skills.weaponskillid 237), not an abilities row")
+    assert "INSERT" not in sql

@@ -92,7 +92,6 @@ def apply_env_overrides(values: dict[str, str]) -> None:
     """
     global FFXI_DIR, FFXI_PIVOT_DIR, FFXI_HD_DIR, BLENDER_PATH
     global XI_SERVER_DIR, XI_NAVMESH_DIR
-    global DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
     for key, raw in (values or {}).items():
         key = str(key).strip()
         if not key:
@@ -108,14 +107,7 @@ def apply_env_overrides(values: dict[str, str]) -> None:
     BLENDER_PATH = os.environ.get('BLENDER_PATH', BLENDER_PATH)
     XI_SERVER_DIR = os.environ.get('XI_SERVER_DIR') or None
     XI_NAVMESH_DIR = os.environ.get('XI_NAVMESH_DIR') or None
-    DB_HOST = os.environ.get('XI_DB_HOST', DB_HOST)
-    try:
-        DB_PORT = int(os.environ.get('XI_DB_PORT', str(DB_PORT)))
-    except ValueError:
-        pass
-    DB_USER = os.environ.get('XI_DB_USER', DB_USER)
-    DB_PASSWORD = os.environ.get('XI_DB_PASSWORD', DB_PASSWORD)
-    DB_NAME = os.environ.get('XI_DB_NAME', DB_NAME)
+    _refresh_db_globals()
 
 
 def require_ffxi_dir() -> Path:
@@ -389,22 +381,43 @@ def fx_band_ceiling() -> int:
 # ── Local dev server DB (LandSandBoat — xidb) ───────────────────────────────
 # Used by `xi zone new` to auto-apply the generated zone-migration.sql to the
 # running dev server's database. Defaults match a stock local LSB setup (MariaDB on
-# localhost, db=xidb per the Quick Start Guide). Override per-machine via env, or
-# better, point XI_SERVER_DIR at your checkout and let network.lua decide.
-DB_HOST     = os.environ.get('XI_DB_HOST', '127.0.0.1')
-DB_PORT     = int(os.environ.get('XI_DB_PORT', '3306'))
-DB_USER     = os.environ.get('XI_DB_USER', 'root')
-DB_PASSWORD = os.environ.get('XI_DB_PASSWORD', 'xi')
-DB_NAME     = os.environ.get('XI_DB_NAME', 'xidb')
+# localhost, db=xidb per the Quick Start Guide). Set XI_DB_* in .env (Settings ›
+# Local Server in the model viewer, or the zone editor's setup) — the one place
+# credentials live; the server's network.lua is never read. These are the same keys,
+# blank rule and defaults (an empty password) as xi.server.xi_commands._resolve, so
+# `zone new` and `dats build --apply-db` log in the same way.
+def _db_env(key: str, default: str) -> str:
+    """A non-blank ``XI_DB_*`` value (trimmed), else ``default``."""
+    return (os.environ.get(key) or '').strip() or default
+
+
+def _refresh_db_globals() -> None:
+    global DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+    DB_HOST = _db_env('XI_DB_HOST', '127.0.0.1')
+    try:
+        DB_PORT = int(_db_env('XI_DB_PORT', '3306'))
+    except ValueError:
+        DB_PORT = 3306
+    DB_USER = _db_env('XI_DB_USER', 'root')
+    DB_PASSWORD = _db_env('XI_DB_PASSWORD', '')
+    DB_NAME = _db_env('XI_DB_NAME', 'xidb')
+
+
+_refresh_db_globals()
 # Auto-apply migrations on `zone new`. Default (unset/empty) attempts to apply when
 # the DB is reachable and skips gracefully otherwise; '0'/'false'/'no'/'off' disables.
 DB_AUTOAPPLY = os.environ.get('XI_DB_AUTOAPPLY', '').strip().lower() not in ('0', 'false', 'no', 'off')
 
 
 def db_creds() -> dict:
-    """Keyword args for ``pymysql.connect(**db_creds())`` against the dev server DB."""
-    return dict(host=DB_HOST, port=DB_PORT, user=DB_USER,
-                password=DB_PASSWORD, database=DB_NAME)
+    """Keyword args for ``pymysql.connect(**db_creds())`` against the dev server DB.
+
+    Resolved at call time by :func:`xi.server.xi_commands._resolve`, so this and every
+    other database user (``xi server db``/``check``, ``dats build --apply-db``) get
+    identical credentials: non-blank ``XI_DB_*``, else the defaults."""
+    from xi.server.xi_commands import _resolve
+    host, port, user, password, database = _resolve(None, None, None, None, None)
+    return dict(host=host, port=int(port), user=user, password=password, database=database)
 
 # ── Custom model_id ceilings (the "buffers") ───────────────────────────────
 # These are the high-water marks the expand tools provision empty FTABLE/VTABLE

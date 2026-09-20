@@ -479,7 +479,12 @@ def weapon_skill_slot(banks: Dict[str, WsBank], race, animation: int) -> WsSlot:
             raise ValueError(f'animation {animation} is past the custom weapon-skill band '
                              f'({cfg.FX_WS_BAND_FIRST}..{last}); raise FX_WS_BAND_SLOTS')
         idx = animation - cfg.FX_WS_BAND_FIRST
-        body = cfg.FX_WS_BAND_BASE + idx * 24 + ri
+        # The race term is 1-based: at runtime the client (and cexislots' bank stub, which
+        # inherits the client's register) indexes the band by the RaceGenderConfig number
+        # 1..8 (Hume male is 1), not by ri (0..7). Retail hides this -- its bank pointer is
+        # pre-offset so table[1] is the first race -- but the flat custom arithmetic adds the
+        # index straight, so we place at ri + 1 or Hume male lands on Hume female's file id.
+        body = cfg.FX_WS_BAND_BASE + idx * 24 + (ri + 1)
         return WsSlot(RACE_NAMES[ri], animation, 'custom', idx, body, body + 8, body + 16)
     bank = banks.get('primary' if animation < WS_EXTENDED_FIRST else 'extended')
     if bank is None or not bank.contains(animation):

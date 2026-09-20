@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/server_ws_widen.json",
+  "title": "xi server ws-widen report",
+  "description": "What `xi server ws-widen --json` prints. The command reads xi_map's three sources under XI_SERVER_DIR (to tell stock from widened, and to diff the user's own files) and writes 900-xitools-WsAnimation16.patch (stock -> 16-bit, derived back to stock when the tree is already widened), ws_animation_16bit.sql and README.md into outDir (default projects/patches/ws_animation_16bit under the xi-tools folder). It never edits the server checkout, never connects to a database, and never commits, builds or restarts anything. A file is rewritten only when its content differs (already). --print writes nothing and returns the three texts. Paths are absolute. --json always exits 0; text mode exits 1 when ok is false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "ok", "mode", "serverDir", "source", "buildCommand", "lines", "error"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.server-ws-widen.v1"},
+    "ok": {"type": "boolean", "description": "false only when a file action is refused (the patch can't be derived: no server folder, or a partial / unrecognised tree) or error is set. In install mode: also false when the source or the database step is refused or errors."},
+    "mode": {"type": "string", "enum": ["write", "print", "install"], "description": "write/print: read-only, files go to outDir. install: the patch is placed in modules/catseyexi and the source is widened in place."},
+    "serverDir": {"type": ["string", "null"], "description": "XI_SERVER_DIR, or null."},
+    "outDir": {"type": "string", "description": "write/print: the folder the files go in (absolute). Absent in install mode."},
+    "source": {"$ref": "server_check.json#/$defs/source"},
+    "patch": {"$ref": "#/$defs/file", "description": "write/print only."},
+    "sql": {"$ref": "#/$defs/file", "description": "write/print only."},
+    "readme": {"$ref": "#/$defs/file", "description": "write/print only."},
+    "install": {"$ref": "#/$defs/install", "description": "install mode only: where the patch and SQL were placed, and whether the source and the database column were widened."},
+    "next": {"type": "array", "items": {"type": "string", "enum": ["sql", "rebuild", "restart", "fix-source", "done"]}, "description": "install mode only: what the user still has to do, in order."},
+    "buildCommand": {"type": ["string", "null"], "description": "cmake --build <dir>/build/<cfg> --target xi_map, when a CMake build folder exists."},
+    "lines": {"type": "array", "items": {"type": "string"}, "description": "Exactly what text mode prints, one entry per line."},
+    "error": {"type": ["string", "null"], "description": "A write that failed, or null."}
+  },
+  "$defs": {
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cppPatch", "moduleSql", "sourceApply", "db"],
+      "properties": {
+        "cppPatch": {"$ref": "#/$defs/placed", "description": "modules/catseyexi/cpp-patches/900-xitools-WsAnimation16.patch."},
+        "moduleSql": {"$ref": "#/$defs/placed", "description": "modules/catseyexi/sql/xi_tools/ws_animation_16bit.sql."},
+        "sourceApply": {
+          "type": "object", "additionalProperties": false, "required": ["action", "error"],
+          "properties": {
+            "action": {"type": ["string", "null"], "enum": ["applied", "already", "refused", "error", null], "description": "applied (≥1 of the 3 sources edited), already (all 4 lines already wide), refused (partial/unrecognised — left untouched), error (a write failed)."},
+            "error": {"type": ["string", "null"]}
+          }
+        },
+        "db": {
+          "type": "object", "additionalProperties": false, "required": ["action", "column", "after", "error"],
+          "properties": {
+            "action": {"type": ["string", "null"], "enum": ["altered", "already-wide", "skipped", "refused", "error", null], "description": "altered (tinyint -> smallint), already-wide, skipped (no --apply-db, or no database set), refused (no column), error."},
+            "column": {"type": ["string", "null"], "description": "The column type before the ALTER, e.g. tinyint(3) unsigned."},
+            "after": {"type": ["string", "null"], "description": "The column type after an ALTER."},
+            "error": {"type": ["string", "null"]}
+          }
+        }
+      }
+    },
+    "placed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "action"],
+      "properties": {
+        "path": {"type": ["string", "null"], "description": "Absolute path inside the server checkout, or null with no server folder."},
+        "action": {"type": ["string", "null"], "enum": ["written", "already", "skipped", "refused", null], "description": "written, already (same content), skipped (no module folder to place it in), refused (the patch can't be derived from this source)."}
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "action", "text"],
+      "properties": {
+        "path": {"type": "string", "description": "Absolute path of the file in outDir."},
+        "action": {
+          "type": ["string", "null"],
+          "enum": ["written", "already", "refused", "printed", null],
+          "description": "written (new or changed), already (same content; not rewritten), refused (the patch can't be derived; the other two files are still written), printed (--print). null only when a write failed before it (see error)."
+        },
+        "text": {"type": ["string", "null"], "description": "The file's text with --print (the patch's is null when refused); null otherwise."}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.server-ws-widen.v1",
+      "ok": true,
+      "mode": "write",
+      "serverDir": "D:\\cexi-server\\catseyexi",
+      "outDir": "D:\\xi-tools\\projects\\patches\\ws_animation_16bit",
+      "source": {
+        "state": "stock",
+        "edits": [
+          {"file": "src/map/utils/battleutils.cpp", "line": 187, "state": "stock",
+           "current": "        PWeaponSkill->setAnimationId(rset->get<uint8>(\"animation\"));",
+           "before": "PWeaponSkill->setAnimationId(rset->get<uint8>(\"animation\"));",
+           "after": "PWeaponSkill->setAnimationId(rset->get<uint16>(\"animation\"));"},
+          {"file": "src/map/weapon_skill.h", "line": 64, "state": "stock",
+           "current": "    void setAnimationId(uint8 id);",
+           "before": "void setAnimationId(uint8 id);", "after": "void setAnimationId(uint16 id);"},
+          {"file": "src/map/weapon_skill.h", "line": 82, "state": "stock",
+           "current": "    uint8                          m_AnimationId;",
+           "before": "uint8                          m_AnimationId;", "after": "uint16                         m_AnimationId;"},
+          {"file": "src/map/weapon_skill.cpp", "line": 114, "state": "stock",
+           "current": "void CWeaponSkill::setAnimationId(const uint8 id)",
+           "before": "void CWeaponSkill::setAnimationId(const uint8 id)", "after": "void CWeaponSkill::setAnimationId(const uint16 id)"}
+        ]
+      },
+      "patch": {"path": "D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\900-xitools-WsAnimation16.patch", "action": "written", "text": null},
+      "sql": {"path": "D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\ws_animation_16bit.sql", "action": "written", "text": null},
+      "readme": {"path": "D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\README.md", "action": "written", "text": null},
+      "buildCommand": "cmake --build D:\\cexi-server\\catseyexi\\build\\x64-Release --target xi_map",
+      "lines": [
+        "ws-widen: D:\\cexi-server\\catseyexi",
+        "  source:  stock — xi_map reads weapon-skill animations as 8 bits (the 4 lines below)",
+        "             src/map/utils/battleutils.cpp:187  PWeaponSkill->setAnimationId(rset->get<uint8>(\"animation\"));",
+        "             src/map/weapon_skill.h:64  void setAnimationId(uint8 id);",
+        "             src/map/weapon_skill.h:82  uint8                          m_AnimationId;",
+        "             src/map/weapon_skill.cpp:114  void CWeaponSkill::setAnimationId(const uint8 id)",
+        "  patch:   D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\900-xitools-WsAnimation16.patch (written)",
+        "  sql:     D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\ws_animation_16bit.sql (written)",
+        "  readme:  D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\README.md (written)",
+        "next: apply the patch (git -C \"D:\\cexi-server\\catseyexi\" apply \"D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\900-xitools-WsAnimation16.patch\"), run the SQL, rebuild xi_map (cmake --build D:\\cexi-server\\catseyexi\\build\\x64-Release --target xi_map) and restart it — see D:\\xi-tools\\projects\\patches\\ws_animation_16bit\\README.md"
+      ],
+      "error": null
+    },
+    {
+      "schema": "xi.server-ws-widen.v1",
+      "ok": true,
+      "mode": "install",
+      "serverDir": "D:\\cexi-server\\catseyexi",
+      "source": {
+        "state": "stock",
+        "edits": [
+          {"file": "src/map/utils/battleutils.cpp", "line": 187, "state": "stock",
+           "current": "        PWeaponSkill->setAnimationId(rset->get<uint8>(\"animation\"));",
+           "before": "PWeaponSkill->setAnimationId(rset->get<uint8>(\"animation\"));",
+           "after": "PWeaponSkill->setAnimationId(rset->get<uint16>(\"animation\"));"},
+          {"file": "src/map/weapon_skill.h", "line": 64, "state": "stock",
+           "current": "    void setAnimationId(uint8 id);",
+           "before": "void setAnimationId(uint8 id);", "after": "void setAnimationId(uint16 id);"},
+          {"file": "src/map/weapon_skill.h", "line": 82, "state": "stock",
+           "current": "    uint8                          m_AnimationId;",
+           "before": "uint8                          m_AnimationId;", "after": "uint16                         m_AnimationId;"},
+          {"file": "src/map/weapon_skill.cpp", "line": 114, "state": "stock",
+           "current": "void CWeaponSkill::setAnimationId(const uint8 id)",
+           "before": "void CWeaponSkill::setAnimationId(const uint8 id)", "after": "void CWeaponSkill::setAnimationId(const uint16 id)"}
+        ]
+      },
+      "install": {
+        "cppPatch": {"path": "D:\\cexi-server\\catseyexi\\modules\\catseyexi\\cpp-patches\\900-xitools-WsAnimation16.patch", "action": "written"},
+        "moduleSql": {"path": "D:\\cexi-server\\catseyexi\\modules\\catseyexi\\sql\\xi_tools\\ws_animation_16bit.sql", "action": "written"},
+        "sourceApply": {"action": "applied", "error": null},
+        "db": {"action": "altered", "column": "tinyint(3) unsigned", "after": "smallint(5) unsigned", "error": null}
+      },
+      "next": ["rebuild", "restart"],
+      "buildCommand": "cmake --build D:\\cexi-server\\catseyexi\\build\\x64-Release --target xi_map",
+      "lines": [
+        "ws-widen install: D:\\cexi-server\\catseyexi",
+        "  source:  applied — the 4 lines are now 16-bit in your source",
+        "  patch:   D:\\cexi-server\\catseyexi\\modules\\catseyexi\\cpp-patches\\900-xitools-WsAnimation16.patch (written)",
+        "  sql:     D:\\cexi-server\\catseyexi\\modules\\catseyexi\\sql\\xi_tools\\ws_animation_16bit.sql (written)",
+        "  db:      column widened tinyint(3) unsigned → smallint(5) unsigned",
+        "next: rebuild xi_map (cmake --build D:\\cexi-server\\catseyexi\\build\\x64-Release --target xi_map) and restart it"
+      ],
+      "error": null
+    }
+  ]
+}

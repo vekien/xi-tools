@@ -132,19 +132,31 @@ See [../entity/npc-look.md](../entity/npc-look.md).
 
 ### Ability (a composed job ability / spell / weapon skill)
 
-Point it at a **recipe** (`*.recipe.json`, [schema](../../schema/ability_recipe.json))
-— the wizard lists the ones under `exports/ability/` — then choose what to publish it
+Point it at a **mix file** (`*.mix.json`, formerly `*.recipe.json` — both are read;
+[schema](../../schema/ability_recipe.json)) — the wizard lists the ones under
+`exports/ability/` — then choose what to publish it
 as (auto reads it off the recipe: a `ws:` motion lane is a weapon skill, a `spell:` one
 a spell, else a job ability), the animation number (auto = the next free one) and the
-ROM10 folder. The recipe is copied to `projects/resources/ability/` (a texture it gives as
-a PNG file is inlined, so the copy stands alone) and the build composes it, places the DAT(s) and registers the file id(s); the number it took is
-recorded on the action and the server SQL lands in `projects/server/abilities/`. The
+ROM10 folder. The mix is copied to `projects/resources/ability/<slug>.mix.json` (a texture
+it gives as a PNG file is inlined, so the copy stands alone; an older manifest's
+`<slug>.recipe.json` still builds) and the build composes it, places the DAT(s) and
+registers the file id(s); the number it took is recorded on the action. The action id
+comes from the recipe's `name`, not the file name. Each publish also fills its own
+folder, `projects/abilities/<slug>/` (`<slug>` is the action id's last part): the server
+SQL, a copy of every DAT it placed at its ROM path, and `placements.json`
+([schema](../../schema/ability_publish.json)) naming the file id of each, so the ability
+can be handed on or packaged as one folder. The folder holds only the latest publish;
+files you add to it — the model viewer's mix files among them — are kept. The
 same action from arguments, with every parameter defaulted:
 
 ```bash
-uv run xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace
+uv run xi dats prepare exports/ability/mixer/tiger_fury.mix.json --project tiger_fury --replace
 uv run xi dats build tiger_fury --dry-run
 ```
+
+`dats build` can also update the local server's row for it, place the client menu record
+at the same id and write its Lua script — see
+[ability server options](#ability-server-options---apply-db---menu-record---lua-stub).
 
 Full detail: [../ability/mixer.md](../ability/mixer.md#publish).
 
@@ -190,6 +202,35 @@ uv run xi dats build --project gyokko_mask --pivot    # into FFXI_PIVOT_DIR (no 
 uv run xi dats build --project gyokko_mask --dry-run  # preview only, writes nothing
 uv run xi dats changelog --project gyokko_mask        # table of recorded results
 ```
+
+### Ability server options (`--apply-db`, `--menu-record`, `--lua-stub`)
+
+For `ability` actions a build can also do the server side, after every DAT is placed and
+recorded (the model viewer's Manage switches *Database Update*, *Client Menu Record* and
+*Lua Stub*; [../ability/mixer.md](../ability/mixer.md#database-update-client-menu-record-lua-stub)
+has the rules):
+
+```bash
+uv run xi dats build love --apply-db --clone-from fire --menu-record --lua-stub [--dry-run]
+```
+
+| Option | What it does |
+|---|---|
+| `--apply-db` | Update the `spell_list` / `abilities` / `weapon_skills` row named after the mix (animation only), or, when there is none, insert one cloned from the kind's default donor (`cure` / `berserk` / `fast_blade`). With `--dry-run`: SELECTs only. |
+| `--db-row ID` | Confirm, once, a row this mix did not create (the build says `needs-confirm` and names it). |
+| `--clone-from X` | Override the donor a new row, menu record and stub clone (an id or a server name). Default: the kind's donor above. |
+| `--server-id ID` | The id for a new row / menu record (default: the highest one blank in the client and free on the server). |
+| `--menu-record` | The client `mgc_` / `comm` record (and its names) at the row's id, over a blank retail placeholder only — never a named row, whatever `--force` says. |
+| `--menu-name TEXT` | What the menu shows (default: the mix name, `_` as a space). |
+| `--lua-stub` | `<XI_SERVER_DIR>/scripts/actions/…/<name>.lua` for a row this mix created. |
+
+Credentials come from xi-tools' `.env` (`XI_DB_*`), never from the command line. Each
+step prints one line (`db: …`, `menu: …`, `lua: …`, then `⚠` warnings) and never fails the
+build: the exit code is 0 whenever the DATs were placed. What each step did is recorded
+on the action (`result.db`, `result.menu`, `result.lua`) and carried over by every later
+build. A real build that wrote a row ends with `database: 1 row written (spell_list
+#1023) — restart the map server (xi_map) to load it`, and the publish folder gains
+`<slug>_<animation>.applied.sql`, the statements that ran.
 
 ### Which table registers a file_id
 
@@ -261,6 +302,8 @@ build used `--pivot`, else `dir`). Zips everything needed to run one project as 
 
 - every DAT the actions built into that source placed (from each action's inline `result`
   — all per-race DATs for gear), plus the mount name/help/key-item string DATs for mount actions,
+- for an ability whose client menu record was placed in that source (`--menu-record`):
+  `ROM/118/114.DAT` and the name/help tables it edited, so players get its menu entry,
 - the full `FTABLE`/`VTABLE` set (so the new file_ids resolve).
 
 Files are laid out ROM-relative inside the zip (XIPivot-ready). Build the project first.
@@ -284,7 +327,9 @@ dats/
   ffxi/                       # zone standard package tree
   ffxi-hd/                    # zone HD package tree
   packages/                   # distributable zips
-  server/                     # emitted server snippets (e.g. mounts)
+  abilities/<slug>/           # one per ability: its SQL, a copy of each DAT placed, placements.json,
+                              #   <slug>_<n>.applied.sql (--apply-db) and the viewer's <Name>.mix.json
+  server/                     # emitted server snippets (e.g. mounts, spell / command records)
 ```
 
 - **Results are recorded inline** on each action (`action["result"]` = model_id → file_id → DAT,
@@ -357,10 +402,10 @@ resource files that live next to the source JSON into `projects/resources/<type>
 | Command | What it does |
 |---|---|
 | `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity/NPC) at new model ids, publish an ability recipe, or add a spell / command menu record, and write a manifest action; `--pivot` checks and builds into `FFXI_PIVOT_DIR` |
-| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--pivot` builds into `FFXI_PIVOT_DIR` instead (no sync); `--dry-run` previews (no separate `plan` command) |
+| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--pivot` builds into `FFXI_PIVOT_DIR` instead (no sync); `--dry-run` previews (no separate `plan` command); for abilities `--apply-db` / `--menu-record` / `--lua-stub` ([above](#ability-server-options---apply-db---menu-record---lua-stub)) |
 | `xi dats package <project>` | Zip the project's built DATs + F/V tables (`--from dir`/`pivot`/`hd`, default where it was built) into `projects/packages/<project>.zip` (ROM-relative, XIPivot-ready) |
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder), and the DATs of `--pivot` builds into the release's pivot folder. Prompts for the folder; `--to <path>`, `--no-dll` |
-| `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back, then remove the manifest (`--keep-json` keeps it) |
+| `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back (an ability's only while the row still holds what the build wrote), then remove the manifest (`--keep-json` keeps it). `--apply-db` also reverts the database row an ability inserted or changed and deletes its unedited Lua stub; without it they are listed (with the revert SQL) and left, and the manifest is **kept** — its cleared actions marked `undone` — until a later `undo --apply-db` removes them (a row already gone or already back at its old animation counts as done). An ability menu record that can't be written back (the game has `114.DAT` open) also keeps the manifest, and the next undo retries it |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
 | `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`) |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
@@ -383,8 +428,12 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
 - `ability`: composes a recipe (`xi.ability.xi_compose`) into one DAT (job ability /
   spell) or body + two companion DATs per race (weapon skill), takes the animation
   number against the live tables, places them under `ROM10/<subdir>/` and registers the
-  file ids; records kind / animation / placements on the action and emits the server
-  SQL to `projects/server/abilities/`. Needs no table expansion.
+  file ids; records kind / animation / placements on the action and writes the publish
+  folder `projects/abilities/<slug>/`: the server SQL, a copy of each placed DAT
+  at its ROM path and `placements.json` (`schema/ability_publish.json`), replacing what
+  the previous publish of the action put there. Needs no table expansion. With
+  `--apply-db` / `--menu-record` / `--lua-stub` it then updates the server row, places
+  the client menu record and writes the Lua stub, recording `result.db` / `menu` / `lua`.
 - `spell` / `command`: writes a definition (`xi.menu.xi_menu_table`) as a new record of
   `ROM/118/114.DAT` (the `mgc_` / `comm` section grown to hold it) plus its EN/JP
   name/help blocks in `ROM/181`, at an id above the retail band decided against the

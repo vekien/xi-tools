@@ -57,3 +57,22 @@ def ev_bytes(root: Path) -> bytes:
 @pytest.fixture(scope="session")
 def dl_bytes(root: Path) -> bytes:
     return _pristine(root, ZONE_DIALOG)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_server(monkeypatch):
+    """No test reaches the real server checkout or database. xi_config loaded XI_DB_*
+    and XI_SERVER_DIR from the repo .env at import; drop them, and make
+    pymysql.connect refuse."""
+    import xi.xi_config as cfg          # first: its import loads .env into os.environ
+    for k in ("XI_DB_HOST", "XI_DB_PORT", "XI_DB_USER", "XI_DB_PASSWORD", "XI_DB_NAME", "XI_SERVER_DIR"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(cfg, "XI_SERVER_DIR", None, raising=False)
+    try:
+        import pymysql
+    except ImportError:
+        return
+
+    def _refuse(*a, **k):
+        raise AssertionError("tests never connect to a database")
+    monkeypatch.setattr(pymysql, "connect", _refuse)

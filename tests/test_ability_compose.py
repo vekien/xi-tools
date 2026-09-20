@@ -198,10 +198,31 @@ def test_emote_lane_maps_to_every_race(root: Path):
     assert [c.race for c in out] == list(ac.RACE_NAMES)
     for c in out:
         names = {s.split("(")[0] for s in c.sections}
-        assert {"bow0", "bow1", "bow2"} <= names, (c.race, c.sections)
+        assert {"bow0", "bow1"} <= names, (c.race, c.sections)          # parts 0/1 in the body
+        assert "bow2" in _clips_of(c.companion), (c.race,)             # part 2 (waist) in the companion
         assert c.warnings == [], (c.race, c.warnings)
     by_race = {c.race: c for c in out}
     assert by_race["HumeFemale"].data != by_race["Galka"].data      # each race's own clips
+
+
+def test_emote_ws_stows_the_weapon(root: Path):
+    # An emote never moves the weapon hand (skeleton ref 127), so a drawn weapon would hang
+    # frozen when the client plays it as a weapon skill. The composer stows main+sub at
+    # frame 0 with the same 0x75 tags a spell cast runs (ROM/0/0 hwmg), so the pose reads
+    # as it does in the mixer preview (which hides them too).
+    recipe = {"name": "bow", "sources": {"motion": {"spec": "ROM/37/13.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "bow?", "start": 0, "dur": 60}]}
+    for c in ac.compose(recipe):
+        assert _vis_hides(c.data) == [(0, 1, 1), (1, 1, 1)], c.race   # main then sub, hidden, ifEngaged
+
+
+def test_non_emote_motion_keeps_the_weapon(root: Path):
+    # A motion that is not an emote or dance is left alone — a race base movement clip here
+    # (composed to one DAT, not per race). Only motions that never touch the weapon hand get
+    # the hide, so a real weapon-skill motion keeps its weapon shown.
+    recipe = {"name": "cm", "sources": {"motion": {"spec": "ROM/32/58.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "cm0?", "start": 0, "dur": 30}]}
+    assert _vis_hides(ac.compose(recipe)[0].data) == []
 
 
 def test_race_base_lane_names_clips_without_carrying(root: Path):
@@ -414,6 +435,27 @@ def _folders(data: bytes):
     return top, pops, end
 
 
+def _clips_of(data) -> set:
+    """The clip (0x2B) names in a DAT (e.g. a weapon skill's waist companion)."""
+    return {ai._clean(s.name) for s in parse_sections(data or b"") if s.type_code == ai.T_CLIP}
+
+
+def _vis_hides(data) -> list:
+    """``(slot, hidden, ifEngaged)`` for every 0x75 ShowHideWeapon tag in the ``main``
+    routine, in order — how the composer stows the weapon for an emote weapon skill."""
+    out = []
+    for s in parse_sections(data or b""):
+        if s.type_code != ac.T_ROUTINE or ac._clean(s.name) != "main":
+            continue
+        body = data[s.data_start:s.start + s.size]
+        for off in range(0, len(body) - 16, 4):
+            if body[off] == 0x75:
+                out.append((struct.unpack_from("<h", body, off + 12)[0],
+                            struct.unpack_from("<I", body, off + 8)[0],
+                            struct.unpack_from("<h", body, off + 14)[0]))
+    return out
+
+
 def _ws_body(c, effect_dir: str) -> tuple:
     """Check one race's composed weapon-skill body against retail's layout and return its
     ``(root, effect folder, clip folder or None)``: the race root ``<tag>_<c>`` (payload
@@ -505,7 +547,12 @@ def test_ws_body_has_retail_layout(root: Path):
     assert [c.race for c in out] == list(ac.RACE_NAMES)
     for c in out:
         _root, _effect, clips = _ws_body(c, "bow_")
-        assert {"bow0", "bow1", "bow2"} <= {n for n, _t in clips["items"]}, c.race
+        # Parts 0/1 in the body, part 2 (waist) in the companion — as retail lays a WS out.
+        assert {"bow0", "bow1"} <= {n for n, _t in clips["items"]}, c.race
+        assert "bow2" not in {n for n, _t in clips["items"]}, c.race
+        assert c.companion is not None, c.race
+        comp_clips = _clips_of(c.companion)
+        assert "bow2" in comp_clips and "bow0" not in comp_clips, c.race
     assert [c.data[:2].decode() for c in out] == _RACE_TAGS
 
 

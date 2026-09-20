@@ -39,7 +39,7 @@
       "additionalProperties": false,
       "required": ["recipe"],
       "properties": {
-        "recipe": {"$ref": "common.json#/$defs/relativePath", "description": "The recipe (ability_recipe.json), relative to projects/resources."}
+        "recipe": {"$ref": "common.json#/$defs/relativePath", "description": "The recipe (ability_recipe.json), relative to projects/resources: ability/<slug>.mix.json (a mix file; older manifests name ability/<slug>.recipe.json, which still builds)."}
       }
     },
     "options": {
@@ -53,7 +53,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "emit": {"type": "boolean", "default": true, "description": "Write the server SQL snippet to projects/server/abilities/<id>_<animation>.sql."}
+        "emit": {"type": "boolean", "default": true, "description": "Write the server SQL snippet as <slug>_<animation>.sql into the publish folder projects/abilities/<slug>/ (<slug> = the id's last part). The folder takes a copy of every DAT placed and placements.json (ability_publish.json) either way."}
       }
     },
     "result": {
@@ -76,8 +76,76 @@
             }
           }
         },
-        "server": {"type": ["string", "null"]},
-        "targets": {"type": "array", "items": {"type": "string"}}
+        "server": {"type": ["string", "null"], "description": "The SQL the build wrote: projects/abilities/<slug>/<slug>_<animation>.sql (earlier builds: projects/server/abilities/<slug>/<slug>_<animation>.sql, and before the publish folder projects/server/abilities/<slug>_<animation>.sql)."},
+        "targets": {"type": "array", "items": {"type": "string"}},
+        "db": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Database Update (dats build --apply-db): the server row this action is bound to. Carried over by every build; dats undo --apply-db reverts it. Never holds a credential: `server` is database@host:port.",
+          "required": ["table", "id", "name", "created", "confirmed"],
+          "properties": {
+            "table": {"type": "string", "enum": ["spell_list", "abilities", "weapon_skills"]},
+            "id": {"type": "integer", "minimum": 0, "description": "The row's primary key (spellid, abilityId, weaponskillid)."},
+            "name": {"type": "string", "description": "The row's name (the recipe name in lower case for a row this action created)."},
+            "created": {"type": "boolean", "description": "This action inserted the row (cloned from `like`); undo deletes it."},
+            "confirmed": {"type": "boolean", "description": "The row existed and was confirmed once (--db-row); later publishes update it without asking."},
+            "like": {"type": ["object", "null"], "additionalProperties": false,
+                     "properties": {"id": {"type": "integer"}, "name": {"type": ["string", "null"]}},
+                     "description": "The donor a created row was cloned from — also the donor of its menu record and Lua stub."},
+            "group": {"type": ["integer", "null"], "description": "spell_list.group of a spell row (its script folder)."},
+            "animation": {"type": "integer", "minimum": 0},
+            "before": {"type": ["object", "null"], "additionalProperties": false,
+                       "properties": {"animation": {"type": ["integer", "null"]}, "animationTime": {"type": ["integer", "null"]}},
+                       "description": "The row as the first write to it found it (null for a created row); undo puts `animation` back."},
+            "op": {"type": "string", "enum": ["update", "insert", "unchanged"], "description": "The last op."},
+            "server": {"type": ["string", "null"], "description": "database@host:port."},
+            "at": {"type": "string", "description": "UTC time of the last op (ISO 8601)."}
+          }
+        },
+        "menu": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Client Menu Record (dats build --menu-record): the client spell / command record placed at the server row's id, per build root. dats undo puts back what each root's row held while it still holds `written`.",
+          "required": ["kind", "record_kind", "server_id", "roots"],
+          "properties": {
+            "kind": {"type": "string", "enum": ["ja", "spell", "ws"]},
+            "record_kind": {"type": "string", "enum": ["spell", "command"]},
+            "server_id": {"type": "integer", "minimum": 0, "description": "The server id: spell N is mgc_[N], job ability A comm[A+512], weapon skill W comm[W]."},
+            "name": {"type": "string", "description": "The name the menu shows (EN and JP)."},
+            "like": {"type": "object", "additionalProperties": false,
+                     "properties": {"server_id": {"type": "integer"}, "record_id": {"type": "integer"}}},
+            "provisional": {"type": "boolean", "description": "The id was chosen without the database; the next publish with Database Update keeps it if it is free."},
+            "roots": {
+              "type": "object",
+              "description": "Per build target (dir, pivot): the record written there.",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "record_id": {"type": "integer", "minimum": 0},
+                  "menu_index": {"type": ["integer", "null"]},
+                  "replaced": {"type": ["object", "null"], "description": "What the row held before (xi_menu_table.capture_record): {record, blocks}."},
+                  "written": {"type": "string", "description": "Hex of the record written; a row still holding it is this action's own."}
+                }
+              }
+            },
+            "at": {"type": "string"}
+          }
+        },
+        "lua": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Lua Stub (dats build --lua-stub): the server script written for a row this action created. dats undo --apply-db deletes it while it is unedited.",
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {"type": "string", "pattern": "^scripts/actions/.+\\.lua$", "description": "Relative to XI_SERVER_DIR, always with /."},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the whole file as written."},
+            "donor": {"type": "string", "description": "black/fire#144, provoke#35, fast_blade#32."},
+            "kind": {"type": "string", "enum": ["ja", "spell", "ws"]},
+            "at": {"type": "string"}
+          }
+        },
+        "undone": {"type": "string", "description": "Set by dats undo when it cleared this action's DATs and table entries but kept the manifest because a database row or Lua stub is still there, or a menu record couldn't be put back (UTC, ISO 8601). Such a record stays in result.menu (only the roots that failed) and the next undo tries it again. The next build drops it."}
       }
     },
     "outputs": {"$ref": "common.json#/$defs/outputTree"}
@@ -88,7 +156,7 @@
       "type": "ability",
       "kind": "auto",
       "target": {"animation": "auto", "subdir": 20},
-      "resources": {"recipe": "ability/tiger_fury.recipe.json"},
+      "resources": {"recipe": "ability/tiger_fury.mix.json"},
       "server": {"emit": true}
     }
   ]

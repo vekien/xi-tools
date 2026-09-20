@@ -3,16 +3,21 @@ the ``ability`` action of ``xi dats`` (``src/xi/dats/xi_dats.py: _build_ability`
 the ``xi ability publish`` shortcut, which is that same action prepared and built in
 one go::
 
-    xi ability publish recipe.json [--project NAME] [--kind ja|spell|ws] [--animation N]
-                                   [--animation-from N] [--subdir S] [--force] [--dry-run]
+    xi ability publish LOVE.mix.json [--project NAME] [--kind ja|spell|ws] [--animation N]
+                                     [--animation-from N] [--subdir S] [--force] [--dry-run]
+                                     [--apply-db [--db-row ID]] [--clone-from X] [--server-id ID]
+                                     [--menu-record [--menu-name TEXT]] [--lua-stub]
 
 is exactly::
 
-    xi dats prepare recipe.json --project NAME --type ability --replace [--kind …] […]
-    xi dats build NAME --only ability.<name> [--force] [--dry-run]
+    xi dats prepare LOVE.mix.json --project NAME --type ability --replace [--kind …] […]
+    xi dats build NAME --only ability.<name> [--force] [--dry-run] [--apply-db …]
 
 so a published ability is a manifest action like any gear or mount placement: rebuilt
-from Git by ``dats build``, listed by ``dats changelog``, reverted by ``dats undo``.
+from Git by ``dats build``, listed by ``dats changelog``, reverted by ``dats undo``. Each
+publish also fills ``projects/abilities/<slug>/`` with the server SQL, a copy of every
+DAT it placed and ``placements.json`` (``write_publish_folder``); the database, menu
+record and Lua stub options are the build's server pass (xi.server.xi_server_pass).
 
 Kinds and where the client looks (docs/ability/inspect.md, docs/anim/weapon-skills.md):
 
@@ -38,13 +43,16 @@ a job ability. ``kind`` on the action (or ``target.kind`` in the recipe) overrid
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import click
 
-from xi.ability.xi_compose import Composed, _is_race_bound, _lanes, compose, load_recipe, output_name
+from xi.ability.xi_compose import (
+    Composed, _is_int, _is_race_bound, _lanes, compose, load_recipe, output_name)
 from xi.ability.xi_inspect import ABILITY_FILE_OFFSET
 from xi.entity.anim.xi_motion_tables import (
     WS_EXTENDED_FIRST, WS_EXTENDED_SLOTS, WS_PRIMARY_SLOTS, resolve_weapon_skill)
@@ -298,9 +306,9 @@ def _ws_file_ids(animation: int, race: str) -> Dict[str, int]:
 
 def _source_ws_animation(recipe: dict) -> Optional[int]:
     """The weapon-skill number whose slot the companion (waist) DATs are copied from: a
-    ``ws:N`` lane's, or a weapon-skill motion file's own bank slot. None when the
-    per-race motion comes from elsewhere (an emote, a battle pack), which carries its
-    waist clips in the body DAT."""
+    ``ws:N`` lane's, or a weapon-skill motion file's own bank slot. None when the per-race
+    motion comes from elsewhere (an emote, a battle pack) — compose then splits an emote's
+    part-2 waist clips into ``Composed.companion``, written to both companion slots below."""
     for lane in _lanes(recipe).values():
         if _is_race_bound(lane.spec):
             return int(lane.spec.split(":")[1])
@@ -352,12 +360,10 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
                       "place": place_for(None, "body", pool), "composed": c})
     else:
         src_anim = _source_ws_animation(recipe)
-        # Companion (waist) DATs come from the motion source's slot for the same race.
-        # Motion that is not a weapon skill has no such slot: its waist clips ride in the
-        # body DAT. On a retail slot the slot's own companions (retail's placeholders)
-        # stay; a custom-band slot has none, so it gets retail's placeholder, slot 0's
-        # companions (a 160-byte `dumm` DAT on every race), and its waist ids are
-        # registered as every retail slot's are.
+        # Companion (waist) DATs: a weapon-skill motion copies the source slot's own; an
+        # emote's part-2 waist rides in Composed.companion and is written there (below). Only
+        # a motion with no waist at all falls back to a placeholder: a retail slot keeps its
+        # own, a custom-band slot gets retail's, slot 0's companions (a 160-byte `dumm` DAT).
         comp_src = src_anim if src_anim is not None else (0 if needs_plugin(kind, anim) else None)
         from xi.xi_config import FFXI_DIR
         from xi.ftable.xi_core import scan_file_ids
@@ -370,16 +376,23 @@ def plan(recipe: dict, root: Path, *, kind: Optional[str] = None, animation: Opt
             seen_ids.add(ids["body"])
             files.append({"race": c.race, "role": "body", "file_id": ids["body"],
                           "place": place_for(c.race, "body", pool), "composed": c})
-            if comp_src is None:
-                continue
-            src_ids = _ws_file_ids(comp_src, c.race)
             for role in ("companion_a", "companion_b"):
-                hits = scan_file_ids([src_ids[role]])
-                if not hits:
-                    raise click.ClickException(f"cannot resolve source companion {role} for {c.race}")
-                files.append({"race": c.race, "role": role, "file_id": ids[role],
-                              "place": place_for(c.race, role, pool),
-                              "copy_from": Path(FFXI_DIR) / hits[0]["dat"]})
+                if c.companion is not None:
+                    # The motion's own waist (part-2) clips, split out of the body by compose:
+                    # write them to both companion slots so whichever the body's info byte 9
+                    # selects carries the waist (retail keeps b*2 here, not in the body).
+                    files.append({"race": c.race, "role": role, "file_id": ids[role],
+                                  "place": place_for(c.race, role, pool),
+                                  "composed_companion": c.companion})
+                elif comp_src is not None:
+                    src_ids = _ws_file_ids(comp_src, c.race)
+                    hits = scan_file_ids([src_ids[role]])
+                    if not hits:
+                        raise click.ClickException(f"cannot resolve source companion {role} for {c.race}")
+                    files.append({"race": c.race, "role": role, "file_id": ids[role],
+                                  "place": place_for(c.race, role, pool),
+                                  "copy_from": Path(FFXI_DIR) / hits[0]["dat"]})
+                # else (comp_src is None, no companion): a retail slot keeps its own companions.
     for f in files:
         f["current"] = _placement(root, f["file_id"])
     warnings = list(dict.fromkeys(w for c in composed for w in c.warnings))
@@ -402,6 +415,9 @@ def write_sources(recipe: dict, p: dict) -> List[Path]:
             c: Composed = f["composed"]
             src = out_dir / output_name(recipe, c)
             src.write_bytes(c.data)
+        elif "composed_companion" in f:
+            src = out_dir / f"{recipe['name']}.{f['race']}.{f['role']}.DAT"
+            src.write_bytes(f["composed_companion"])
         else:
             src = out_dir / f"{recipe['name']}.{f['race']}.{f['role']}.DAT"
             shutil.copy2(f["copy_from"], src)
@@ -409,30 +425,32 @@ def write_sources(recipe: dict, p: dict) -> List[Path]:
     return paths
 
 
+_DB_UPDATE_NOTE = ("-- animationTime is left as the row has it. xi dats build --apply-db does this for you "
+                   "(Manage › Database Update in the model viewer); a new row: set Clone from (--clone-from).")
+
+
 def server_snippet(recipe: dict, kind: str, animation: int) -> str:
-    name = recipe["name"]
+    """The SQL the publish folder's ``<slug>_<animation>.sql`` holds: what to run by hand
+    (never executed; ``dats build --apply-db`` runs its own guarded statement). The row is
+    named after the mix; a new row is cloned from a donor (the kind's default, or
+    ``--clone-from``), never written from a positional template (columns drift by version)."""
+    name = recipe["name"].lower()
     if kind == "spell":
         return (f"-- in-game check, no DB change: target a mob or NPC and   !injectaction 4 {animation}\n"
                 f"-- spell: point a spell_list row at the new animation (the client opens file id 0xAF0 + {animation})\n"
-                f"UPDATE spell_list SET animation = {animation}, animationTime = 2000 WHERE name = '{name}';\n"
-                f"-- or a new row (spellid, name, jobs, group, family, element, zonemisc, validTargets, skill, mpCost,\n"
-                f"--   castTime, recastTime, message, magicBurstMessage, animation, animationTime, AOE, base, multiplier,\n"
-                f"--   CE, VE, requirements, spell_range, radius, content_tag):\n"
-                f"-- INSERT INTO spell_list VALUES (<spellid>,'{name}',<jobs>,<group>,<family>,<element>,0,<validTargets>,<skill>,\n"
-                f"--   <mpCost>,<castTime>,<recastTime>,<msg>,<burstMsg>,{animation},2000,0,0,1.00,0,0,0,<range>,0,NULL);")
+                f"UPDATE spell_list SET animation = {animation} WHERE name = '{name}';\n"
+                f"{_DB_UPDATE_NOTE}")
     if kind == "ja":
         return (f"-- in-game check, no DB change: target a mob or NPC and   !injectaction 6 {animation}\n"
                 f"-- job ability: point an abilities row at the new animation\n"
-                f"UPDATE abilities SET animation = {animation}, animationTime = 2000 WHERE name = '{name}';\n"
-                f"-- or a new row: INSERT INTO abilities VALUES (<abilityId>,'{name}',<job>,<level>,<validTarget>,"
-                f"<recast>,<recastId>,<msg1>,<msg2>,{animation},2000,0,0,0,0,0,1,0,0,0,NULL);")
+                f"UPDATE abilities SET animation = {animation} WHERE name = '{name}';\n"
+                f"{_DB_UPDATE_NOTE}")
     return (f"-- in-game check, no DB change: target a mob or NPC and   !injectaction 3 {animation}\n"
             f"-- humanoid mob skill (mob_anim_id is 16-bit, works today):\n"
             f"--   INSERT INTO mob_skills VALUES (<id below 256>,{animation},'{name}',0,0.0,5.0,2000,0,4,0,0,0,8,0,0);\n"
-            f"-- player weapon skill: weapon_skills.animation is tinyint and the loader reads it as uint8\n"
-            f"--   (src/map/utils/battleutils.cpp get<uint8>(\"animation\")), so {animation} needs the column\n"
-            f"--   widened (ALTER TABLE weapon_skills MODIFY animation smallint unsigned NOT NULL DEFAULT 0)\n"
-            f"--   and a one-line cpp-patch to get<uint16> — then:\n"
+            f"-- player weapon skill: needs `xi server ws-widen` once (the C++ patch for 4 lines in 3 files, and\n"
+            f"--   the ALTER; Settings › Local Server › Weapon skills in the model viewer): apply both, rebuild\n"
+            f"--   xi_map and restart it. Then:\n"
             f"--   UPDATE weapon_skills SET animation = {animation} WHERE name = '{name}';")
 
 
@@ -452,6 +470,183 @@ def permission_hint(root: Path, e: PermissionError) -> str:
              "on the install once:\n"
              f'  icacls "{root}" /grant "%USERNAME%":(OI)(CI)M /T')
     return hint + "\nNothing was registered; any DAT already copied is unreferenced and harmless."
+
+
+# ── The publish folder: projects/abilities/<slug>/ ──────────────────────────────────
+# What a publish hands on: the server SQL, a copy of every DAT it placed at its ROM path
+# (so the folder drops into a DAT overlay as it is) and placements.json naming the file id
+# each copy registers as (schema/ability_publish.json); with --apply-db also
+# <slug>_<animation>.applied.sql, what ran against the database. The folder mirrors the
+# latest publish of its action; a file the user adds to it — the model viewer's mix files
+# (<Name>.mix.json, check.<Name>.mix.json, a legacy <Name>.recipe.json) among them — is
+# left alone. The folder used to be projects/server/abilities/<slug>/; an old one there is
+# not moved or read.
+
+PUBLISH_SCHEMA = "xi.ability-publish.v1"       # schema/ability_publish.json
+PUBLISH_ROOT = Path("projects") / "abilities"
+PUBLISH_RECORD = "placements.json"
+_PUBLISH_KEYS = ("schema", "id", "name", "kind", "animation", "placements", "server")
+_PUBLISH_PLACEMENT_KEYS = ("race", "role", "file_id", "dat")
+_PUBLISH_ROLES = ("body", "companion_a", "companion_b")
+_ACTION_ID_RX = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")           # common.json actionId
+_ROM_PATH_RX = re.compile(r"^ROM[0-9]*/[0-9]+/[0-9]+(?:\.DAT)?$")  # common.json romPath
+_SQL_NAME_RX = re.compile(r"^[A-Za-z0-9_.-]+\.sql$")
+_SLUG_RX = re.compile(r"^[a-z0-9][a-z0-9_-]*$")       # what xi_dats._slug / _project_slug produce
+
+
+def publish_folder(action_id: str) -> Path:
+    """``projects/abilities/<slug>``: the slug is the action id's last part
+    (``ability.love`` -> ``love``), the name the SQL has always carried. It must be a plain
+    folder name, so a hand-typed id cannot move the folder (and what it writes and
+    removes) outside projects/abilities."""
+    slug = action_id.split(".")[-1]
+    if not _SLUG_RX.fullmatch(slug):
+        raise click.ClickException(
+            f"{action_id}: the action id's last part must be a-z, 0-9, _ or - to name its publish folder")
+    return PUBLISH_ROOT / slug
+
+
+def publish_record(action_id: str, name: str, kind: str, animation: int,
+                   placements: List[dict], server: Optional[str]) -> dict:
+    """The placements.json of one publish: what a packager needs to register the copies."""
+    return {"schema": PUBLISH_SCHEMA, "id": action_id, "name": name, "kind": kind,
+            "animation": animation,
+            "placements": [{k: p.get(k) for k in _PUBLISH_PLACEMENT_KEYS} for p in placements],
+            "server": server}
+
+
+def validate_publish_record(doc) -> List[str]:
+    """Problems with a placements.json against ``schema/ability_publish.json`` (empty when
+    it conforms). Hand-rolled like ``validate_recipe`` and kept in step with the schema."""
+    if not isinstance(doc, dict):
+        return ["placements.json must be a JSON object"]
+    errs = [f"unknown key {k!r}" for k in doc if k not in _PUBLISH_KEYS]
+    errs += [f"missing {k!r}" for k in _PUBLISH_KEYS if k not in doc]
+    if "schema" in doc and doc["schema"] != PUBLISH_SCHEMA:
+        errs.append(f"schema must be {PUBLISH_SCHEMA!r}")
+    if "id" in doc and not (isinstance(doc["id"], str) and _ACTION_ID_RX.match(doc["id"])):
+        errs.append("id must be an action id (a-z, 0-9, _ . -)")
+    if "name" in doc and not (isinstance(doc["name"], str) and re.fullmatch(r"[A-Za-z0-9_\-]+", doc["name"])):
+        errs.append("name must be letters, digits, _ or -")
+    if "kind" in doc and doc["kind"] not in KINDS:
+        errs.append("kind must be ja, spell or ws")
+    if "animation" in doc and not (_is_int(doc["animation"]) and 0 <= doc["animation"] <= ANIMATION_MAX):
+        errs.append(f"animation must be an integer from 0 to {ANIMATION_MAX}")
+    if "server" in doc and doc["server"] is not None and not (
+            isinstance(doc["server"], str) and _SQL_NAME_RX.match(doc["server"])):
+        errs.append("server must be the name of a .sql file in the folder, or null")
+    placements = doc.get("placements", [])
+    if not isinstance(placements, list) or not placements:
+        errs.append("placements must be a non-empty list")
+        placements = []
+    for i, p in enumerate(placements):
+        where = f"placements[{i}]"
+        if not isinstance(p, dict):
+            errs.append(f"{where}: must be an object")
+            continue
+        errs += [f"{where}: unknown key {k!r}" for k in p if k not in _PUBLISH_PLACEMENT_KEYS]
+        errs += [f"{where}: missing {k!r}" for k in _PUBLISH_PLACEMENT_KEYS if k not in p]
+        if p.get("race") is not None and not isinstance(p["race"], str):
+            errs.append(f"{where}: race must be a race name or null")
+        if "role" in p and p["role"] not in _PUBLISH_ROLES:
+            errs.append(f"{where}: role must be body, companion_a or companion_b")
+        if "file_id" in p and not (_is_int(p["file_id"]) and p["file_id"] >= 0):
+            errs.append(f"{where}: file_id must be a non-negative integer")
+        if "dat" in p and not (isinstance(p["dat"], str) and _ROM_PATH_RX.match(p["dat"])):
+            errs.append(f"{where}: dat must be a ROM path such as ROM10/20/0.DAT")
+    return errs
+
+
+def _previous_publish_files(folder: Path) -> set:
+    """Folder-relative paths an earlier publish wrote into ``folder``: the DAT copies and
+    SQL its placements.json lists, and every ``<slug>_<animation>.sql`` and
+    ``<slug>_<animation>.applied.sql``. Only a ROM path or a bare .sql name is taken from
+    the record, so a hand-edited one cannot reach outside the folder — or name a mix file
+    (``*.mix.json``, ``*.recipe.json``), which a publish never removes."""
+    out: set = set()
+    sql_rx = re.compile(rf"^{re.escape(folder.name)}_\d+(?:\.applied)?\.sql$", re.I)
+    if folder.is_dir():
+        out.update(p.name for p in folder.iterdir() if p.is_file() and sql_rx.match(p.name))
+    try:
+        prev = json.loads((folder / PUBLISH_RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return out
+    if not isinstance(prev, dict):
+        return out
+    if isinstance(prev.get("server"), str) and _SQL_NAME_RX.match(prev["server"]):
+        out.add(prev["server"])
+    placements = prev.get("placements")
+    for p in placements if isinstance(placements, list) else []:
+        dat = p.get("dat") if isinstance(p, dict) else None
+        if isinstance(dat, str) and _ROM_PATH_RX.match(dat.replace("\\", "/")):
+            out.add(dat.replace("\\", "/"))
+    return out
+
+
+def _prune_empty_dirs(d: Path, stop: Path) -> None:
+    """Remove ``d`` and its parents while they are empty, up to (not including) ``stop``."""
+    d, stop = d.resolve(), stop.resolve()
+    while d != stop and stop in d.parents:
+        try:
+            d.rmdir()
+        except OSError:
+            return
+        d = d.parent
+
+
+def _write_bytes_if_changed(dest: Path, data: bytes) -> bool:
+    """Write ``data`` to ``dest`` unless it already holds exactly that; True when written."""
+    if dest.is_file() and dest.read_bytes() == data:
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    return True
+
+
+def _write_text_if_changed(dest: Path, text: str) -> bool:
+    # Compared as bytes: a file the user re-saved in another encoding is rewritten rather
+    # than failing to decode. Kept apart from _write_bytes_if_changed, which copies DATs.
+    data = text.encode("utf-8")
+    if dest.is_file() and dest.read_bytes() == data:
+        return False
+    dest.write_bytes(data)
+    return True
+
+
+def write_publish_folder(folder: Path, record: dict, sources: List[Path], sql: Optional[str]) -> dict:
+    """Make ``folder`` hold this publish: the SQL as ``record['server']`` (none when that is
+    null), ``sources[i]`` copied to ``record['placements'][i]['dat']`` and the record as
+    placements.json. Whatever an earlier publish of the action put there that this one does
+    not (the SQL of another animation, the applied SQL of another animation, DATs at other
+    paths) is removed first; nothing else in the folder is touched — the mix files the
+    model viewer keeps there (``*.mix.json``, ``check.*.mix.json``, ``*.recipe.json``) and
+    this animation's ``.applied.sql`` among them. A file that already holds its bytes is
+    not written again, so a build into a second target copies nothing."""
+    folder = Path(folder)
+    dats: Dict[str, Path] = {}
+    for p, src in zip(record["placements"], sources):
+        dats.setdefault(str(p["dat"]).replace("\\", "/"), Path(src))
+    server = record.get("server")
+    if server and sql is None:
+        raise ValueError(f"{folder}: the record names {server} but no SQL was given for it")
+    keep = {rel.upper() for rel in dats} | {PUBLISH_RECORD.upper()}
+    keep.add(f"{folder.name}_{record['animation']}.applied.sql".upper())
+    if server:
+        keep.add(server.upper())
+    removed: List[str] = []
+    for rel in sorted(_previous_publish_files(folder)):
+        path = folder / rel
+        if rel.upper() in keep or not path.is_file():
+            continue
+        path.unlink()
+        removed.append(rel)
+        _prune_empty_dirs(path.parent, folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    copied = [rel for rel, src in dats.items() if _write_bytes_if_changed(folder / rel, src.read_bytes())]
+    if server:
+        _write_text_if_changed(folder / server, sql + "\n")
+    _write_text_if_changed(folder / PUBLISH_RECORD, json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+    return {"folder": str(folder), "copied": copied, "removed": removed}
 
 
 # ── `xi ability slots` — what every weapon-skill number holds today ─────────────────
@@ -474,7 +669,7 @@ def _ability_owners(root: Path) -> Dict[str, str]:
             continue
         for a in actions:
             res = a.get("result") if isinstance(a, dict) and a.get("type") == "ability" else None
-            if not res or target not in (res.get("targets") or [target]):
+            if not res or res.get("undone") or target not in (res.get("targets") or [target]):
                 continue
             for pl in res.get("placements") or []:
                 if pl.get("dat"):
@@ -570,16 +765,40 @@ def slots_cmd(first: Optional[int], last: Optional[int], only_free: bool, pivot:
 @click.option("--force", is_flag=True, help="Repoint a file id that is already registered.")
 @click.option("--dry-run", is_flag=True, help="Show the plan; write nothing.")
 @click.option("--pivot", is_flag=True, help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
+@click.option("--apply-db", is_flag=True, default=False,
+              help="Database Update: after the DATs are placed, update the server row named after each ability "
+                   "(or insert one cloned from --clone-from). With --dry-run: a read-only preview.")
+@click.option("--db-row", type=int, default=None,
+              help="Confirm, once, the existing row the build found by name (its id). Needs --apply-db.")
+@click.option("--clone-from", default=None,
+              help="Override the donor a new row / menu record / Lua stub clones: an id or a server name "
+                   "(fire, fast_blade). Default: the kind's donor — cure (spell), berserk (ja), fast_blade (ws).")
+@click.option("--server-id", type=int, default=None,
+              help="Server id for an insert / a menu record with no row yet (default: the highest blank one).")
+@click.option("--menu-record", is_flag=True, default=False,
+              help="Client Menu Record: place the client spell/command record at the row's id (ROM/118/114.DAT + "
+                   "names). Finds the row with SELECTs only when a server is configured.")
+@click.option("--menu-name", default=None,
+              help="Name the menu shows (default: the mix name, _ as a space). No control characters or line breaks.")
+@click.option("--lua-stub", is_flag=True, default=False,
+              help="Lua Stub: write the server script for a row this mix created into XI_SERVER_DIR/scripts/actions.")
 def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation: Optional[int],
-                animation_from: Optional[int], subdir: int, force: bool, dry_run: bool, pivot: bool = False):
-    """Publish RECIPE_PATH through `xi dats`: prepare an ability action, then build it.
+                animation_from: Optional[int], subdir: int, force: bool, dry_run: bool, pivot: bool = False,
+                apply_db: bool = False, db_row: Optional[int] = None, clone_from: Optional[str] = None,
+                server_id: Optional[int] = None, menu_record: bool = False, menu_name: Optional[str] = None,
+                lua_stub: bool = False):
+    """Publish RECIPE_PATH (a mix file, *.mix.json or *.recipe.json) through `xi dats`:
+    prepare an ability action, then build it.
 
     \b
     Shorthand for
       xi dats prepare RECIPE --project NAME --type ability --replace
-      xi dats build NAME --only ability.<name> [--pivot]
+      xi dats build NAME --only ability.<name> [--pivot] [--apply-db …]
     The action lands in projects/<NAME>.json beside any gear or mount actions, so the
-    ability is rebuilt, listed and undone with the rest of the project.
+    ability is rebuilt, listed and undone with the rest of the project. The server SQL,
+    a copy of every DAT placed and placements.json land in projects/abilities/<slug>/
+    (<slug>: the recipe name in lowercase, `love` for LOVE). --apply-db, --menu-record
+    and --lua-stub are passed to the build (docs/ability/mixer.md).
     """
     from xi.dats.xi_dats import _slug, build_cmd, prepare_cmd
     recipe = load_recipe(recipe_path)
@@ -589,4 +808,6 @@ def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation:
                ability_kind=kind, animation=animation, animation_from=animation_from, subdir=subdir)
     click.echo()
     ctx.invoke(build_cmd, project=project, only=(f"ability.{_slug(recipe['name'])}",),
-               force=force, dry_run=dry_run, pivot=pivot)
+               force=force, dry_run=dry_run, pivot=pivot,
+               apply_db=apply_db, db_row=db_row, clone_from=clone_from, server_id=server_id,
+               menu_record=menu_record, menu_name=menu_name, lua_stub=lua_stub)

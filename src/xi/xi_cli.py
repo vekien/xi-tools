@@ -595,6 +595,12 @@ server.add_command(server_cmds.db_cmd,     'db')
 server.add_command(server_cmds.status_cmd, 'status')
 server.add_command(server_cmds.npc_snapshot_cmd, 'npc-snapshot')   # bake the offline npc_list fallback
 
+from xi.server import xi_check as server_check
+from xi.server import xi_ws_widen as server_ws_widen
+
+server.add_command(server_check.check_cmd,        'check')      # read-only setup report (xi.server-check.v1)
+server.add_command(server_ws_widen.ws_widen_cmd,  'ws-widen')   # write the weapon-skill 16-bit C++ patch + SQL
+
 
 # ── mv (xi-model-viewer list refresh) ─────────────────────────────────────────
 

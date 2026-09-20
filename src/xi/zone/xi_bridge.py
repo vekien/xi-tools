@@ -3631,6 +3631,12 @@ def _env_status(params: dict) -> dict:
         db_info = resolved_creds()
     except Exception:
         db_info = {}
+    # resolved_creds() says "env" when XI_DB_* sets the login (network.lua is no longer
+    # read). The zone editor's setup wizard only knows "network.lua" / "override" (and
+    # takes anything else for "no server checkout, falling back"), and gates its player
+    # spawn marker on "override" — so hand it the name it knows for "the values you set".
+    if db_info.get("source") == "env":
+        db_info = {**db_info, "source": "override"}
 
     return {
         "ok": True,
@@ -3760,24 +3766,9 @@ def _env_validate(params: dict) -> dict:
     return {"ok": True, "valid": p.exists(), "detail": ""}
 
 
-def _friendly_db_error(exc: Exception) -> str:
-    """Translate pymysql connection failures into something a user can act on.
-
-    MariaDB answers a wrong username/password with ``auth_gssapi_client not
-    configured`` rather than "access denied" (it avoids confirming whether an account
-    exists). Taken at face value that reads like a missing Kerberos dependency, which
-    is exactly the wrong thing to go fix."""
-    msg = str(exc)
-    if "auth_gssapi_client" in msg:
-        return ("Wrong username or password. (MariaDB reports a failed login as an "
-                "'auth_gssapi_client' plugin error rather than access denied.)")
-    if "Access denied" in msg:
-        return "Access denied — check the username and password."
-    if "Unknown database" in msg:
-        return "That database does not exist on the server."
-    if any(s in msg for s in ("Can't connect", "Connection refused", "timed out", "WinError 10061")):
-        return "Could not reach the server — is it running, and are the host and port right?"
-    return msg
+# Moved to xi.server.xi_commands (the ability pass and `xi server check` word
+# connection failures the same way); kept under its old name for this module.
+from xi.server.xi_commands import friendly_db_error as _friendly_db_error  # noqa: E402
 
 
 def _env_test_db(params: dict) -> dict:
@@ -3785,7 +3776,8 @@ def _env_test_db(params: dict) -> dict:
 
     Called by the setup wizard before saving, so a bad credential surfaces here as a
     clear message instead of later as silently-missing NPCs. Any field left blank
-    falls through the normal resolution chain (network.lua, then defaults)."""
+    falls through the normal resolution chain (XI_DB_* from xi-tools' .env, then the
+    defaults); the server's network.lua is not read."""
     try:
         import pymysql
     except ImportError:
@@ -4841,7 +4833,8 @@ def _replace_collision(params: dict) -> dict:
 def _db_connect(params: dict):
     """Resolve credentials and return an open pymysql connection.
 
-    Uses the same resolution order as the CLI (params → network.lua → defaults).
+    Uses the same resolution order as the CLI (params → XI_DB_* from xi-tools' .env →
+    defaults).
     Raises ``RuntimeError`` instead of calling ``sys.exit`` so the bridge handler's
     ``except Exception`` can surface the error cleanly to the frontend."""
     try:

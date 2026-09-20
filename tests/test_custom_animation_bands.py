@@ -86,12 +86,14 @@ def test_a_band_never_overlaps_the_retail_ids_it_replaces(bands):
 
 
 def test_weapon_skill_band_groups_ids_by_number(bands):
+    # The race term is 1-based: the client indexes the band by RaceGenderConfig 1..8 (Hume
+    # male is 1) and cexislots feeds that in, so race 0 (Hume male) sits at base + 1.
     a = mt.weapon_skill_slot({}, 0, 272)
-    assert (a.bank, a.file_id, a.companion_a, a.companion_b) == ("custom", 431_344, 431_352, 431_360)
+    assert (a.bank, a.file_id, a.companion_a, a.companion_b) == ("custom", 431_345, 431_353, 431_361)
     # every race of one number sits together, so a number costs 24 ids
     last_race = mt.weapon_skill_slot({}, 7, 272)
-    assert last_race.file_id == 431_344 + 7
-    assert mt.weapon_skill_slot({}, 0, 273).file_id == 431_344 + 24
+    assert last_race.file_id == 431_344 + 8            # race 7 -> base + (7 + 1)
+    assert mt.weapon_skill_slot({}, 0, 273).file_id == 431_344 + 24 + 1
 
 
 def test_weapon_skill_band_size_can_grow_without_moving_anything(bands, monkeypatch):

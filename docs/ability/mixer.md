@@ -5,16 +5,19 @@ effects of another, the sound of a third. The xi-model-viewer's **Ability Mixer*
 is the UI; these are the commands it drives, usable on their own.
 
 ```bash
-uv run xi ability recipe ws:1:HumeMale --out fb.json     # starter recipe from one source
-uv run xi ability compose recipe.json [--out DIR] [--race Mithra] [--json]
-uv run xi ability publish recipe.json [--project NAME] [--kind ja|spell|ws] [--animation N | --animation-from N] [--subdir 20] [--dry-run]
+uv run xi ability recipe ws:1:HumeMale --out fb.mix.json # starter recipe from one source
+uv run xi ability compose LOVE.mix.json [--out DIR] [--race Mithra] [--json]
+uv run xi ability publish LOVE.mix.json [--project NAME] [--kind ja|spell|ws] [--animation N | --animation-from N] [--subdir 20] [--dry-run]
+                          [--apply-db [--db-row ID]] [--clone-from X] [--server-id ID] [--menu-record [--menu-name T]] [--lua-stub]
 uv run xi ability slots [--pivot] [--free] [--json]     # the weapon-skill numbers and what holds each
 uv run xi mv update --only abilities                      # the viewer's pick list (mv/lists/abilities.json)
 ```
 
 A recipe is validated against [`schema/ability_recipe.json`](../../schema/ability_recipe.json)
 (`"schema": "xi.ability.v1"`); `compose`, `publish` and `dats prepare` refuse one that
-does not match, naming the field.
+does not match, naming the field. Its file is a **mix file**, `<Name>.mix.json` (formerly
+`<Name>.recipe.json`; every command, and the `dats new` wizard, still reads that name).
+What names the ability is the recipe's `name`, never the file name.
 
 ## Recipe
 
@@ -528,26 +531,27 @@ project manifest beside any gear, mount or entity actions, is rebuilt from Git b
 uv run xi dats new
 
 # 2. straight arguments — every parameter has a default the build fills in
-uv run xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace \
+uv run xi dats prepare exports/ability/mixer/tiger_fury.mix.json --project tiger_fury --replace \
     [--kind ja|spell|ws] [--animation N | --animation-from N] [--subdir 20]
 uv run xi dats build tiger_fury --dry-run          # the plan: slot, file ids, server SQL
 uv run xi dats build tiger_fury                    # add --pivot to build into FFXI_PIVOT_DIR
 
 # 3. the shortcut — exactly 2., in one command
-uv run xi ability publish recipe.json [--project NAME] [--dry-run] [--pivot]
+uv run xi ability publish tiger_fury.mix.json [--project NAME] [--dry-run] [--pivot]
 ```
 
-`prepare` copies the recipe to `projects/resources/ability/<name>.recipe.json` (one whose
+`prepare` copies the mix to `projects/resources/ability/<slug>.mix.json` (one whose
 `textures` name PNG files is stored with each PNG inlined as a data URI, so the copy
-rebuilds on its own) and writes:
+rebuilds on its own; a manifest that still names an older `<slug>.recipe.json` copy builds
+from it, and a re-prepare leaves that file where it is) and writes:
 
 ```jsonc
 {
   "id": "ability.tiger_fury", "type": "ability",
   "kind": "auto",                              // auto = from the recipe (table below)
   "target": {"animation": "auto", "subdir": 20},
-  "resources": {"recipe": "ability/tiger_fury.recipe.json"},
-  "server": {"emit": true}                     // projects/server/abilities/<name>_<animation>.sql
+  "resources": {"recipe": "ability/tiger_fury.mix.json"},
+  "server": {"emit": true}                     // <slug>_<animation>.sql in the publish folder
 }
 ```
 
@@ -626,8 +630,8 @@ for every file it attaches before `main` runs), so the ids are filled the way re
 every empty slot.
 
 `dats build --dry-run` prints the plan: kind, animation number, every file id with its
-current occupant, and the SQL to add. The mixer shows this plan before it asks to
-confirm. **Restart the client** after publishing — it caches the file tables at
+current occupant, the [publish folder](#the-publish-folder) it would write and the SQL to
+add. The mixer shows this plan before it asks to confirm. **Restart the client** after publishing — it caches the file tables at
 startup.
 
 The client accepts custom numbers of all three kinds from the ROM10 overlay: job abilities
@@ -639,6 +643,230 @@ takes the client's *face target*, which is not sent for yourself, and ignore the
 line the command prints (it is hardcoded). Publish with the client closed, or restart it
 afterwards: a running client holds the overlay's file tables in memory and can write them
 back over a registration made while it runs.
+
+### The publish folder
+
+A publish (not a dry run) also leaves everything it made in one folder,
+`projects/abilities/<slug>/` under the folder `xi` runs in — `<slug>` is the action
+id's last part, the recipe name in lowercase with anything but a–z and 0–9 made `_`
+(`ability.love` → `love`):
+
+```text
+projects/abilities/love/
+  LOVE.mix.json          the mix the model viewer published (check.LOVE.mix.json: its last Check)
+  love_300.sql           the server SQL the build printed
+  love_300.applied.sql   what ran against the database (--apply-db only)
+  placements.json        what each DAT copy is (schema/ability_publish.json)
+  ROM10/28/2.DAT         a copy of every DAT the publish placed, at its ROM path:
+  ROM10/28/0.DAT …         the bytes written to the target, companions included
+```
+
+The ROM paths let the folder be dropped into a DAT overlay or a release package as it is.
+Copying the DATs does not register them: `placements.json` lists what to register —
+`{schema, id, name, kind, animation, placements: [{race, role, file_id, dat}], server}`,
+the same placements the action records in `result`, and `server` the SQL's file name
+(null when the action's `server.emit` is false, which writes no SQL).
+
+The folder holds the latest publish only. Before writing, a publish removes what the
+previous publish of the action put there and this one does not: the DATs and SQL its
+`placements.json` lists, any `<slug>_<number>.sql` and `<slug>_<number>.applied.sql` of
+another animation, and the folders that leaves empty. Anything else in the folder (notes, a
+zip, the mix files `*.mix.json` / `check.*.mix.json` / `*.recipe.json`) is left alone. A
+copy that already holds the right bytes is not written again, so building into a second
+target copies nothing twice. `dats undo` clears the target, not this folder. Earlier
+versions wrote this folder as `projects/server/abilities/<slug>/` (and before that the SQL
+straight into `projects/server/abilities/`); those are not moved or read — delete them once
+the mix is republished.
+
+The folder is written after the DATs are placed and registered, so one that cannot be
+written (a read-only copy, a file in use) does not fail the build: it finishes, records its
+result and warns `publish folder not updated`. An action id whose last part is not a plain
+folder name (a–z, 0–9, `_`, `-`; a hand-typed `--id` can be anything) is refused before
+anything is placed.
+
+## Database Update, Client Menu Record, Lua Stub
+
+Publishing places the DATs: **how the ability looks**. Three more steps of the same build do
+the server side, each opt-in (the model viewer's Manage switches, **per mix** and off again
+after an import, rename or duplicate):
+
+```bash
+uv run xi ability publish LOVE.mix.json --kind spell --apply-db --clone-from fire --menu-record --lua-stub [--dry-run]
+uv run xi dats build LOVE --apply-db --clone-from fire --menu-record --lua-stub          # the same, on the action
+```
+
+| Switch | Option | What it does |
+|---|---|---|
+| Database Update | `--apply-db` (`--db-row ID` to confirm) | points the server row named after the mix at the new animation, or, when there is none, inserts one cloned from the kind's **default donor** (spell → `cure`, ja → `berserk`, ws → `fast_blade`) |
+| Client Menu Record | `--menu-record` (`--menu-name TEXT`) | the client's menu entry — the spell / command record and its names — at the same id as that row, so players can use it |
+| Lua Stub | `--lua-stub` | the server script for a row this mix created: **what the ability does**, handed to the donor's script |
+| Server id | `--server-id ID` | the id for a new row and its menu record (default: the highest that fits, below) |
+
+The donor a new row/record/stub clones is the kind's default (`DEFAULT_DONOR` in
+`xi.server.xi_db_apply`): `cure`, `berserk`, `fast_blade`. It is a working row that carries
+the animation so the new one plays and can be used; a developer edits its real stats
+(MP, cast time, jobs, damage, …) in the database afterwards. `--clone-from X` (an id, or a
+server name: `fire`, `Fast Blade`, `fast_blade`) overrides it; the model viewer has no field
+for it. Once this mix has created a row, that row's donor is kept.
+
+**Where the server is.** xi-tools' `.env`: `XI_DB_HOST`, `XI_DB_PORT`, `XI_DB_USER`,
+`XI_DB_PASSWORD`, `XI_DB_NAME`, and `XI_SERVER_DIR` (the LandSandBoat checkout the stub is
+written into). The model viewer's **Settings › Local Server** edits exactly those lines of
+that `.env`; the server's `settings/network.lua` is never read. With none of `XI_DB_HOST`,
+`XI_DB_USER` or `XI_DB_NAME` set there is no database: `db: skip — no database configured`.
+Credentials never go on the command line, and no output, result or file holds the password
+(a result names the server `database@host:port`). `xi server check` reports the setup.
+
+**What it prints.** One line per step, which the viewer reads, then the warnings:
+
+```text
+     db: insert spell_list #1023 'love' like #144 'fire' animation 1100 (xidb@127.0.0.1:3306)
+     menu: place spell 1023 'LOVE' like spell 144, menu index 973, in pivot (replaces the blank placeholder)
+     lua: write scripts/actions/spells/black/love.lua (calls black/fire #144 at run time)
+     ⚠ db: learn it in game with !addspell 1023
+     ⚠ db: restart the map server (xi_map): it reads spell_list only at startup
+     ⚠ menu: restart the game client to load it (114.DAT is read at start-up)
+```
+
+The ops are `db:` update, insert, unchanged, needs-confirm; `menu:` place, unchanged;
+`lua:` write, rewrite, unchanged, kept — and, for any step, `skip`, `refused` or `error`,
+whose text after ` — ` is the reason. A dry run (Check) puts `would` after the step
+(`db: would insert …`) and only reads: SELECTs, `information_schema` and files. **None of
+it fails the publish**: the exit code is 0 whenever the DATs were placed, and a real build
+that wrote a row ends with `database: 1 row written (spell_list #1023) — restart the map
+server (xi_map) to load it`.
+
+### Database Update
+
+- **The row.** `spell_list`, `abilities` or `weapon_skills` by kind, the row whose `name` is
+  the mix name in lower case. Only `animation` is written — never `animationTime` or `name`
+  — by one statement keyed by primary key and guarded by the value just read; a row that
+  changed in between is `error — the row changed while publishing; publish again`.
+- **Confirm once.** A row this mix created, or one it was confirmed for, is *ours*: later
+  publishes update it without asking. Any other row with the mix's name is `needs-confirm`
+  and nothing changes until you confirm it — `--db-row <id>` (Manage › **Confirm**) — which
+  is recorded (`result.db.confirmed`), so it is asked once.
+- **The donor.** A mix with no server row inserts one cloned from the kind's default donor
+  (`cure` / `berserk` / `fast_blade`), or from `--clone-from` when given. The new row copies
+  every column of the donor's — jobs, group, MP, cast time, `animationTime`, recast… — except
+  the id, name and animation (`content_tag` is NULL), so it plays and works until a developer
+  edits its stats. A created row keeps its donor for good: it is also the donor of the menu
+  record and the stub, and a different `--clone-from` later only warns (undo first to clone it
+  from something else). A created row that has since vanished (a dbtool re-import) is
+  re-inserted at its id from the same donor, with a warning. If the default donor is missing
+  from the database it is refused (name one with `--clone-from`); donors that can't be cloned
+  are refused too: a spell of group 0 (no script folder), blue magic or a trust; a pet or
+  non-player job ability.
+- **The id** — one number for the row and its menu record: blank in the client (a retail
+  placeholder, below), free on the server (no row, and for a spell ≥ 896 no trust pool at
+  id + 5000) and used by no other project in `projects/`, the highest first. Server id
+  (`--server-id`) picks one under the same guards. The server takes spells 1–1023, job
+  abilities 16–511 (not 55 or the pet abilities 353–355) and weapon skills 1–255, and the
+  client has blank rows at only **6 spells** (1023, 1022, 1021, 1020, 1001, 1000), **116 job
+  abilities** (511 down to 396) and **12 weapon skills** (237, 236, 223, 207, 206, 205, 143,
+  127, 111, 95, 79, 63) — the same in the install and in CatsEyeXI's pivot overlay.
+- **Type.** While a mix still owns a row, a menu record or a stub made under another Type
+  (spell / job ability / weapon skill), every step is refused: `refused — this mix created
+  spell_list #1023 when its Type was spell; set the Type back, or undo it first (xi dats undo
+  LOVE --apply-db)`.
+- **Weapon skills above 255** need the server widened first (below); until then such a
+  publish refuses the database step. 0–255 fits the stock column and is published like any
+  other kind.
+- **Afterwards.** Restart the map server: it reads these tables only at startup. A new spell
+  is learned with `!addspell <id>`. A cloned job ability goes live for every job and level
+  its donor is for, and shares the donor's recast timer on the server and in the client.
+- **What ran** goes into the publish folder as `<slug>_<animation>.applied.sql`: the
+  statements, safe to run again on another server (keyed by primary key; an insert is a
+  `DELETE` of that id and name, then the `INSERT … SELECT`). A dbtool re-import of the stock
+  SQL drops inserted rows; the next publish puts a created one back, or run this file.
+
+### Client Menu Record
+
+- **The record.** Spell N is `mgc_[N]`, job ability A is `comm[A + 512]`, weapon skill W is
+  `comm[W]` in `ROM/118/114.DAT`, plus its EN and JP name (help is `.`). It is a copy of the
+  donor's record (MP, cast time, levels, icons, targets) with the id changed. The name is
+  **Menu name** (`--menu-name`), else the mix name with `_` as a space: a `'` is fine, a
+  control character or a line break is refused, and it holds 99 bytes for a spell, 39 for a
+  command (a Japanese character counts 2). A spell takes the next free menu index, which
+  must be below 1024 (what the game lists without cexislots), and keeps it on rebuilds.
+- **Only a blank row.** It writes over a retail *placeholder* — both names `.` and the band's
+  canonical reserved shape — or over the record it wrote itself, never a named row, whatever
+  `--force` says (that flag is for the animation slot), and never past the table's end.
+  Every build re-checks the row: one a retail update has taken since is refused and left
+  alone (an id no server row is bound to yet is simply re-picked).
+- **Which client.** It writes into the root being built: the install, or the pivot overlay
+  with `--pivot` (*Use Pivot Folder*). A client with PIVOT on reads the overlay's own
+  `114.DAT`, so a build without `--pivot` warns when the overlay has one.
+- **Without Database Update** it still finds the row named after the mix, with SELECTs only,
+  when a database is configured, and puts the record at that row's id (warning when the row
+  is not this mix's; nothing on the server changes). With no database the id is
+  **provisional** (`· provisional — database not checked`): the next publish with Database
+  Update keeps it if it is free. A weapon-skill record is placed only with Database Update
+  (a `weapon_skills` row at the same id).
+- **Afterwards.** Restart the game client (114.DAT is read at start-up). `dats package` and
+  `dats release` ship `114.DAT` and the name tables with the ability.
+
+### Lua Stub
+
+- The server looks an action's behaviour up by the row's name —
+  `scripts/actions/spells/<group folder>/<name>.lua`, `…/abilities/<name>.lua`,
+  `…/weaponskills/<name>.lua` — so a new row has none and cannot be used. The stub hands
+  every call to the donor's script at run time: it is **what the ability does**, copied from
+  the donor (the default `cure` / `berserk` / `fast_blade`, or `--clone-from`); the published
+  DAT is only **how it looks** (and the cast's wind-up belongs to the spell's type, not either).
+- It is written only for a row this mix created (Database Update on), into
+  `XI_SERVER_DIR`, in place (the server reloads a changed script; restart it for a new
+  row), and never creates a folder. Its header carries the line `-- xi: mixer lua stub
+  (xi dats build --lua-stub); delete this line to keep your own edits` and a hash of the
+  body: a stub edited by hand is `kept`, never overwritten; delete that line to own it, or
+  delete the file to get it regenerated. A file of that name xi didn't write, a script of
+  the same name elsewhere in the kind, a name a server module uses, a loader folder name
+  (`black`, `pets`…), a donor with no script of its own, and corsair rolls / dancer steps
+  (which look their numbers up by ability id) are refused.
+- A spell stub also lends the new spell id the donor's rows in the spell helpers' private
+  per-spell tables (the damage tables and the like, keyed by spell id — without them most
+  cloned black, white, song, ninjutsu and geomancy spells error when cast). **This has not
+  been tried in game yet**, and every spell stub write says so: cast it once; "attempt to
+  index a nil value" in the map server log means it failed — then clone a self-contained
+  spell (cure, raise, meteor or a summon).
+
+### Weapon skills above 255 (`xi server ws-widen`)
+
+Custom weapon skills use animation numbers 264–527 (the cexislots plugin reads 272–527).
+The server can't carry those yet: `weapon_skills.animation` only stores 0–255, and xi_map
+reads it as an 8-bit number in four places in its C++. So a published weapon skill would
+play its number minus 256 — 300 plays as 44, a retail motion. The patch makes those four
+spots 16-bit and the SQL widens the column; retail weapon skills (all below 256) are
+unaffected.
+
+```bash
+uv run xi server ws-widen [--out DIR] [--print] [--json]
+```
+
+writes `900-xitools-WsAnimation16.patch` (diffed from your own checkout), the idempotent
+`ws_animation_16bit.sql` and a README into `projects/patches/ws_animation_16bit/`: apply
+the patch to your server checkout (`git -C <server> apply …`), run the SQL, rebuild xi_map
+and restart it. It only reads the server's source — never edits it, never touches the
+database, never builds. The model viewer's **Settings › Local Server › Weapon skills › Get
+the C++ patch** runs it and opens the folder. A weapon skill above 255 then publishes to the
+database only when the column is wide and xi_map was rebuilt with 16-bit reads (read from
+`xi_map.pdb`; with no PDB it goes ahead with a warning); `xi server check` shows each part.
+
+### Undo, and what is recorded
+
+Each step records what it did on the action — `result.db` (the row, whether this mix
+created or confirmed it, its donor, the animation it had before), `result.menu` (the id,
+and per root the record written and what it replaced) and `result.lua` (the path and a
+hash) — see [`schema/ability.json`](../../schema/ability.json). Every later build carries
+them over, with or without the switches. `xi dats undo <project>` puts back the placeholder
+in each root (only while the row still holds the record written there);
+`--apply-db` also deletes a created row, or puts the old animation back, and deletes the
+stub while it is unedited (that needs only `XI_SERVER_DIR`). Without `--apply-db` the undo
+prints the revert SQL and the stub path and leaves them, and keeps the manifest — its cleared
+actions marked `undone` — until an `undo --apply-db` removes them. A row that is already
+gone (a dbtool re-import) or already holds its old animation counts as done; only a row
+that still holds other values is left. A menu record that can't be put back (the game has
+`114.DAT` open) keeps the manifest too, and the next undo tries it again.
 
 ## Catalog (the viewer's pick list)
 
@@ -726,8 +954,14 @@ of the previewed source with *solo* (play one generator alone) and *take*. **Pla
 composes for the actor's race under `exports/ability/mixer/` and plays it; **Publish**
 prepares the `xi dats` action for the recipe, shows `dats build --dry-run`'s plan, then
 builds it. The Manage panel's *Use Pivot Folder* switch adds `--pivot` to that build and
-to its Check, so the mix goes into `FFXI_PIVOT_DIR` instead of the game folder. Recipes
-save next to the composed DATs.
+to its Check, so the mix goes into `FFXI_PIVOT_DIR` instead of the game folder. Its
+*Folder* button opens the mix's [publish folder](#the-publish-folder), or
+`projects\abilities` when the mix has not been published yet. A Publish writes the mix it
+prepares there as `<Name>.mix.json`, a Check as `check.<Name>.mix.json`; saved mixes are
+`exports\ability\mixer\<Name>.mix.json`. Manage's *Database Update*, *Client Menu
+Record* and *Lua Stub* switches, with *Server id* and *Menu name*, are the
+[server steps](#database-update-client-menu-record-lua-stub); *Settings › Local Server*
+edits the `.env` they read.
 
 Weapon-skill motion carries its own clips; the viewer resolves a routine's clip refs
 against the loaded character, so picking a `ws:` motion source also sets the

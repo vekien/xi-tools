@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/server_check.json",
+  "title": "xi server check report",
+  "description": "What `xi server check --json` prints: the local LandSandBoat setup as xi-tools sees it, read-only. Credentials come from XI_DB_* in xi-tools' .env only (the server's settings/network.lua is never read), and the password appears nowhere in the report. `--no-db` makes no connection attempt (connected, version, sqlMode, tables and weaponSkills.column are null); `--no-binary` skips the xi_map.pdb probe and the process check (weaponSkills.binary.method is \"skipped\"). The command always exits 0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "ok", "configured", "source", "overriddenFields", "fieldSources", "serverDir",
+               "serverDirValid", "host", "port", "user", "database", "connected", "version", "sqlMode",
+               "tables", "weaponSkills", "error"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.server-check.v1"},
+    "ok": {"type": "boolean", "description": "configured, not known to be unreachable, every probed table present and no error. With --no-db: configured."},
+    "configured": {"type": "boolean", "description": "At least one of XI_DB_HOST, XI_DB_USER or XI_DB_NAME is set (non-blank). Otherwise every ability db: step is skipped."},
+    "source": {"type": "string", "enum": ["env", "default"], "description": "env when any XI_DB_* key is set, else default."},
+    "overriddenFields": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["database", "host", "password", "port", "user"]},
+      "description": "The credential fields an XI_DB_* key sets (sorted). Names only, never values."
+    },
+    "fieldSources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "user", "password", "database"],
+      "description": "Where each field's effective value comes from: env (its XI_DB_* key is set, from xi-tools' .env or the environment) or default. The password's source is given; its value never is.",
+      "properties": {
+        "host": {"$ref": "#/$defs/fieldSource"},
+        "port": {"$ref": "#/$defs/fieldSource"},
+        "user": {"$ref": "#/$defs/fieldSource"},
+        "password": {"$ref": "#/$defs/fieldSource"},
+        "database": {"$ref": "#/$defs/fieldSource"}
+      }
+    },
+    "serverDir": {"type": ["string", "null"], "description": "XI_SERVER_DIR, or null."},
+    "serverDirValid": {"type": "boolean", "description": "The folder exists and holds scripts/actions."},
+    "host": {"type": "string"},
+    "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+    "user": {"type": "string"},
+    "database": {"type": "string"},
+    "connected": {"type": ["boolean", "null"], "description": "null when no connection was attempted (--no-db, or not configured)."},
+    "version": {"type": ["string", "null"], "description": "SELECT VERSION()."},
+    "sqlMode": {"type": ["string", "null"], "description": "SELECT @@SESSION.sql_mode."},
+    "tables": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["spell_list", "abilities", "weapon_skills"],
+      "properties": {
+        "spell_list": {"$ref": "#/$defs/table"},
+        "abilities": {"$ref": "#/$defs/table"},
+        "weapon_skills": {"$ref": "#/$defs/table"}
+      }
+    },
+    "weaponSkills": {"$ref": "#/$defs/wsState"},
+    "error": {"type": ["string", "null"], "description": "The friendly connection error, or null."}
+  },
+  "$defs": {
+    "fieldSource": {"type": "string", "enum": ["env", "default"]},
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "animation"],
+      "properties": {
+        "present": {"type": "boolean"},
+        "animation": {"type": ["string", "null"], "description": "The animation column's COLUMN_TYPE."}
+      }
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "line", "state", "current", "before", "after"],
+      "description": "One of the four 8-bit spots in xi_map's source.",
+      "properties": {
+        "file": {"type": "string", "enum": ["src/map/utils/battleutils.cpp", "src/map/weapon_skill.h", "src/map/weapon_skill.cpp"]},
+        "line": {"type": ["integer", "null"], "minimum": 1},
+        "state": {"type": "string", "enum": ["stock", "wide", "unknown"]},
+        "current": {"type": ["string", "null"], "description": "The line as it is now; null when not found."},
+        "before": {"type": "string", "description": "The line's stock (8-bit) form."},
+        "after": {"type": "string", "description": "The line's widened (16-bit) form."}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "edits"],
+      "properties": {
+        "state": {"type": "string", "enum": ["stock", "widened", "partial", "unrecognised", "no-server-dir"]},
+        "edits": {"type": "array", "items": {"$ref": "#/$defs/edit"}, "minItems": 4, "maxItems": 4}
+      }
+    },
+    "binary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exe", "exeTime", "pdb", "pdbMatchesExe", "memberType", "method", "rebuilt"],
+      "properties": {
+        "exe": {"type": ["string", "null"]},
+        "exeTime": {"type": ["string", "null"], "description": "Local time, YYYY-MM-DDTHH:MM:SS."},
+        "pdb": {"type": ["string", "null"]},
+        "pdbMatchesExe": {"type": ["boolean", "null"], "description": "Their mtimes are within 60 s."},
+        "memberType": {"type": ["string", "null"], "enum": ["uint8", "uint16", null], "description": "m_AnimationId's type as the PDB records it."},
+        "method": {"type": "string", "enum": ["pdb", "mtime", "none", "skipped"]},
+        "rebuilt": {"type": ["boolean", "null"], "description": "pdb: memberType is uint16. mtime: with the source widened, the exe is newer than the three sources; with it stock, false. null when unknowable."}
+      }
+    },
+    "wsState": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["column", "columnWide", "source", "binary", "process", "buildCommand", "ready", "next"],
+      "description": "Whether a weapon skill can carry an animation above 255: the column, xi_map's source and the binary.",
+      "properties": {
+        "column": {"type": ["string", "null"], "description": "weapon_skills.animation's COLUMN_TYPE; null when the database wasn't probed."},
+        "columnWide": {"type": ["boolean", "null"], "description": "Its DATA_TYPE is smallint, mediumint, int or bigint; null when not probed."},
+        "source": {"$ref": "#/$defs/source"},
+        "binary": {"$ref": "#/$defs/binary"},
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["running"],
+          "properties": {"running": {"type": ["boolean", "null"], "description": "xi_map.exe is running (tasklist); null when unknown or skipped."}}
+        },
+        "buildCommand": {"type": ["string", "null"], "description": "cmake --build <dir>/build/<cfg> --target xi_map, from the first build/*/CMakeCache.txt."},
+        "ready": {"type": "boolean", "description": "columnWide, source widened and binary.rebuilt all true."},
+        "next": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {"type": "string", "enum": ["patch", "alter", "rebuild", "none"]},
+          "description": "The first thing left to do: patch (the source isn't widened: xi server ws-widen writes the patch), alter (the column is known to be narrow: run its SQL), rebuild (xi_map still reads 8 bits), none."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.server-check.v1",
+      "ok": true,
+      "configured": true,
+      "source": "env",
+      "overriddenFields": ["database", "host", "password", "port", "user"],
+      "fieldSources": {"host": "env", "port": "env", "user": "env", "password": "env", "database": "env"},
+      "serverDir": "D:\\cexi-server\\catseyexi",
+      "serverDirValid": true,
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "xi",
+      "database": "xidb",
+      "connected": true,
+      "version": "10.11.6-MariaDB",
+      "sqlMode": "STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION",
+      "tables": {
+        "spell_list": {"present": true, "animation": "smallint(5) unsigned"},
+        "abilities": {"present": true, "animation": "smallint(5) unsigned"},
+        "weapon_skills": {"present": true, "animation": "tinyint(3) unsigned"}
+      },
+      "weaponSkills": {
+        "column": "tinyint(3) unsigned",
+        "columnWide": false,
+        "source": {
+          "state": "stock",
+          "edits": [
+            {"file": "src/map/utils/battleutils.cpp", "line": 187, "state": "stock",
+             "current": "        PWeaponSkill->setAnimationId(rset->get<uint8>(\"animation\"));",
+             "before": "PWeaponSkill->setAnimationId(rset->get<uint8>(\"animation\"));",
+             "after": "PWeaponSkill->setAnimationId(rset->get<uint16>(\"animation\"));"},
+            {"file": "src/map/weapon_skill.h", "line": 64, "state": "stock",
+             "current": "    void setAnimationId(uint8 id);",
+             "before": "void setAnimationId(uint8 id);", "after": "void setAnimationId(uint16 id);"},
+            {"file": "src/map/weapon_skill.h", "line": 82, "state": "stock",
+             "current": "    uint8                          m_AnimationId;",
+             "before": "uint8                          m_AnimationId;", "after": "uint16                         m_AnimationId;"},
+            {"file": "src/map/weapon_skill.cpp", "line": 114, "state": "stock",
+             "current": "void CWeaponSkill::setAnimationId(const uint8 id)",
+             "before": "void CWeaponSkill::setAnimationId(const uint8 id)", "after": "void CWeaponSkill::setAnimationId(const uint16 id)"}
+          ]
+        },
+        "binary": {"exe": "xi_map.exe", "exeTime": "2026-08-12T21:13:27", "pdb": "xi_map.pdb", "pdbMatchesExe": true,
+                   "memberType": "uint8", "method": "pdb", "rebuilt": false},
+        "process": {"running": true},
+        "buildCommand": "cmake --build D:\\cexi-server\\catseyexi\\build\\x64-Release --target xi_map",
+        "ready": false,
+        "next": ["patch"]
+      },
+      "error": null
+    }
+  ]
+}
