@@ -19,6 +19,11 @@ does not match, naming the field. Its file is a **mix file**, `<Name>.mix.json` 
 `<Name>.recipe.json`; every command, and the `dats new` wizard, still reads that name).
 What names the ability is the recipe's `name`, never the file name.
 
+> **A published action plays but looks wrong in game?** See
+> [troubleshooting.md](troubleshooting.md): the layers, the recurring gotchas
+> (custom-band race is 1-based, per-race joints, waist → companion, emote weapon
+> stow), and why "looks right in the mixer preview" is not "plays right in game".
+
 ## Recipe
 
 ```jsonc
@@ -150,9 +155,20 @@ hf_l/      race root: the race's tag, _, the effect folder's first character (lo
 - The tags are retail's: `hm` `hf` `em` `ef` `tr` `mt` `gl`. Both Tarutaru get `tr`, since
   retail loads one file for the two. A `dir` that starts with neither a letter nor a digit
   gives a root ending `_0`.
-- An emote's waist part (`bow2`) stays in the body's clip folder. Retail keeps a weapon
-  skill's waist clips in its two companion DATs, but a wildcard ref such as `bow?` finds
-  them in any file loaded for the skill, and the body is always one of them.
+- An emote's waist part (`bow2`, part 2) goes to the skill's **two companion DATs**, not the
+  body, exactly as retail lays a weapon skill out — the client reads a weapon skill's waist
+  only from the companion, so a waist left in the body froze the mid-body and tore the model.
+  Parts 0/1 stay in the body's clip folder; a wildcard ref such as `bow?` resolves each part
+  across the body and the companion the client loads alongside it. A motion with no waist
+  sibling falls back to a placeholder companion; a weapon-skill motion copies the source
+  slot's own companions.
+- An emote (or dance) never moves the **weapon hand** — the grip re-parents onto the
+  skeleton's right-hand joint reference when the weapon is drawn, and an emote is animated
+  for an empty hand — so a drawn weapon would hang frozen while the arms move. A weapon skill
+  built from an emote or dance therefore gets two `0x75` ShowHideWeapon tags at the front of
+  `main` (verbatim from `ROM/0/0.DAT`'s `hwmg`, the pair a spell cast runs) that stow main and
+  sub while it plays; the idle that resumes when the skill ends shows them again. The viewer's
+  mixer preview already hides the weapon for an emote motion, so the two now match.
 - The folder names are cosmetic. The client finds `main`, clips and weapon traces by type
   and name across every file loaded for the skill, and a routine's own lookups widen from
   its folder to the root (PS2 decompile: `ReverseFindRes`, `YmResourceFile::FindResource`),

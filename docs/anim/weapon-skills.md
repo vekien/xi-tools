@@ -138,6 +138,34 @@ all races, and the model viewer's base list, which labels `ROM/204/17`
 old guess with no better provenance. Both labels are unverified as a retail
 semantic join.
 
+### The custom band (cexislots) and its 1-based race term
+
+Above both retail banks sits a **custom band** the `cexislots` plugin adds so
+weapon-skill numbers past retail's range resolve to published DATs (default
+first number 272, base file id 431344; both configurable, `FX_WS_BAND_*` in
+`xi_config`). Its ids are flat, grouped by number so raising the reserved count
+moves nothing already published:
+
+```text
+file_id = WS_BASE + (number - FX_WS_BAND_FIRST) * 24 + block * 8 + race
+          block 0 = body, 1 = companion A (body + 8), 2 = companion B (body + 16)
+          24 ids per number: 8 body, 8 companion A, 8 companion B
+```
+
+**`race` is 1-based** — the client's `RaceGenderConfig` number 1..8 (Hume male
+is 1, Galka 8), the same index the retail loader rejects at 9 and above. The
+retail banks hide this behind a table pointer that is pre-offset so `table[1]`
+is the first race; the flat custom arithmetic adds the number straight, so the
+placement must use `ri + 1` (`weapon_skill_slot` in `xi_motion_tables.py`).
+`cexislots::fxWeaponSkillBank` reads the client's register directly and is
+already correct — so a mismatch is fixed on the xi-tools side, not the plugin.
+Placing races 0-based made every race resolve one id too low: a Hume male
+weapon skill opened Hume female's body DAT (432401 instead of 432400) and the
+wrong race's clips on the skeleton stretched the model in game (found
+2026-09-20 from a Process Monitor capture of the client's `ReadFile`, not from
+the DATs, which were each individually correct). Diagnose any "custom WS loads
+wrong / model stretched" report from the file the client **opens**.
+
 ## 3. What the retail DATs reveal
 
 ### `ROM/181/72.DAT` — ability / weapon-skill names
