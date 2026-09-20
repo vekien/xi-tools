@@ -73,7 +73,9 @@ The **first character of `sourceId`** classifies the volume:
 |---|---|---|
 | `'m'` | **sub-area** | building interior; `param` = the **sub-area id** |
 | `'z'` | zone line / entrance | `destId` set ⇒ transition (server-coordinated); `destId` 0 ⇒ entrance marker |
-| `'_'` | door | animated door |
+| `'_'` | door | animated door — `wt_b/door/<id>/open|clos` `0x07` routines; see [doors.md](doors.md) |
+| `'@'` | **lift / elevator** | auto-running platform; the tail s16s are its two floor heights — see [elevators.md](elevators.md) |
+| `'s'` | sound region | |
 | `'f'` | fishing area | |
 
 Collect the distinct non-zero `param`s of the `'m'` entries → the zone's sub-area ids.

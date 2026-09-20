@@ -45,6 +45,10 @@ compatibility alias.
   decryption, the visibility structures).
 - **[subareas.md](subareas.md)** — sub-areas (shop / building interiors): the `0x36` trigger
   volumes, the placeholder file-id link, interior-DAT resolution, and the editor feature.
+- **[elevators.md](elevators.md)** — elevators / lifts: the `'@'` RID record, the two floor
+  heights (`param/256 + record.Y`), paired antiphase motion, and viewer playback.
+- **[doors.md](doors.md)** — doors: the `'_'` RID volume, the `wt_b/door/<rid>/open|clos`
+  `0x07` routines that swing/slide the leaves, and how to drive an open/close-all toggle.
 - **[collision.md](collision.md)** — player-collision mesh (MZB): export, edit, and append new blockers.
 - **[navmesh.md](navmesh.md)** — server navmesh (`.nav`): bake from collision via the bundled
   native Recast/Detour lib, install, and validate. Built lib lives in
