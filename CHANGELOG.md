@@ -8,7 +8,11 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ## Unreleased
 
-[Compare v1.9.0...main](https://github.com/vekien/xi-tools/compare/v1.9.0...main)
+## v1.10.0 — 2026-09-21
+
+[Compare v1.9.0...v1.10.0](https://github.com/vekien/xi-tools/compare/v1.9.0...v1.10.0)
+
+- **Zone docs for elevators and doors** (`docs/zone/elevators.md`, `docs/zone/doors.md`), plus updates to the zone README and subareas notes.
 
 - **Database credentials come from xi-tools' `.env` only.** `XI_DB_HOST`, `XI_DB_PORT`, `XI_DB_USER`, `XI_DB_PASSWORD` and `XI_DB_NAME` (the model viewer's Settings › Local Server and the zone editor's setup both write them) are the one source; a field no key sets uses the default (`127.0.0.1`, `3306`, `root`, an empty password, `xidb`). The server's `settings/network.lua` is no longer read for credentials — the zone editor's setup can still offer it as a pre-fill. `xi server db`, `zone new`'s auto-apply and everything else now log in the same way: `zone new`'s password used to default to `xi` when `XI_DB_PASSWORD` was unset, and now defaults to empty like the rest. The setup report's `source` is now `env` or `default` (it was `override`, `network.lua` or `default`).
 - **`xi server check`** reports the local server setup, read-only: the server folder, where each database field comes from (`env` or `default`; never the password), whether it connects (version, `sql_mode`), the animation column of `spell_list`, `abilities` and `weapon_skills`, and whether weapon skills can carry animations above 255 (xi_map's source, the column, and whether xi_map was rebuilt, read from `xi_map.pdb`). `--no-db` makes no connection attempt, `--no-binary` skips the PDB probe; `--json` prints `xi.server-check.v1` (`schema/server_check.json`) and always exits 0.
