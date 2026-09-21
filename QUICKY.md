@@ -211,6 +211,8 @@ xi zone export ROM/23/95 --with-collision-proxies --with-far-lod
 xi zone export ROM/1/41 --no-subareas
 # for Unreal/Unity/Godot: un-mirrored, CCW winding, mirrored tiles baked, terrain welded across UV seams
 xi zone export ROM/0/127 --fbx --right-handed --weld-seams
+# (Test) Alpha Split Mesh: two FBX (opaque base + separated ground decals) so decals stop z-fighting in Unreal
+xi zone export ROM/1/41 --alpha-split-mesh --right-handed
 
 xi object json
 xi object export

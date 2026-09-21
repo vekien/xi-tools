@@ -8,6 +8,10 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ## Unreleased
 
+**Zone export**
+
+- `xi zone export --alpha-split-mesh` — **(Test) Alpha Split Mesh**. Exports two FBX files, `<stem>.fbx` (opaque base) and `<stem>_A.fbx` (the alpha-blend ground decals, separated out), so FFXI's coplanar overlays stop z-fighting when imported into Unreal. Welds opaque and alpha polys apart, auto-smooths both by angle, lifts the decals along the surface normal, and transfers the base normals onto them. `--decal-offset` and `--decal-smooth-angle` tune the lift and smoothing. Implies `--fbx`; pair with `--right-handed`.
+
 ## v1.10.0 — 2026-09-21
 
 [Compare v1.9.0...v1.10.0](https://github.com/vekien/xi-tools/compare/v1.9.0...v1.10.0)

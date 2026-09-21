@@ -24,6 +24,7 @@ from xi.entity.mesh.xi_export import (
     TextureImage,
     compute_min_max_vec3,
     convert_glb_to_fbx,
+    convert_glb_to_fbx_alpha_split,
     pack_indices,
     pack_vec2,
     pack_vec3,
@@ -1293,13 +1294,17 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                 collision_proxies: bool = False, far_lod: bool = False,
                 sub_areas: bool = True, opaque_nonblend: bool = False,
                 weld: bool = True, weld_seams: bool = False,
-                mesh_merge_dp: int = 4) -> List[Path]:
+                mesh_merge_dp: int = 4, alpha_split_mesh: bool = False,
+                decal_offset: float = 0.00001, decal_smooth_angle: float = 45.0) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
     src = source or dat_path
     meshes_by_name, placements, textures = parse_zone(src)
     if not meshes_by_name:
         raise ValueError("No zone mesh (0x2E) geometry found in this DAT")
+    if alpha_split_mesh and objects:
+        raise ValueError("--alpha-split-mesh builds one combined base/decal pair and "
+                         "can't be combined with --objects (per-mesh export).")
     # --weld-seams fuses the UV-seam vertex splits a glTF forces, but keeps the
     # per-corner UVs — only possible in the FBX (Blender merge-by-distance), since
     # a GLB stores one UV per vertex. So it is a merge distance handed to the FBX
@@ -1338,7 +1343,15 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                       skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                       drop_names=drop_names, opaque_nonblend=opaque_nonblend,
                       weld=weld, mesh_merge_dp=mesh_merge_dp)
-    if fbx:
+    if alpha_split_mesh:
+        # "(Test) Alpha Split Mesh": two FBX files (opaque base + separated decals)
+        # for a clean Unreal import — solves the coplanar decal z-fighting.
+        fbx_paths = convert_glb_to_fbx_alpha_split(
+            paths[0], decal_offset=decal_offset, smooth_angle=decal_smooth_angle,
+            weld_dp=mesh_merge_dp)
+        paths.extend(fbx_paths)
+        paths.append(_write_ue5_mat_script(fbx_paths[0]))
+    elif fbx:
         fbx_path = convert_glb_to_fbx(paths[0], merge_distance=merge_distance)
         paths.append(fbx_path)
         paths.append(_write_ue5_mat_script(fbx_path))
@@ -1392,6 +1405,15 @@ def main() -> int:
                              "--mesh-merge-dp")
     parser.add_argument("--mesh-merge-dp", dest="mesh_merge_dp", type=int, default=4,
                         help="Decimal places for the weld position threshold (default 4 = 0.0001 units)")
+    parser.add_argument("--alpha-split-mesh", dest="alpha_split_mesh", action="store_true", default=False,
+                        help="(Test) Alpha Split Mesh — two FBX files (opaque base + separated decals) "
+                             "for Unreal, solving coplanar decal z-fighting. Implies --fbx; pair with "
+                             "--right-handed")
+    parser.add_argument("--decal-offset", dest="decal_offset", type=float, default=0.00001,
+                        help="How far --alpha-split-mesh lifts each decal off the surface, in mesh/FFXI "
+                             "units (~0.001 cm in Unreal after the usual 100x FBX import)")
+    parser.add_argument("--decal-smooth-angle", dest="decal_smooth_angle", type=float, default=45.0,
+                        help="Auto-smooth angle in degrees for --alpha-split-mesh (default 45)")
     args = parser.parse_args()
     dat_path = resolve_dat_path(args.dat_path)
     if args.base:
@@ -1402,13 +1424,16 @@ def main() -> int:
     else:
         source = read_path_for(dat_path)  # the live DAT (edits are in place)
     output_dir = args.output or default_output_dir(dat_path)
-    for path in export_zone(dat_path, output_dir, fbx=args.fbx, skip_sky=args.skip_sky, raw=args.raw,
+    fbx = args.fbx or args.alpha_split_mesh
+    for path in export_zone(dat_path, output_dir, fbx=fbx, skip_sky=args.skip_sky, raw=args.raw,
                             right_handed=args.right_handed, source=source,
                             collision=args.collision, alpha_scale=args.alpha_scale,
                             as_json=args.as_json, no_vfx=args.no_vfx, objects=args.objects,
                             collision_proxies=args.collision_proxies, far_lod=args.far_lod,
                             sub_areas=args.sub_areas, weld=args.weld,
-                            weld_seams=args.weld_seams, mesh_merge_dp=args.mesh_merge_dp):
+                            weld_seams=args.weld_seams, mesh_merge_dp=args.mesh_merge_dp,
+                            alpha_split_mesh=args.alpha_split_mesh, decal_offset=args.decal_offset,
+                            decal_smooth_angle=args.decal_smooth_angle):
         print(f"Exported: {path}")
     return 0
 
@@ -1499,9 +1524,24 @@ import click as _click  # noqa: E402
 @_click.option("--mesh-merge-dp", "mesh_merge_dp", type=int, default=4, show_default=True,
                help="Decimal places for the weld position threshold (4 = 0.0001 unit tolerance). "
                     "Lower it if adjacent polys stay unjoined; raise it to weld only exact matches.")
+@_click.option("--alpha-split-mesh", "alpha_split_mesh", is_flag=True, default=False,
+               help="(Test) Alpha Split Mesh — export TWO FBX files for Unreal: <stem>.fbx (opaque "
+                    "base) and <stem>_A.fbx (the alpha-blend decals, separated out). Welds opaque and "
+                    "alpha polys apart, auto-smooths both by angle, lifts the decals a hair off the "
+                    "surface along its normal and transfers the base normals onto them — so FFXI's "
+                    "coplanar ground overlays stop z-fighting in Unreal. Implies --fbx (needs Blender); "
+                    "pair with --right-handed for a fully engine-ready export.")
+@_click.option("--decal-offset", "decal_offset", type=float, default=0.00001, show_default=True,
+               help="How far --alpha-split-mesh pushes each decal off the surface, in mesh/FFXI units "
+                    "(~0.001 cm in Unreal after the usual 100x FBX import). Raise it if decals still "
+                    "z-fight, especially far from the origin where FBX float precision is coarser.")
+@_click.option("--decal-smooth-angle", "decal_smooth_angle", type=float, default=45.0, show_default=True,
+               help="Auto-smooth angle in degrees for --alpha-split-mesh (45-60 is typical). Edges "
+                    "sharper than this stay hard.")
 def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool, use_base: bool,
         collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool, alpha_scale: float,
-        opaque_nonblend: bool, weld: bool, weld_seams: bool, mesh_merge_dp: int):
+        opaque_nonblend: bool, weld: bool, weld_seams: bool, mesh_merge_dp: int,
+        alpha_split_mesh: bool, decal_offset: float, decal_smooth_angle: float):
     """Export a zone's static mesh + textures to a self-contained .glb.
 
     DAT_PATH may be a ROM-relative spec like ROM/1/41. Zone meshes are decrypted
@@ -1527,6 +1567,11 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
     else:
         source = read_path_for(resolved)  # the live DAT (edits are in place)
     output_dir = output or default_output_dir(resolved)
+    if alpha_split_mesh:
+        fbx = True  # the split runs in Blender and emits FBX, so --fbx is implied
+        if not right_handed:
+            _click.echo("Note: --alpha-split-mesh targets Unreal — add --right-handed too so the "
+                        "terrain isn't mirrored/black-from-above in-engine.")
     try:
         paths = export_zone(resolved, output_dir, fbx=fbx, skip_sky=skip_sky, raw=raw,
                             right_handed=right_handed, source=source,
@@ -1534,7 +1579,9 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
                             no_vfx=no_vfx, objects=objects,
                             collision_proxies=collision_proxies, far_lod=far_lod,
                             sub_areas=sub_areas, opaque_nonblend=opaque_nonblend,
-                            weld=weld, weld_seams=weld_seams, mesh_merge_dp=mesh_merge_dp)
+                            weld=weld, weld_seams=weld_seams, mesh_merge_dp=mesh_merge_dp,
+                            alpha_split_mesh=alpha_split_mesh, decal_offset=decal_offset,
+                            decal_smooth_angle=decal_smooth_angle)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:

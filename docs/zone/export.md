@@ -6,7 +6,9 @@ texture-embedded `.fbx`, with every object instanced and placed in world space.
 ```bash
 uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--alpha-scale N] [--opaque]
                             [--with-collision-proxies] [--with-far-lod] [--no-subareas] [--no-weld] [--weld-seams] [--mesh-merge-dp N]
+                            [--alpha-split-mesh] [--decal-offset N] [--decal-smooth-angle DEG]
 uv run xi zone export ROM/1/41            # Lower Jeuno
+uv run xi zone export ROM/1/41 --alpha-split-mesh --right-handed   # Unreal: base + decal FBX pair
 ```
 
 `<dat>` may be a ROM-relative spec like `ROM/1/41` (resolved against `FFXI_DIR`).
@@ -50,6 +52,9 @@ Zones are a different format from entity models (no skeleton); see
 | `--no-weld` | Keep the original per-triangle vertices. **Welding is on by default** — see below. |
 | `--weld-seams` | Also fuse the UV-seam splits the default weld leaves (tiled terrain). **Needs `--fbx`** — the merge runs in Blender and keeps the texture. See below. |
 | `--mesh-merge-dp N` | Decimal places for the weld position threshold. **Default `4`** (`0.0001` units). Lower it if adjacent polys stay unjoined; raise it to weld only exact matches. |
+| `--alpha-split-mesh` | **(Test) Alpha Split Mesh** — export **two** FBX files for Unreal, splitting FFXI's coplanar ground decals off the terrain so they stop z-fighting. Implies `--fbx`. See below. |
+| `--decal-offset N` | How far `--alpha-split-mesh` lifts each decal off the surface, in mesh/FFXI units. **Default `0.00001`** (≈`0.001` cm in Unreal after the usual 100× FBX import). See below. |
+| `--decal-smooth-angle DEG` | Auto-smooth angle for `--alpha-split-mesh`. **Default `45`** (45–60 is typical). |
 
 ## Welding (`--no-weld`, `--mesh-merge-dp`)
 
@@ -132,6 +137,52 @@ the original layout. So for a game
 engine, always export with `--right-handed` (add `--weld-seams` too for connected terrain).
 The normals themselves export correctly either way — the DAT stores them all pointing up;
 if you still want them two-sided in-engine, set the material two-sided there.
+
+## (Test) Alpha Split Mesh (`--alpha-split-mesh`)
+
+FFXI paints ground decals — paths, cracks, puddles, blood stains — as an **alpha-blend
+overlay** (the `0x8000` blend bit, exported as an `_alpha` material) drawn **coplanar** with
+the opaque terrain underneath it. The retail client sorts them fine, but in Unreal two
+surfaces at the exact same depth **z-fight**: the decal and the ground flicker against each
+other as the camera moves.
+
+`--alpha-split-mesh` runs the recipe that fixes it and writes **two** FBX files:
+
+- `<stem>.fbx` — the opaque **base** terrain/props.
+- `<stem>_A.fbx` — just the **decals**, separated out, lifted a hair off the surface.
+
+Import them into Unreal as **two separate static meshes**. Per mesh it:
+
+1. **Welds** the opaque polys together, and the alpha polys together — separately, so a
+   decal is never fused into the base (Blender can't hold two faces on the same vertices and
+   would delete the overlay).
+2. **Auto-smooths** both by polygon angle (`--decal-smooth-angle`, default 45°).
+3. **Separates** the alpha polys into their own mesh, named `<object>_A`.
+4. **Pushes** the decal polys along the surface normal by `--decal-offset` so they sit just
+   in front of the ground instead of on it.
+5. **Transfers** the base surface's normals onto the decal, so the lifted decal still shades
+   as one with the ground (no visible seam where it lifts).
+
+```bash
+uv run xi zone export ROM/1/41 --alpha-split-mesh --right-handed
+#   -> exports/zone/rom/1/41/41.fbx      (opaque base)
+#   -> exports/zone/rom/1/41/41_A.fbx    (decals)
+#   -> exports/zone/rom/1/41/41.ue5_mat.py  (sets 'Enable - Alpha' on the _alpha materials)
+```
+
+Needs Blender (it runs the split there), so `--fbx` is implied. This targets Unreal, so
+**pair it with `--right-handed`** — otherwise the terrain is still mirrored and black-from-
+above in-engine (see above); the command prints a reminder if you leave it off. `--no-sky
+--no-vfx` are worth adding too, or the sky/water blend meshes end up in the decal file.
+
+**Tuning the offset.** `--decal-offset` is in mesh/FFXI units (~metres); the default
+`0.00001` lands at ≈`0.001` cm in Unreal after the standard 100× FBX import. That is
+deliberately tiny, but FBX vertex precision gets coarser the further geometry sits from the
+origin, so on a large zone decals far from `0,0,0` may still z-fight — **raise `--decal-offset`**
+(e.g. `0.0005`) until they hold. Too large and the decal visibly floats.
+
+`--alpha-split-mesh` can't be combined with `--objects` (it builds one combined base/decal
+pair, not per-mesh files).
 
 ## Texture opacity (`--alpha-scale`)
 
