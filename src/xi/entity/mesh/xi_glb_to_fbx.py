@@ -18,6 +18,7 @@ import sys
 import bpy
 import bmesh
 from collections import defaultdict
+from mathutils import Vector
 
 
 def _weld_within_materials(dist: float) -> None:
@@ -157,11 +158,272 @@ def _opaque_png(image, png_path: str, scene) -> str:
     return out
 
 
+# ---------------------------------------------------------------------------
+# "(Test) Alpha Split Mesh" — the decal split for Unreal (zone export)
+#
+# FFXI paints ground decals (paths, cracks, stains) as an alpha-blended overlay
+# drawn *coplanar* with the opaque terrain it sits on. That is fine for the
+# retail client but z-fights in Unreal, where the two coplanar surfaces flicker.
+# This runs the recipe a friend worked out for a clean FBX import:
+#
+#   1. Weld the opaque polys together, and the alpha polys together (separately,
+#      so a decal never fuses into the base and gets deleted).
+#   2. Smooth both by polygon angle.
+#   3. Separate the alpha polys into their own mesh (named <mesh>_A).
+#   4. Push the alpha polys a hair along their normal so they no longer z-fight.
+#   5. Transfer the base surface's normals onto the decal so it still shades as
+#      one with the ground.
+#
+# Output is two FBX files — <stem>.fbx (opaque base) and <stem>_A.fbx (decals) —
+# imported into Unreal as two separate meshes. Alpha materials are the ones the
+# GLB export already suffixes "_alpha" (the 0x8000 blend bit); "_cutout"/opaque
+# foliage is not a decal and stays with the base.
+# ---------------------------------------------------------------------------
+
+
+def _is_alpha_flags(me):
+    """Per-material-slot flags: True where the slot is an FFXI alpha-blend decal."""
+    return [bool(m) and m.name.endswith("_alpha") for m in me.materials]
+
+
+def _weld_buckets(me, tol: float) -> None:
+    """Weld coincident vertices within the opaque set and within the alpha set,
+    but never across the two — the friend's "select non-alpha > WELD, then select
+    alpha > WELD". A vertex shared by both an opaque and an alpha face sits on the
+    boundary and is left unwelded so the decal is not pulled into the base (Blender
+    cannot hold two faces on the same vertices and would delete one). UVs and
+    vertex colours ride along on the loops; the DAT normals are dropped here on
+    purpose because the next step recomputes them by angle."""
+    if not me.polygons:
+        return
+    dp = max(0, round(-math.log10(tol))) if tol > 0 else 4
+    alpha = _is_alpha_flags(me)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+
+    vmats = defaultdict(set)
+    for f in bm.faces:
+        for v in f.verts:
+            vmats[v].add(f.material_index)
+
+    def bucket(mis):
+        flags = [alpha[i] for i in mis]
+        if not any(flags):
+            return "opaque"
+        if all(flags):
+            return "alpha"
+        return None  # opaque<->alpha boundary: keep separate
+
+    groups = defaultdict(list)
+    for v in bm.verts:
+        b = bucket(vmats.get(v, ()))
+        if b is None:
+            continue
+        key = (b, tuple(round(c, dp) for c in v.co))
+        groups[key].append(v)
+    targetmap = {}
+    for verts in groups.values():
+        for v in verts[1:]:
+            targetmap[v] = verts[0]
+    # weld_verts deletes any face left degenerate or duplicated by the weld; a few
+    # meshes draw the same triangle twice inside one bucket, so un-weld the corners
+    # of such faces rather than lose them (same guard as _weld_within_materials).
+    for _ in range(4):
+        seen, bad = {}, set()
+        for f in bm.faces:
+            key = frozenset(targetmap.get(v, v) for v in f.verts)
+            if len(key) < len(f.verts):
+                bad.update(f.verts)
+            elif key in seen:
+                bad.update(f.verts)
+                bad.update(seen[key].verts)
+            else:
+                seen[key] = f
+        bad = {v for v in bad if v in targetmap}
+        if not bad:
+            break
+        for v in bad:
+            del targetmap[v]
+    if targetmap:
+        bmesh.ops.weld_verts(bm, targetmap=targetmap)
+    bm.to_mesh(me)
+    bm.free()
+
+
+def _extract_faces(src_me, want_alpha: bool, new_name: str):
+    """Return a new mesh holding only the opaque (or, with want_alpha, only the
+    alpha) faces of ``src_me``, with the material slots pruned to those it uses and
+    UVs/colours preserved. None if there are no such faces."""
+    alpha = _is_alpha_flags(src_me)
+    bm = bmesh.new()
+    bm.from_mesh(src_me)
+    bm.faces.ensure_lookup_table()
+    kill = [f for f in bm.faces if bool(alpha[f.material_index]) != want_alpha]
+    if kill:
+        bmesh.ops.delete(bm, geom=kill, context="FACES")
+    if not bm.faces:
+        bm.free()
+        return None
+    used = sorted({f.material_index for f in bm.faces})
+    remap = {old: i for i, old in enumerate(used)}
+    for f in bm.faces:
+        f.material_index = remap[f.material_index]
+    new_me = bpy.data.meshes.new(new_name)
+    for old in used:
+        new_me.materials.append(src_me.materials[old])
+    bm.to_mesh(new_me)
+    bm.free()
+    return new_me
+
+
+def _angle_custom_normals(me, angle_rad: float) -> None:
+    """Auto-smooth by polygon angle and freeze the result as custom split normals.
+
+    Every face is set smooth; an edge whose two faces meet at more than the
+    threshold is marked sharp (as is any boundary/non-manifold edge), which is how
+    Blender splits the normal there. The computed corner normals are then written
+    back as custom normals so they survive the separate/push below and export
+    verbatim to FBX."""
+    if not me.polygons:
+        return
+    me.polygons.foreach_set("use_smooth", [True] * len(me.polygons))
+    me.update()
+    face_n = [Vector(p.normal) for p in me.polygons]
+    edge_faces = defaultdict(list)
+    for pi, poly in enumerate(me.polygons):
+        vs = poly.vertices
+        n = len(vs)
+        for i in range(n):
+            a, b = vs[i], vs[(i + 1) % n]
+            edge_faces[(a, b) if a < b else (b, a)].append(pi)
+    for e in me.edges:
+        faces = edge_faces.get(tuple(e.vertices) if e.vertices[0] < e.vertices[1]
+                               else (e.vertices[1], e.vertices[0]), [])
+        if len(faces) == 2:
+            e.use_edge_sharp = face_n[faces[0]].angle(face_n[faces[1]], 0.0) > angle_rad
+        else:
+            e.use_edge_sharp = True
+    me.update()
+    me.normals_split_custom_set([tuple(me.corner_normals[i].vector)
+                                 for i in range(len(me.loops))])
+
+
+def _pos_normal_map(me, dp: int):
+    """Rounded vertex position -> unit surface normal, averaged from the (frozen)
+    corner normals — the base surface's normals to transfer onto the decal."""
+    acc = defaultdict(lambda: Vector((0.0, 0.0, 0.0)))
+    for li, loop in enumerate(me.loops):
+        co = me.vertices[loop.vertex_index].co
+        acc[(round(co.x, dp), round(co.y, dp), round(co.z, dp))] += Vector(me.corner_normals[li].vector)
+    return {k: (n.normalized() if n.length > 0 else Vector((0.0, 0.0, 1.0)))
+            for k, n in acc.items()}
+
+
+def _push_and_transfer(me, pos_normal, offset: float, dp: int) -> None:
+    """Push every decal vertex ``offset`` along the base surface normal at its
+    position (step 4), then set the decal's custom normals to those same base
+    normals (step 5), so the lifted decal still shades as one with the ground.
+    Falls back to the decal's own smoothed normal where no coincident base vertex
+    exists (a decal with no opaque twin)."""
+    if not me.polygons:
+        return
+    own = defaultdict(lambda: Vector((0.0, 0.0, 0.0)))
+    for li, loop in enumerate(me.loops):
+        own[loop.vertex_index] += Vector(me.corner_normals[li].vector)
+    vnorm = {}
+    for v in me.vertices:
+        co = v.co
+        n = pos_normal.get((round(co.x, dp), round(co.y, dp), round(co.z, dp)))
+        if n is None:
+            o = own[v.index]
+            n = o.normalized() if o.length > 0 else Vector((0.0, 0.0, 1.0))
+        vnorm[v.index] = n
+    if offset:
+        for v in me.vertices:
+            v.co = v.co + vnorm[v.index] * offset
+        me.update()
+    me.normals_split_custom_set([tuple(vnorm[loop.vertex_index]) for loop in me.loops])
+
+
+def _alpha_out_path(fbx_out: str) -> str:
+    base, ext = os.path.splitext(fbx_out)
+    return base + "_A" + ext
+
+
+def _export_selection(objs, path: str) -> None:
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs:
+        try:
+            o.select_set(True)
+        except RuntimeError:
+            pass
+    bpy.ops.export_scene.fbx(
+        filepath=path,
+        use_selection=True,
+        path_mode="ABSOLUTE",
+        embed_textures=False,
+        add_leaf_bones=False,
+        bake_anim=False,
+        use_custom_props=True,
+    )
+
+
+def _alpha_split_export(fbx_out: str, angle_rad: float, offset: float, tol: float) -> None:
+    """Run the friend's decal recipe on the imported scene and write two FBX files:
+    ``fbx_out`` (opaque base) and its ``_A`` twin (the separated decals). Operates
+    on mesh data so instanced placements follow, then rebuilds the instancing by
+    giving every object that had decals an ``<name>_A`` sibling."""
+    dp = max(0, round(-math.log10(tol))) if tol > 0 else 4
+    scene = bpy.context.scene
+
+    mesh_objs = defaultdict(list)
+    for obj in list(bpy.data.objects):
+        if obj.type == "MESH" and obj.data is not None:
+            mesh_objs[obj.data].append(obj)
+
+    alpha_objs = []
+    for me, objs in mesh_objs.items():
+        _weld_buckets(me, tol)
+        base_me = _extract_faces(me, want_alpha=False, new_name=f"{me.name}_base")
+        alpha_me = _extract_faces(me, want_alpha=True, new_name=f"{me.name}_A")
+        has_base = base_me is not None and len(base_me.polygons) > 0
+        has_alpha = alpha_me is not None and len(alpha_me.polygons) > 0
+        if has_base:
+            _angle_custom_normals(base_me, angle_rad)
+        if has_alpha:
+            _angle_custom_normals(alpha_me, angle_rad)
+            _push_and_transfer(alpha_me, _pos_normal_map(base_me, dp) if has_base else {},
+                               offset, dp)
+        for obj in objs:
+            if has_alpha:
+                twin = obj.copy()
+                twin.data = alpha_me
+                twin.name = f"{obj.name}_A"
+                colls = obj.users_collection or (scene.collection,)
+                for coll in colls:
+                    coll.objects.link(twin)
+                alpha_objs.append(twin)
+            if has_base:
+                obj.data = base_me
+            else:
+                bpy.data.objects.remove(obj, do_unlink=True)
+
+    alpha_ids = {id(o) for o in alpha_objs}
+    empties = [o for o in bpy.data.objects if o.type != "MESH"]
+    base_objs = [o for o in bpy.data.objects if o.type == "MESH" and id(o) not in alpha_ids]
+    _export_selection(base_objs + empties, fbx_out)
+    _export_selection(alpha_objs + empties, _alpha_out_path(fbx_out))
+
+
 def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1:]
     glb_in, fbx_out, tex_dir = argv[0], argv[1], argv[2]
     bake_anim = len(argv) > 3 and argv[3] == "1"
     merge_dist = float(argv[4]) if len(argv) > 4 else 0.0
+    alpha_split = len(argv) > 5 and argv[5] == "1"
+    smooth_angle = math.radians(float(argv[6])) if len(argv) > 6 else math.radians(45.0)
+    decal_offset = float(argv[7]) if len(argv) > 7 else 0.0
+    weld_tol = 10.0 ** (-int(argv[8])) if len(argv) > 8 else 1e-4
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
@@ -224,6 +486,10 @@ def main() -> None:
             mat.blend_method = "BLEND"
         elif alpha_wanted:
             links.new(tex_node.outputs["Alpha"], bsdf_node.inputs["Alpha"])
+
+    if alpha_split:
+        _alpha_split_export(fbx_out, smooth_angle, decal_offset, weld_tol)
+        return
 
     bpy.ops.export_scene.fbx(
         filepath=fbx_out,

@@ -861,6 +861,42 @@ def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
     return fbx_path
 
 
+def convert_glb_to_fbx_alpha_split(glb_path: Path, decal_offset: float = 0.00001,
+                                   smooth_angle: float = 45.0,
+                                   weld_dp: int = 4) -> List[Path]:
+    """"(Test) Alpha Split Mesh" — convert a zone ``.glb`` to **two** FBX files via
+    headless Blender: ``<stem>.fbx`` (opaque base) and ``<stem>_A.fbx`` (the
+    alpha-blend decals, separated, pushed off the surface, normals transferred from
+    the base). Used by ``zone export --alpha-split-mesh`` to solve the coplanar
+    decal z-fighting that FFXI ground overlays cause in Unreal. See
+    ``xi_glb_to_fbx._alpha_split_export`` for the per-mesh recipe.
+
+    ``decal_offset`` is how far (in mesh/FFXI units) each decal is lifted along the
+    base normal; ``smooth_angle`` is the auto-smooth angle in degrees; ``weld_dp``
+    the decimal places for the weld tolerance (matches ``--mesh-merge-dp``).
+    """
+    blender = Path(BLENDER_PATH)
+    if not blender.is_file():
+        raise ValueError(
+            f"Blender not found at {blender}. Set BLENDER_PATH to your blender.exe to use --alpha-split-mesh."
+        )
+
+    fbx_path = glb_path.with_suffix(".fbx")
+    alpha_path = fbx_path.with_name(f"{fbx_path.stem}_A.fbx")
+    tex_dir = str(glb_path.parent.resolve())
+    completed = subprocess.run(
+        [str(blender), "-b", "--python", str(_GLB_TO_FBX_SCRIPT),
+         "--", str(glb_path), str(fbx_path), tex_dir, "0", "0.0",
+         "1", repr(float(smooth_angle)), repr(float(decal_offset)), str(int(weld_dp))],
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 or not fbx_path.is_file() or not alpha_path.is_file():
+        detail = (completed.stderr or completed.stdout or "blender produced no output").strip()
+        raise ValueError(f"Blender alpha-split conversion failed:\n{detail}")
+    return [fbx_path, alpha_path]
+
+
 def list_mesh_parts(dat_path: Path) -> List[dict]:
     """Return info about all 0x2A mesh sections in a DAT — name, index, size in bytes."""
     data = read_path_for(dat_path).read_bytes()
