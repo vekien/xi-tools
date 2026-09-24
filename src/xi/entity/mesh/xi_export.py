@@ -823,7 +823,7 @@ def _inject_fbx_textures(fbx_path: Path, tex_dir: Path) -> None:
 
 
 def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
-                       merge_distance: float = 0.0) -> Path:
+                       merge_distance: float = 0.0, linear_colors: bool = False) -> Path:
     """Convert a .glb to an FBX via headless Blender.
 
     The Blender script rewires packed GLB images to the loose PNG files that
@@ -839,6 +839,9 @@ def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
     keeping the per-corner UVs — used by ``zone export --weld-seams``. FBX stores
     UVs per polygon-vertex, so this connects the topology without smearing the
     texture the way collapsing UVs in the GLB would.
+
+    ``linear_colors`` writes vertex colours to the FBX untouched instead of Blender's
+    default sRGB encode (neutral 0.5 -> ~0.73) — ``zone export --vertex-color raw``.
     """
     blender = Path(BLENDER_PATH)
     if not blender.is_file():
@@ -851,7 +854,8 @@ def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
     completed = subprocess.run(
         [str(blender), "-b", "--python", str(_GLB_TO_FBX_SCRIPT),
          "--", str(glb_path), str(fbx_path), tex_dir, "1" if bake_anim else "0",
-         repr(float(merge_distance))],
+         repr(float(merge_distance)), "0", "45.0", "0.0", "4",  # argv 5-8: alpha split off
+         "LINEAR" if linear_colors else "SRGB"],
         capture_output=True,
         text=True,
     )
@@ -863,7 +867,7 @@ def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
 
 def convert_glb_to_fbx_alpha_split(glb_path: Path, decal_offset: float = 0.00001,
                                    smooth_angle: float = 45.0,
-                                   weld_dp: int = 4) -> List[Path]:
+                                   weld_dp: int = 4, linear_colors: bool = False) -> List[Path]:
     """"(Test) Alpha Split Mesh" — convert a zone ``.glb`` to **two** FBX files via
     headless Blender: ``<stem>.fbx`` (opaque base) and ``<stem>_A.fbx`` (the
     alpha-blend decals, separated, pushed off the surface, normals transferred from
@@ -874,6 +878,7 @@ def convert_glb_to_fbx_alpha_split(glb_path: Path, decal_offset: float = 0.00001
     ``decal_offset`` is how far (in mesh/FFXI units) each decal is lifted along the
     base normal; ``smooth_angle`` is the auto-smooth angle in degrees; ``weld_dp``
     the decimal places for the weld tolerance (matches ``--mesh-merge-dp``).
+    ``linear_colors`` as for :func:`convert_glb_to_fbx`, applied to both files.
     """
     blender = Path(BLENDER_PATH)
     if not blender.is_file():
@@ -887,7 +892,8 @@ def convert_glb_to_fbx_alpha_split(glb_path: Path, decal_offset: float = 0.00001
     completed = subprocess.run(
         [str(blender), "-b", "--python", str(_GLB_TO_FBX_SCRIPT),
          "--", str(glb_path), str(fbx_path), tex_dir, "0", "0.0",
-         "1", repr(float(smooth_angle)), repr(float(decal_offset)), str(int(weld_dp))],
+         "1", repr(float(smooth_angle)), repr(float(decal_offset)), str(int(weld_dp)),
+         "LINEAR" if linear_colors else "SRGB"],
         capture_output=True,
         text=True,
     )

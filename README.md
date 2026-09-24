@@ -252,6 +252,7 @@ Full details: [docs/zone/navmesh.md](docs/zone/navmesh.md) · native lib notes:
 | [docs/common_crashes.md](docs/common_crashes.md) | Client crash diagnosis after publishes |
 | [docs/zone/navmesh.md](docs/zone/navmesh.md) | Navmesh bake & server install |
 | [docs/zone/collision.md](docs/zone/collision.md) | Collision mesh format, authoring, and the client's winding rule |
+| [unreal-engine/](unreal-engine/README.md) | FFXI zones in Unreal Engine 5.6: export args, import settings, materials, setup script |
 
 Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — WebGL2/Tauri asset browser (zones, NPCs, gear, VFX, audio, DAT inspector).
 

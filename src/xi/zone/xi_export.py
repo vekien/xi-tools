@@ -35,7 +35,7 @@ from xi.entity.mesh.xi_export import (
     sanitize_filename,
     write_glb,
 )
-from xi.utils.xi_core import DEFAULT_ALPHA_SCALE, encode_png_rgba, scale_alpha
+from xi.utils.xi_core import DEFAULT_ALPHA_SCALE, encode_png_rgb, encode_png_rgba, scale_alpha
 from xi.zone.xi_decrypt import decrypt_zone_mesh, decrypt_zone_objects, load_key_tables
 
 SECTION_TYPE_ZONE_MESH = 0x2E
@@ -514,6 +514,46 @@ def filter_placements(meshes_by_name: Dict[str, List[ZonePrimitive]],
     return out
 
 
+def drop_hidden_duplicates(prims: List[ZonePrimitive], is_opaque) -> List[ZonePrimitive]:
+    """Drop opaque triangles that exactly repeat an earlier opaque triangle of the same mesh.
+
+    A few tiles carry two opaque triangles at identical positions with different textures
+    (South Gustaberg's `mitid00_m`: triangle 138 of the gus_02 submesh and 44 of gus_07).
+    FFXI and the XI viewer always resolve the tie the same way, first-drawn wins (the
+    viewer depth-tests with WebGL's default LESS), but a game engine has no rule for two
+    surfaces at one depth and shows either, so one wrong-textured triangle appears. Keep
+    the first, in submesh order. Only prims `is_opaque` accepts take part: blend overlays
+    are meant to be coplanar, and cutouts can show what is behind their holes."""
+    seen: set = set()
+    out: List[ZonePrimitive] = []
+    for prim in prims:
+        if not is_opaque(prim):
+            out.append(prim)
+            continue
+        keep = []
+        for t in range(0, len(prim.positions) - 2, 3):
+            key = frozenset(tuple(round(c, 4) for c in p) for p in prim.positions[t:t + 3])
+            if key in seen:
+                continue
+            seen.add(key)
+            keep.append(t)
+        if len(keep) * 3 == len(prim.positions):
+            out.append(prim)
+            continue
+        if not keep:
+            continue
+        sel = [t + i for t in keep for i in range(3)]
+        out.append(ZonePrimitive(
+            texture_name=prim.texture_name,
+            positions=[prim.positions[i] for i in sel],
+            normals=[prim.normals[i] for i in sel],
+            uvs=[prim.uvs[i] for i in sel],
+            colors=[prim.colors[i] for i in sel] if prim.colors else [],
+            alpha_blend=prim.alpha_blend, alpha_test=prim.alpha_test,
+            double_sided=prim.double_sided))
+    return out
+
+
 def resolve_texture(name: Optional[str], textures: Dict[str, TextureImage]) -> Optional[str]:
     if not name:
         return None
@@ -541,6 +581,8 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
               drop_names: Optional[set] = None,
               weld: bool = True,
               mesh_merge_dp: int = 4,
+              vertex_color: str = "baked",
+              dedupe_opaque: bool = False,
               out_stem: Optional[str] = None) -> List[Path]:
     # out_stem overrides the .glb filename stem (default: dat_path.stem) — used by
     # --objects to write one <meshname>.glb per object instead of one zone file.
@@ -577,6 +619,15 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
             png_path = output_dir / f"{sanitize_filename(tex_key)}.png"
             png_path.write_bytes(png_bytes)
             texture_paths.append(png_path)
+            if opaque_nonblend:
+                # The FBX step points OPAQUE materials at a 24-bit <tex>_opaque.png so
+                # Blender's importer doesn't wire the (junk) alpha back in. Write it here,
+                # byte for byte: when Blender made it with save_render, the scene's view
+                # transform tone-mapped every texel (base ground came out up to 42/255
+                # darker). The Blender script reuses a twin that already exists.
+                opaque_path = output_dir / f"{sanitize_filename(tex_key)}_opaque.png"
+                opaque_path.write_bytes(encode_png_rgb(image.width, image.height, image.rgba))
+                texture_paths.append(opaque_path)
         images.append({"bufferView": bv, "mimeType": "image/png", "name": tex_key})
         gltf_textures.append({"source": len(images) - 1, "sampler": 0})
         tex_image_index[tex_key] = len(gltf_textures) - 1
@@ -630,7 +681,11 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
         # Group by (tex_key, mode) so bark and leaves sharing the same texture
         # each get their own material slot (opaque vs alpha variant).
         by_tex: Dict[Tuple[Optional[str], str], List[ZonePrimitive]] = {}
-        for prim in meshes_by_name[name]:
+        prims_in = meshes_by_name[name]
+        if dedupe_opaque:
+            # --unreal: an engine can't break a depth tie the way the client does.
+            prims_in = drop_hidden_duplicates(prims_in, lambda p: mode_for(name, p) == "OPAQUE")
+        for prim in prims_in:
             key = (resolve_texture(prim.texture_name, textures), mode_for(name, prim))
             by_tex.setdefault(key, []).append(prim)
         mesh_prims: List[dict] = []
@@ -692,18 +747,29 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
                 "NORMAL": builder.add_accessor(pack_vec3(normals), 5126, "VEC3", len(normals), target=34962),
                 "TEXCOORD_0": builder.add_accessor(pack_vec2(uvs), 5126, "VEC2", len(uvs), target=34962),
             }
-            # COLOR_0 carries the baked vertex lighting with FFXI's modulate2x folded in:
-            # the engine draws final = texture * vertexColour * 2, so a raw texture dump
-            # looks faint. Pre-doubling RGB here (clamped) makes a glTF viewer's
-            # baseColorTexture * COLOR_0 reproduce the in-game brightness — same as the
-            # editor's old-view bake in web/leveleditor/main.js (min(1, c*2)). Alpha is
-            # pinned to 1.0: the texture already carries the (scale_alpha'd) cutout, and
-            # folding doubled vertex-alpha in would punch holes wherever a vert's alpha
-            # is low (this zone has verts at 0x00).
+            # COLOR_0 carries the baked vertex lighting. The engine draws
+            # final = texture * vertexColour * 2, so where that modulate2x lives
+            # depends on who shades the mesh:
+            #   vertex_color="baked" (default, DCC-facing) — fold the *2 in here
+            #     (clamped), so a shaderless glTF viewer's baseColorTexture * COLOR_0
+            #     reproduces the in-game brightness (same as the editor old-view bake
+            #     in web/leveleditor/main.js, min(1, c*2)). Alpha is pinned to 1.0: the
+            #     texture already carries the (scale_alpha'd) cutout, and folding doubled
+            #     vertex-alpha in would punch holes where a vert's alpha is low (0x00).
+            #   vertex_color="raw" (--unreal) — emit the untouched DAT RGBA and let the
+            #     UE zone material do BaseColor = Tex * VertexColor * 2 itself. The baked
+            #     path's *2 clamp crushes every above-neutral tile to flat white in a
+            #     shaded engine (the washed-out patches), and doubles up against the
+            #     engine's own lighting; raw defers the modulate to the material, matching
+            #     what `entity mesh export` writes. NOTE: a raw export looks half-bright
+            #     under a stock material — the material MUST apply the *2 (see docs).
             if colors:
-                col2x = [(min(1.0, r * 2.0), min(1.0, g * 2.0), min(1.0, b * 2.0), 1.0)
-                         for (r, g, b, _a) in colors]
-                attrs["COLOR_0"] = builder.add_accessor(pack_vec4(col2x), 5126, "VEC4", len(col2x), target=34962)
+                if vertex_color == "raw":
+                    out_colors = list(colors)
+                else:
+                    out_colors = [(min(1.0, r * 2.0), min(1.0, g * 2.0), min(1.0, b * 2.0), 1.0)
+                                  for (r, g, b, _a) in colors]
+                attrs["COLOR_0"] = builder.add_accessor(pack_vec4(out_colors), 5126, "VEC4", len(out_colors), target=34962)
             # FFXI DAT triangles are clockwise-front (Direct3D); glTF and game
             # engines treat counter-clockwise as the front face. The exporter
             # normally leaves the winding as-is because every zone material is
@@ -820,17 +886,40 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
     return [glb_path, *texture_paths]
 
 
-def _write_ue5_mat_script(fbx_path: Path) -> Path:
-    """Write a UE5 Python script alongside the FBX that sets 'Enable - Alpha' = 1.0
-    on every MaterialInstanceConstant whose name contains '_alpha'.
+def _write_ue5_mat_script(fbx_path: Path, vertex_color: str = "baked") -> Path:
+    """Write a UE5 Python helper alongside the FBX: enable alpha on '_alpha'
+    (blend-overlay) material instances and force every base-colour texture to
+    sRGB. Paste into UE5 Output Log > Python console (or Tools > Execute Python
+    Script) after importing the FBX. Change IMPORT_PATH to your content folder.
 
-    Paste into UE5 Output Log > Python console (or Tools > Execute Python Script)
-    after importing the FBX. Change IMPORT_PATH to match your content folder first.
+    ``vertex_color`` records how the mesh was exported so the header states the
+    correct material contract: a ``raw`` export leaves FFXI's modulate2x to the
+    material (BaseColor = Tex * VertexColor * 2), a ``baked`` export folds it into
+    COLOR_0 already, so a material that also multiplies vertex colour would double it.
     """
+    if vertex_color == "raw":
+        vc_note = (
+            "# Vertex colour: RAW (this export). Your zone material MUST apply FFXI's\n"
+            "#   modulate2x itself:  BaseColor = TextureColor * VertexColor * 2\n"
+            "#   (VertexColor from a VertexColor node). Without the *2 the zone reads\n"
+            "#   half-bright; the raw data is what stops above-neutral tiles clamping to\n"
+            "#   flat white and stops double-lighting against UE's own sun.")
+    else:
+        vc_note = (
+            "# Vertex colour: BAKED (this export). COLOR_0 already has modulate2x folded\n"
+            "#   in and clamped, so DO NOT multiply vertex colour again in the material —\n"
+            "#   use the texture as-is, or re-export with --vertex-color raw (or --unreal)\n"
+            "#   to move the *2 into a material and recover blown-out tile detail.")
     script = '''\
 # Generated by xi zone export
 # Run in UE5: Output Log > Python console, or Tools > Execute Python Script
 # Change IMPORT_PATH to the Content Browser folder where you imported the FBX.
+#
+{vc_note}
+#
+# Also worth setting once on the master material (not scriptable per-instance here):
+#   - Masked materials: Opacity Mask Clip Value 0.333 (glTF/FBX MASK cutoff is 0.5).
+#   - Two Sided off is fine — a --right-handed/--unreal export already winds CCW-front.
 import unreal
 
 IMPORT_PATH = '/Game/ZONES/test'  # <-- CHANGE THIS
@@ -840,8 +929,16 @@ mat_lib  = unreal.EditorAssetLibrary
 mat_edit = unreal.MaterialEditingLibrary
 
 changed = 0
+srgb_fixed = 0
 for path in mat_lib.list_assets(IMPORT_PATH, recursive=True, include_folder=False):
     asset = mat_lib.load_asset(path)
+    if isinstance(asset, unreal.Texture2D):
+        # FFXI zone textures are colour (base colour), so they belong in sRGB.
+        if not asset.get_editor_property('srgb'):
+            asset.set_editor_property('srgb', True)
+            mat_lib.save_asset(path, only_if_is_dirty=False)
+            srgb_fixed += 1
+        continue
     if not isinstance(asset, unreal.MaterialInstanceConstant):
         continue
     if '_alpha' not in asset.get_name().lower():
@@ -850,8 +947,8 @@ for path in mat_lib.list_assets(IMPORT_PATH, recursive=True, include_folder=Fals
     mat_lib.save_asset(path, only_if_is_dirty=False)
     changed += 1
 
-print(f'Set {PARAM_NAME}=1 on {changed} material instances')
-'''
+print(f'Set {{PARAM_NAME}}=1 on {{changed}} material instances; sRGB on {{srgb_fixed}} textures')
+'''.format(vc_note=vc_note)
     out = fbx_path.with_suffix(".ue5_mat.py")
     out.write_text(script)
     return out
@@ -1254,7 +1351,8 @@ def export_objects(dat_path: Path, output_dir: Path,
                    alpha_scale: float = DEFAULT_ALPHA_SCALE,
                    skip_sky: bool = False, drop_names: Optional[set] = None,
                    opaque_nonblend: bool = False, weld: bool = True,
-                   mesh_merge_dp: int = 4, merge_distance: float = 0.0) -> List[Path]:
+                   mesh_merge_dp: int = 4, merge_distance: float = 0.0,
+                   vertex_color: str = "baked", dedupe_opaque: bool = False) -> List[Path]:
     """Export each unique zone mesh as its own ``<meshname>.glb`` (+ ``.fbx`` if
     ``fbx``) into ``output_dir``. Each object is emitted in local space at the
     origin (its raw geometry), oriented by the same ``ffxi_root_correction`` node
@@ -1279,11 +1377,13 @@ def export_objects(dat_path: Path, output_dir: Path,
                         raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                         write_loose_textures=fbx, out_stem=sanitize_filename(name),
                         opaque_nonblend=opaque_nonblend, weld=weld,
-                        mesh_merge_dp=mesh_merge_dp)
+                        mesh_merge_dp=mesh_merge_dp, vertex_color=vertex_color,
+                        dedupe_opaque=dedupe_opaque)
         paths.append(out[0])
         if fbx:
             print(f"  [{i}/{len(names)}] {name} -> fbx")
-            paths.append(convert_glb_to_fbx(out[0], merge_distance=merge_distance))
+            paths.append(convert_glb_to_fbx(out[0], merge_distance=merge_distance,
+                                            linear_colors=(vertex_color == "raw")))
     return paths
 
 
@@ -1294,8 +1394,9 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                 collision_proxies: bool = False, far_lod: bool = False,
                 sub_areas: bool = True, opaque_nonblend: bool = False,
                 weld: bool = True, weld_seams: bool = False,
-                mesh_merge_dp: int = 4, alpha_split_mesh: bool = False,
-                decal_offset: float = 0.00001, decal_smooth_angle: float = 45.0) -> List[Path]:
+                mesh_merge_dp: int = 4, vertex_color: str = "baked",
+                alpha_split_mesh: bool = False, decal_offset: float = 0.00001,
+                decal_smooth_angle: float = 45.0, dedupe_opaque: bool = False) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
     src = source or dat_path
@@ -1335,26 +1436,29 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                                raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                                skip_sky=skip_sky, drop_names=drop_names,
                                opaque_nonblend=opaque_nonblend, weld=weld,
-                               mesh_merge_dp=mesh_merge_dp, merge_distance=merge_distance)
+                               mesh_merge_dp=mesh_merge_dp, merge_distance=merge_distance,
+                               vertex_color=vertex_color, dedupe_opaque=dedupe_opaque)
         if as_json:
             paths.append(export_zone_json(dat_path, output_dir, source=source))
         return paths
     paths = build_glb(dat_path, output_dir, meshes_by_name, placements, textures,
                       skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                       drop_names=drop_names, opaque_nonblend=opaque_nonblend,
-                      weld=weld, mesh_merge_dp=mesh_merge_dp)
+                      weld=weld, mesh_merge_dp=mesh_merge_dp, vertex_color=vertex_color,
+                      dedupe_opaque=dedupe_opaque)
     if alpha_split_mesh:
         # "(Test) Alpha Split Mesh": two FBX files (opaque base + separated decals)
         # for a clean Unreal import — solves the coplanar decal z-fighting.
         fbx_paths = convert_glb_to_fbx_alpha_split(
             paths[0], decal_offset=decal_offset, smooth_angle=decal_smooth_angle,
-            weld_dp=mesh_merge_dp)
+            weld_dp=mesh_merge_dp, linear_colors=(vertex_color == "raw"))
         paths.extend(fbx_paths)
-        paths.append(_write_ue5_mat_script(fbx_paths[0]))
+        paths.append(_write_ue5_mat_script(fbx_paths[0], vertex_color=vertex_color))
     elif fbx:
-        fbx_path = convert_glb_to_fbx(paths[0], merge_distance=merge_distance)
+        fbx_path = convert_glb_to_fbx(paths[0], merge_distance=merge_distance,
+                                      linear_colors=(vertex_color == "raw"))
         paths.append(fbx_path)
-        paths.append(_write_ue5_mat_script(fbx_path))
+        paths.append(_write_ue5_mat_script(fbx_path, vertex_color=vertex_color))
     if collision:
         # The player-collision mesh lives in the 0x1C ZoneDef section, separate
         # from the visible 0x2E geometry. Emit it as <stem>.collision.obj in the
@@ -1381,6 +1485,10 @@ def main() -> int:
     parser.add_argument("--objects", dest="objects", action="store_true", help="Export each mesh as its own <meshname>.glb/.fbx into <stem>_objects/ (local space, at origin) instead of one combined zone file")
     parser.add_argument("--raw", action="store_true", help="Omit the orientation-correction node (raw FFXI coords; view-only, do not re-import)")
     parser.add_argument("--right-handed", action="store_true", help="Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into geometry (engines drop negative node-scale -> un-mirrored, collidable) and flip winding to CCW-front so single-sided engines light the terrain top instead of culling it black")
+    parser.add_argument("--unreal", action="store_true", help="Unreal preset: --right-handed + --opaque + --fbx + raw vertex colours (do the *2 in the UE material). An explicit --vertex-color still wins.")
+    parser.add_argument("--opaque", dest="opaque_nonblend", action="store_true", help="Write non-blend materials as OPAQUE instead of MASK (fixes junk-alpha floors/walls clipping to holes)")
+    parser.add_argument("--vertex-color", dest="vertex_color", choices=["raw", "baked"], default=None,
+                        help="COLOR_0 baked lighting: 'baked' (default) folds FFXI's modulate2x in and clamps it for shaderless DCC viewers; 'raw' leaves the *2 to the engine material (--unreal implies it)")
     parser.add_argument("--base", action="store_true", help="Export from the pristine original instead of your edited DAT")
     parser.add_argument("--collision", action="store_true", help="Also dump the player-collision mesh (0x1C MZB) to <stem>.collision.obj")
     parser.add_argument("--json", action="store_true", dest="as_json",
@@ -1416,6 +1524,10 @@ def main() -> int:
                         help="Auto-smooth angle in degrees for --alpha-split-mesh (default 45)")
     args = parser.parse_args()
     dat_path = resolve_dat_path(args.dat_path)
+    right_handed = args.right_handed or args.unreal
+    opaque_nonblend = args.opaque_nonblend or args.unreal
+    fbx = args.fbx or args.unreal or args.alpha_split_mesh
+    vertex_color = args.vertex_color or ("raw" if args.unreal else "baked")
     if args.base:
         source = _pristine_source(dat_path)
         if not source.is_file():
@@ -1424,16 +1536,16 @@ def main() -> int:
     else:
         source = read_path_for(dat_path)  # the live DAT (edits are in place)
     output_dir = args.output or default_output_dir(dat_path)
-    fbx = args.fbx or args.alpha_split_mesh
     for path in export_zone(dat_path, output_dir, fbx=fbx, skip_sky=args.skip_sky, raw=args.raw,
-                            right_handed=args.right_handed, source=source,
+                            right_handed=right_handed, source=source,
                             collision=args.collision, alpha_scale=args.alpha_scale,
                             as_json=args.as_json, no_vfx=args.no_vfx, objects=args.objects,
                             collision_proxies=args.collision_proxies, far_lod=args.far_lod,
-                            sub_areas=args.sub_areas, weld=args.weld,
+                            sub_areas=args.sub_areas, opaque_nonblend=opaque_nonblend, weld=args.weld,
                             weld_seams=args.weld_seams, mesh_merge_dp=args.mesh_merge_dp,
+                            vertex_color=vertex_color,
                             alpha_split_mesh=args.alpha_split_mesh, decal_offset=args.decal_offset,
-                            decal_smooth_angle=args.decal_smooth_angle):
+                            decal_smooth_angle=args.decal_smooth_angle, dedupe_opaque=args.unreal):
         print(f"Exported: {path}")
     return 0
 
@@ -1474,6 +1586,19 @@ import click as _click  # noqa: E402
                     "is clockwise-front and relies on two-sided rendering; a single-sided engine culls "
                     "it, so the ground reads as black / see-through from above and only lights from "
                     "below. This makes it render right-side-up and lit. Un-mirrored, correctly lit, collidable.")
+@_click.option("--unreal", "unreal", is_flag=True, default=False,
+               help="Unreal preset: --right-handed + --opaque + --fbx, and raw vertex colours "
+                    "(--vertex-color raw). Gives a UE-facing FBX with correct winding/orientation, no "
+                    "clipped floors, and FFXI's modulate2x left to the zone material (do "
+                    "BaseColor = Tex * VertexColor * 2 there) so above-neutral tiles don't clamp to "
+                    "flat white. The generated *.ue5_mat.py notes the material contract. An explicit "
+                    "--vertex-color still wins.")
+@_click.option("--vertex-color", "vertex_color", type=_click.Choice(["raw", "baked"]), default=None,
+               help="How COLOR_0 carries FFXI's baked vertex lighting. 'baked' (default) folds the "
+                    "modulate2x in and clamps it, so a shaderless glTF/DCC viewer shows in-game "
+                    "brightness. 'raw' emits the untouched DAT colour and leaves the *2 to the "
+                    "engine material (matches `entity mesh export`); use it for game engines — "
+                    "--unreal implies it.")
 @_click.option("--base", "use_base", is_flag=True,
                help="Export from the pristine original instead of your edited DAT — handy to regenerate a clean model after editing")
 @_click.option("--collision", is_flag=True,
@@ -1538,7 +1663,8 @@ import click as _click  # noqa: E402
 @_click.option("--decal-smooth-angle", "decal_smooth_angle", type=float, default=45.0, show_default=True,
                help="Auto-smooth angle in degrees for --alpha-split-mesh (45-60 is typical). Edges "
                     "sharper than this stay hard.")
-def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool, use_base: bool,
+def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool,
+        unreal: bool, vertex_color, use_base: bool,
         collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool, alpha_scale: float,
         opaque_nonblend: bool, weld: bool, weld_seams: bool, mesh_merge_dp: int,
         alpha_split_mesh: bool, decal_offset: float, decal_smooth_angle: float):
@@ -1560,6 +1686,14 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
     except FileNotFoundError as e:
         raise _click.ClickException(str(e))
     ensure_base(resolved)
+    # --unreal is a preset: game-engine orientation/winding, no clipped floors, an
+    # .fbx, and raw vertex colours (the material applies FFXI's *2). An explicit
+    # --vertex-color still wins; without one, --unreal picks raw and DCC picks baked.
+    if unreal:
+        right_handed = True
+        opaque_nonblend = True
+        fbx = True
+    vertex_color = vertex_color or ("raw" if unreal else "baked")
     if use_base:
         source = _pristine_source(resolved)
         if not source.is_file():
@@ -1580,14 +1714,18 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
                             collision_proxies=collision_proxies, far_lod=far_lod,
                             sub_areas=sub_areas, opaque_nonblend=opaque_nonblend,
                             weld=weld, weld_seams=weld_seams, mesh_merge_dp=mesh_merge_dp,
+                            vertex_color=vertex_color,
                             alpha_split_mesh=alpha_split_mesh, decal_offset=decal_offset,
-                            decal_smooth_angle=decal_smooth_angle)
+                            decal_smooth_angle=decal_smooth_angle, dedupe_opaque=unreal)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:
         _click.echo(f"Exported {len([p for p in paths if p.suffix == '.glb'])} objects to {output_dir}")
     for path in paths:
         _click.echo(f"Exported: {path}")
+    if unreal:
+        _click.echo("(unreal preset: --right-handed --opaque --fbx, vertex colours raw — "
+                    "the zone material must apply FFXI's *2; see the .ue5_mat.py header)")
     if use_base:
         _click.echo("(exported from the pristine original)")
     if raw:

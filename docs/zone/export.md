@@ -4,7 +4,7 @@ Export an FFXI **zone** (static area geometry) to a self-contained `.glb` and a
 texture-embedded `.fbx`, with every object instanced and placed in world space.
 
 ```bash
-uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--alpha-scale N] [--opaque]
+uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--unreal] [--vertex-color raw|baked] [--alpha-scale N] [--opaque]
                             [--with-collision-proxies] [--with-far-lod] [--no-subareas] [--no-weld] [--weld-seams] [--mesh-merge-dp N]
                             [--alpha-split-mesh] [--decal-offset N] [--decal-smooth-angle DEG]
 uv run xi zone export ROM/1/41            # Lower Jeuno
@@ -43,6 +43,8 @@ Zones are a different format from entity models (no skeleton); see
 | `--base` | Export from the pristine original instead of your edited DAT — handy to regenerate a clean model after edits. |
 | `--raw` | Omit the orientation-correction node (raw FFXI coords). View-only — a raw export is not meant to be re-imported. |
 | `--right-handed` | Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into geometry (engines drop the negative node scale, mirroring the zone and breaking collision) **and** flip winding to CCW-front so single-sided engines light the terrain instead of culling it black. See below. |
+| `--unreal` | Unreal preset: `--right-handed` + `--opaque` + `--fbx` + `--vertex-color raw`. One flag for a UE-facing FBX with correct winding/orientation, no clipped floors, and FFXI's `×2` left to the zone material. The generated `*.ue5_mat.py` states the material contract. An explicit `--vertex-color` still wins. See below. |
+| `--vertex-color raw\|baked` | Where FFXI's baked-lighting `×2` (modulate2x) lives in `COLOR_0`. **Default `baked`** folds it in and clamps it, so a shaderless glTF/DCC viewer shows in-game brightness. `raw` emits the untouched DAT colour (and real vertex alpha) and leaves the `×2` to the engine material — matches `entity mesh export`. `--unreal` implies `raw`. See below. |
 | `--json` | Also write `<stem>.zone.json`: every placement (full TRS, LOD, links), mesh list, textures, per-weather ambient sounds, companion event/dialog/NPC DAT paths, sub-area interior DATs. |
 | `--with-collision-proxies` | Include **collision-only placements** — draw distance exactly `1.0`, the sentinel the client treats as never-render (`hitwall_*`, `kabe-atariyou`, `hit_*`, `id_board*` / `id_box*`). Retail has 15,835 of them; Ru'Aun Gardens is 45% proxies. Off by default: they stack invisible geometry on the zone. |
 | `--with-far-lod` | Include **far copies** — `m_` / `lnd_` meshes that stand in for richer geometry the zone also places (Ru'Aun's `m_osid_*` islands, `m_bri_*` bridge). The client shows one or the other by region, so exporting both puts the cheap copy inside the detailed one. Only fires where a richer same-stem twin is actually placed, so ordinary `m_` props (`m_bed_02`, `m_pot`) are never affected. |
@@ -138,7 +140,72 @@ engine, always export with `--right-handed` (add `--weld-seams` too for connecte
 The normals themselves export correctly either way — the DAT stores them all pointing up;
 if you still want them two-sided in-engine, set the material two-sided there.
 
+## Exporting for Unreal (`--unreal`, `--vertex-color`)
+
+> **The full Unreal workflow** — recommended args, FBX import settings, the materials and the
+> per-zone setup script — lives in [`unreal-engine/`](../../unreal-engine/README.md). Use
+> `--unreal --no-sky --no-vfx`. This section covers what the flag itself does.
+
+`--unreal` is a one-flag preset: `--right-handed --opaque --fbx --vertex-color raw`. It also
+drops **hidden duplicate triangles**: a few tiles carry two opaque triangles at the exact same
+position with different textures (South Gustaberg's `mitid00_m`: a `gus_02` and a `gus_07`
+triangle). The client and the XI viewer always show the first-drawn one; an engine has no rule
+for two surfaces at one depth and shows either, so a single wrong-textured triangle appears.
+The export keeps the first, in submesh order (blend overlays and cutouts are left alone). It gives
+a UE-facing FBX that's right-side-up, un-mirrored, collidable, has no junk-alpha holes in
+floors/walls, and leaves FFXI's baked-lighting `×2` to the zone material instead of baking it
+into the mesh. The `.fbx` ships with a `*.ffxi_root_correction`-oriented layout and a generated
+`<stem>.ue5_mat.py` (paste into UE5's Python console after import) that enables alpha on the
+`_alpha` blend-overlay materials and forces base-colour textures to sRGB; its header states the
+vertex-colour contract for the mode you exported.
+
+### Washed-out / flat-white terrain patches — the vertex-colour bake
+
+FFXI draws terrain as `texture × vertexColour × 2` (modulate2x): the neutral vertex colour is
+`0x80` (0.5), so the `×2` brings it back to full brightness, and baked lighting darkens from
+there. A **glTF/DCC viewer has no shader**, so `--vertex-color baked` (the default) folds the
+`×2` into `COLOR_0` and clamps it, and a viewer's `baseColorTexture × COLOR_0` reproduces the
+in-game look.
+
+In a **shaded engine that multiplies by vertex colour** (a real UE zone material), that pre-bake
+is wrong two ways:
+
+- Every tile lit **at or above neutral** clamps to pure white after the `×2`, so it loses all
+  texture detail — the flat, washed-out beige patches. (Measured on Abdhaljs Isle: the neutral
+  floor `rz_be_fl1_m` goes to `1.0` on every channel under `baked`, versus its true `0.5` under
+  `raw`.)
+- The engine then lights that already-brightened albedo with its own sun (UDS, etc.), doubling
+  the brightness again → blown highlights.
+
+`--vertex-color raw` (what `--unreal` selects) emits the **untouched** DAT colour — the true
+`0x80` neutral and the real per-vertex alpha — and you do the `×2` once, in the material:
+
+```
+BaseColor = TextureColor × VertexColor × 2          (FFXI, in gamma space)
+BaseColor = Texture × Power(VertexColor × 2, 2.2)   (the same thing in UE's linear space)
+```
+
+FFXI does the multiply on sRGB values; UE's texture sample is already linear, so a plain `× 2`
+flattens the baked shading. The `Power(…, 2.2)` form is what `unreal-engine/`'s MasterMaterial
+uses. With `raw` colours the FBX also carries them **linear** (Blender's default sRGB would turn
+the neutral `0.5` into `0.735`). This is the same split the FFXI engine and `entity mesh export` use. **A raw export looks
+half-bright under a stock material** — the material *must* apply the `×2`, or the whole zone reads
+dark. The generated `ue5_mat.py` header spells this out. If you'd rather keep the plug-and-play
+baked look for a quick look-see, pass `--vertex-color baked` (or just don't use `--unreal`).
+
+What `--unreal` can't fix (engine-side, not export): auto-exposure/tonemapping in the level,
+whether blend overlays (`_alpha` road paint / terrain transitions) render as translucent quads
+or DBuffer decals, and lightmap UVs (moot under a fully dynamic sky). The overlays are the other
+source of "faceted white patches": they fade by vertex alpha, so UE's FBX import must use
+**Vertex Color Import Option = Replace** (the default *Ignore* draws every overlay tile at full
+strength). Routing them to a decal / masked material with a depth pull is what
+`unreal-engine/ffxi_zone_setup.py` does.
+
 ## (Test) Alpha Split Mesh (`--alpha-split-mesh`)
+
+> **Not recommended for Unreal any more.** Its auto-smooth draws sharp shading creases across
+> the terrain; a single `--unreal` FBX plus the overlay materials' camera-facing Depth Pull in
+> [`unreal-engine/`](../../unreal-engine/README.md) solves the z-fighting without it.
 
 FFXI paints ground decals — paths, cracks, puddles, blood stains — as an **alpha-blend
 overlay** (the `0x8000` blend bit, exported as an `_alpha` material) drawn **coplanar** with
@@ -174,6 +241,8 @@ Needs Blender (it runs the split there), so `--fbx` is implied. This targets Unr
 **pair it with `--right-handed`** — otherwise the terrain is still mirrored and black-from-
 above in-engine (see above); the command prints a reminder if you leave it off. `--no-sky
 --no-vfx` are worth adding too, or the sky/water blend meshes end up in the decal file.
+It combines with `--unreal` too: both FBX files then carry raw vertex colours, and the
+`ue5_mat.py` header states that contract.
 
 **Tuning the offset.** `--decal-offset` is in mesh/FFXI units (~metres); the default
 `0.00001` lands at ≈`0.001` cm in Unreal after the standard 100× FBX import. That is
@@ -215,7 +284,9 @@ Without the flag `0x2000` submeshes are still written as `BLEND` and everything 
 batch (`xi batch icons`) always exports the `--opaque` way.
 
 With `--fbx`, every OPAQUE material in the `.fbx` points at a 24-bit `<texture>_opaque.png`
-twin written next to the normal PNGs. Blender's FBX importer wires a diffuse texture's alpha
+twin written next to the normal PNGs. The export writes each twin itself, byte-identical to the
+texture's RGB (Blender's `save_render`, which used to make them, applied the scene's view
+transform and tone-mapped every texel, so base ground came out up to 42/255 darker). Blender's FBX importer wires a diffuse texture's alpha
 into the material whenever the PNG has an alpha channel, which would undo `--opaque` on the
 way back in; the alpha-free twin is the only thing it leaves alone. Blend and cutout
 materials keep using the original PNG.
@@ -259,8 +330,9 @@ combined export). With `--fbx`, Blender is spawned once per object, so a full zo
 - Needs `FFXiMain.dll` at `FFXI_DIR` (the decryption key tables are read from it).
 - Needs Blender (`BLENDER_PATH`) for the `--fbx` step; omit `--fbx` to skip it.
 - LOD: objects with `_l`/`_m`/`_h` ids resolve to the highest-detail mesh.
-- Vertex colours (FFXI baked lighting) are written as `COLOR_0`, with the
-  FFXI ×2 modulate folded in.
+- Vertex colours (FFXI baked lighting) are written as `COLOR_0`. By default the
+  FFXI ×2 modulate is folded in (for shaderless DCC viewers); `--vertex-color raw`
+  (and `--unreal`) leave it to the engine material instead. See above.
 
 Re-importing an edited GLB back into the DAT is done via `xi zone import` (placements, mesh-merge) and `xi object import` (individual objects). See [import.md](import.md).
 

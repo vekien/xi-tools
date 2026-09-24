@@ -220,6 +220,21 @@ def encode_png_rgba(width: int, height: int, rgba: bytes) -> bytes:
     return PNG_SIGNATURE + png_chunk(b"IHDR", ihdr) + png_chunk(b"IDAT", idat) + png_chunk(b"IEND", b"")
 
 
+def encode_png_rgb(width: int, height: int, rgba: bytes) -> bytes:
+    """24-bit PNG of `rgba` with the alpha channel dropped (RGB kept byte for byte)."""
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        row = rgba[y * width * 4:(y + 1) * width * 4]
+        rgb = bytearray(width * 3)
+        rgb[0::3], rgb[1::3], rgb[2::3] = row[0::4], row[1::4], row[2::4]
+        raw.extend(rgb)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    idat = zlib.compress(bytes(raw))
+    return PNG_SIGNATURE + png_chunk(b"IHDR", ihdr) + png_chunk(b"IDAT", idat) + png_chunk(b"IEND", b"")
+
+
 def write_png_rgba(path: Path, width: int, height: int, rgba: bytes) -> None:
     ensure_parent_dir(path)
     path.write_bytes(encode_png_rgba(width, height, rgba))

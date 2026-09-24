@@ -6,11 +6,22 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
-## Unreleased
+## v1.11.0 — 2026-09-24
+
+[Compare v1.10.0...v1.11.0](https://github.com/vekien/xi-tools/compare/v1.10.0...v1.11.0)
+
+**Unreal Engine**
+
+- New [`unreal-engine/`](unreal-engine/README.md) kit for FFXI zones in UE 5.6: recommended export args, FBX import settings, the materials (`MasterMaterial` plus decal / wall / translucent overlay materials) and `ffxi_zone_setup.py`, a select-all › Execute Python Script pass that sorts each zone's overlays onto the right material. Docs cover how FFXI draws a zone and what each part becomes in UE.
 
 **Zone export**
 
-- `xi zone export --alpha-split-mesh` — **(Test) Alpha Split Mesh**. Exports two FBX files, `<stem>.fbx` (opaque base) and `<stem>_A.fbx` (the alpha-blend ground decals, separated out), so FFXI's coplanar overlays stop z-fighting when imported into Unreal. Welds opaque and alpha polys apart, auto-smooths both by angle, lifts the decals along the surface normal, and transfers the base normals onto them. `--decal-offset` and `--decal-smooth-angle` tune the lift and smoothing. Implies `--fbx`; pair with `--right-handed`.
+- `--unreal` — one flag for an Unreal FBX: right-handed, opaque materials, raw vertex colours. Use `--unreal --no-sky --no-vfx`.
+- `--vertex-color raw|baked` — `raw` keeps the DAT's own colours and vertex alpha for an engine material to apply FFXI's ×2; `baked` (default) folds it in for shaderless viewers.
+- Raw vertex colours go into the FBX as linear, not sRGB, so the neutral 0.5 arrives as 0.5.
+- `_opaque.png` texture twins are written byte-identical; Blender no longer tone-maps them darker.
+- `--unreal` drops hidden duplicate opaque triangles (two textures at one spot showed as a stray wrong-textured triangle in UE).
+- `--alpha-split-mesh` — **(Test) Alpha Split Mesh**. Exports two FBX files, `<stem>.fbx` (opaque base) and `<stem>_A.fbx` (the alpha-blend ground decals, separated out). `--decal-offset` and `--decal-smooth-angle` tune the lift and smoothing. Superseded for Unreal by the `unreal-engine/` materials: its auto-smooth draws shading creases.
 
 ## v1.10.0 — 2026-09-21
 

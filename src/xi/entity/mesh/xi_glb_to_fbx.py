@@ -148,12 +148,19 @@ def _opaque_png(image, png_path: str, scene) -> str:
         flat.pixels.foreach_set(px)
         flat.alpha_mode = "NONE"
         settings = scene.render.image_settings
+        view = scene.view_settings
         fmt, mode, depth = settings.file_format, settings.color_mode, settings.color_depth
+        transform, look, exposure, gamma = view.view_transform, view.look, view.exposure, view.gamma
         settings.file_format, settings.color_mode, settings.color_depth = "PNG", "RGB", "8"
+        # save_render applies the scene's view transform (AgX/Filmic by default), which
+        # tone-maps every texel. Standard with no look is a plain sRGB round trip.
+        # (Zone exports write this twin themselves; this is the fallback.)
+        view.view_transform, view.look, view.exposure, view.gamma = "Standard", "None", 0.0, 1.0
         try:
             flat.save_render(out, scene=scene)
         finally:
             settings.file_format, settings.color_mode, settings.color_depth = fmt, mode, depth
+            view.view_transform, view.look, view.exposure, view.gamma = transform, look, exposure, gamma
             bpy.data.images.remove(flat)
     return out
 
@@ -350,7 +357,7 @@ def _alpha_out_path(fbx_out: str) -> str:
     return base + "_A" + ext
 
 
-def _export_selection(objs, path: str) -> None:
+def _export_selection(objs, path: str, colors_type: str = "SRGB") -> None:
     bpy.ops.object.select_all(action="DESELECT")
     for o in objs:
         try:
@@ -365,10 +372,12 @@ def _export_selection(objs, path: str) -> None:
         add_leaf_bones=False,
         bake_anim=False,
         use_custom_props=True,
+        colors_type=colors_type,
     )
 
 
-def _alpha_split_export(fbx_out: str, angle_rad: float, offset: float, tol: float) -> None:
+def _alpha_split_export(fbx_out: str, angle_rad: float, offset: float, tol: float,
+                        colors_type: str = "SRGB") -> None:
     """Run the friend's decal recipe on the imported scene and write two FBX files:
     ``fbx_out`` (opaque base) and its ``_A`` twin (the separated decals). Operates
     on mesh data so instanced placements follow, then rebuilds the instancing by
@@ -411,8 +420,8 @@ def _alpha_split_export(fbx_out: str, angle_rad: float, offset: float, tol: floa
     alpha_ids = {id(o) for o in alpha_objs}
     empties = [o for o in bpy.data.objects if o.type != "MESH"]
     base_objs = [o for o in bpy.data.objects if o.type == "MESH" and id(o) not in alpha_ids]
-    _export_selection(base_objs + empties, fbx_out)
-    _export_selection(alpha_objs + empties, _alpha_out_path(fbx_out))
+    _export_selection(base_objs + empties, fbx_out, colors_type)
+    _export_selection(alpha_objs + empties, _alpha_out_path(fbx_out), colors_type)
 
 
 def main() -> None:
@@ -424,6 +433,11 @@ def main() -> None:
     smooth_angle = math.radians(float(argv[6])) if len(argv) > 6 else math.radians(45.0)
     decal_offset = float(argv[7]) if len(argv) > 7 else 0.0
     weld_tol = 10.0 ** (-int(argv[8])) if len(argv) > 8 else 1e-4
+    # FBX vertex-colour space. Blender's default ('SRGB') sRGB-encodes the glTF's
+    # linear COLOR_0, so FFXI's neutral 0x80 lands in the FBX as ~0.73 instead of
+    # 0.5. 'LINEAR' writes the values untouched — zone export --vertex-color raw
+    # (--unreal) needs that so the engine material's *2 lands neutral at 1.0.
+    colors_type = argv[9] if len(argv) > 9 and argv[9] in ("SRGB", "LINEAR") else "SRGB"
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
@@ -488,7 +502,7 @@ def main() -> None:
             links.new(tex_node.outputs["Alpha"], bsdf_node.inputs["Alpha"])
 
     if alpha_split:
-        _alpha_split_export(fbx_out, smooth_angle, decal_offset, weld_tol)
+        _alpha_split_export(fbx_out, smooth_angle, decal_offset, weld_tol, colors_type)
         return
 
     bpy.ops.export_scene.fbx(
@@ -498,6 +512,7 @@ def main() -> None:
         add_leaf_bones=False,
         bake_anim=bake_anim,
         use_custom_props=True,
+        colors_type=colors_type,
     )
 
 
