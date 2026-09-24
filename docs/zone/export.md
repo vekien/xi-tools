@@ -5,9 +5,10 @@ texture-embedded `.fbx`, with every object instanced and placed in world space.
 
 ```bash
 uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--unreal] [--vertex-color raw|baked] [--alpha-scale N] [--opaque]
-                            [--with-collision-proxies] [--with-far-lod] [--no-subareas] [--no-weld] [--weld-seams] [--mesh-merge-dp N]
+                            [--with-collision-proxies] [--with-far-lod] [--no-subareas] [--sub-areas] [--no-weld] [--weld-seams] [--mesh-merge-dp N]
                             [--alpha-split-mesh] [--decal-offset N] [--decal-smooth-angle DEG]
 uv run xi zone export ROM/1/41            # Lower Jeuno
+uv run xi zone export ROM/1/41 --sub-areas   # + 41_454 ... 41_466, one file per shop interior
 uv run xi zone export ROM/1/41 --alpha-split-mesh --right-handed   # Unreal: base + decal FBX pair
 ```
 
@@ -48,7 +49,8 @@ Zones are a different format from entity models (no skeleton); see
 | `--json` | Also write `<stem>.zone.json`: every placement (full TRS, LOD, links), mesh list, textures, per-weather ambient sounds, companion event/dialog/NPC DAT paths, sub-area interior DATs. |
 | `--with-collision-proxies` | Include **collision-only placements** — draw distance exactly `1.0`, the sentinel the client treats as never-render (`hitwall_*`, `kabe-atariyou`, `hit_*`, `id_board*` / `id_box*`). Retail has 15,835 of them; Ru'Aun Gardens is 45% proxies. Off by default: they stack invisible geometry on the zone. |
 | `--with-far-lod` | Include **far copies** — `m_` / `lnd_` meshes that stand in for richer geometry the zone also places (Ru'Aun's `m_osid_*` islands, `m_bri_*` bridge). The client shows one or the other by region, so exporting both puts the cheap copy inside the detailed one. Only fires where a richer same-stem twin is actually placed, so ordinary `m_` props (`m_bed_02`, `m_pot`) are never affected. |
-| `--no-subareas` | Omit placements tagged with a sub-area id: shop and inn interiors in the towns, and in Ru'Aun Gardens a whole second low-detail copy of the sky. Included by default — they are real geometry, drawn inside their own volume. See [subareas.md](subareas.md). |
+| `--no-subareas` | Omit the **sub-area stand-ins** (`0x1C` `+0x50` link): the low-detail placeholder the client draws for each sub-area until the camera enters it, then swaps for the sub-area's own DAT — the closed shop room in the towns, Ru'Aun Gardens' island platforms. Kept by default. `--sub-areas` already leaves out the ones it exports. See [subareas.md](subareas.md). |
+| `--sub-areas` | Also export **each sub-area from its own DAT** as `<stem>_<id>` beside the zone, `<id>` being the sub-area id — see [Sub-areas as files](#sub-areas-as-files---sub-areas). Can't be combined with `--objects`. |
 | `--alpha-scale N` | Multiply texture alpha by `N` (clamped to 255) before writing the PNGs. **Default `2.0`** — see below. Pass `1.0` for the raw FFXI alpha, or higher to force more opacity. |
 | `--opaque` | Write non-blend materials as `alphaMode: OPAQUE` instead of `MASK`. Fixes the checkerboard/eaten floors and walls some zones show in Blender — see below. |
 | `--no-weld` | Keep the original per-triangle vertices. **Welding is on by default** — see below. |
@@ -324,6 +326,28 @@ uv run xi zone export ROM/1/41 --objects --fbx --no-sky --no-vfx
 `--no-sky` / `--no-vfx` decide which meshes are written (same filtering as the
 combined export). With `--fbx`, Blender is spawned once per object, so a full zone
 (100s of meshes) takes a while — progress prints per object.
+
+## Sub-areas as files (`--sub-areas`)
+
+`--sub-areas` writes the zone plus one file per sub-area, each read from the
+sub-area's own DAT (resolved as in [subareas.md](subareas.md#3-resolving-the-interior-dat)):
+
+```bash
+uv run xi zone export ROM/1/41 --sub-areas --fbx     # 41.fbx + 41_454.fbx ... 41_466.fbx
+uv run xi zone export ROM2/12/107 --sub-areas        # Ru'Aun Gardens: 107 + 107_524 ... 107_539
+```
+
+- The sub-area files are in the zone's world space, so importing them all at the
+  origin puts every interior (every Ru'Aun island platform) in place.
+- The main file leaves out the stand-ins those sub-areas replace, so nothing is
+  doubled; a sub-area whose DAT is not registered keeps its stand-ins.
+- Each sub-area DAT resolves meshes against itself and textures against itself first,
+  then the zone (it ships a few and borrows the rest). All files share one folder of
+  loose PNGs: a texture a sub-area ships under a name already used for other pixels
+  is written as `<name>@<id>` (Lower Jeuno has 24, e.g. `model   r_2ju02k` in three
+  versions), so no file's FBX points at another's texture.
+- Geometry only: `--collision` and `--json` stay on the main zone. Every other
+  option (`--fbx`, `--unreal`, `--alpha-split-mesh`, weld, alpha…) applies to each file.
 
 ## Requirements & limits
 

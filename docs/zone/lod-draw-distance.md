@@ -178,6 +178,27 @@ Distance is measured as squared magnitude from `CameraEyePosition` to
 
 ---
 
+## Two more detail swaps: sub-area stand-ins and far copies
+
+The `h`/`m`/`l` variants are not the only way a zone trades detail for distance. Two
+other mechanisms carry most of it in the zones that need it, and neither is a
+distance check:
+
+- **Sub-area stand-ins.** A `0x1C` placement with a `+0x50` link is a low-detail
+  stand-in for a sub-area whose real geometry is a separate DAT, loaded when the
+  camera enters that sub-area's `'m'` volume. Ru'Aun Gardens puts every island
+  platform behind one (16 sub-areas, 592 stand-ins), so in game only the island you
+  are on is ever at full detail. See [subareas.md](subareas.md).
+- **Far copies in the culling tables.** A zone can place a cheap copy and the detailed
+  object on the same spot and list them in culling tables that never overlap; the
+  table picked from the camera's floor decides which draws (Ru'Aun's `m_bri_*` bridge,
+  Eastern Adoulin's `low*` walls). See
+  [format.md](format.md#visibility--space-tree-culling-tables-collision-transforms).
+
+Anything that draws a zone without the client's per-camera state (a viewer, an
+exporter) has to resolve both, or it shows the cheap copies — alone, or on top of the
+detailed ones.
+
 ## Culling pipeline — full order per frame
 
 Each frame, `ZoneRenderer::Draw()` calls `RenderSubStruct(i)` for each loaded zone slot.

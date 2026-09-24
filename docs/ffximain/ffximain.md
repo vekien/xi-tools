@@ -375,3 +375,39 @@ For modelid 15000: `file_id = 15000 + 98239 = 113239` (within expanded FTABLE, z
 - The primary mesh (`moun`) file for monsters is looked up via a **different mechanism** — not directly derivable from this modelid formula. Only the skeleton/animation (`tige`) file uses the formula above.
 - ROM10 loads correctly (confirmed via Process Monitor). FTABLE10/VTABLE10 are read at Ashita startup.
 - The `102429` "BASE_MODEL_OFFSET" in older tooling versions was wrong and has been corrected to `MODEL_FILE_OFFSET = 98239` in `src/xi/entity/xi_core.py`.
+
+---
+
+## Sub-area ID → File ID Formula
+
+Found at VA `0x10177850` in the unpacked `.text` (the Ghidra project has not analysed
+it into a function; disassemble the bytes directly). It turns a sub-area id — the
+`param` of a zone's `0x36` `'m'` volume, and the `+0x50` link on the `0x1C` stand-ins
+for it — into the file id of the DAT that holds the sub-area's geometry:
+
+```asm
+10177850:  mov  eax, [esp+8]        ; sub-area id
+10177854:  cmp  eax, 0x2BC          ; id >= 700?
+10177859:  mov  [ecx+0x40], eax
+1017785C:  lea  edx, [eax+0x64]     ; default: id + 100
+1017785F:  jge  → high
+10177861:  cmp  eax, 0x258          ; id < 600?
+10177866:  jl   → done
+high:
+10177868:  lea  edx, [eax+0x144F7]  ; id + 83191
+done:
+1017786F:  push edx                 ; file id → 0x10072EF0 (resource manager at [0x1047AFB8])
+```
+
+The same computation is inlined at `0x101772F8`, on the path that activates a sub-area.
+
+| sub-area id | file_id |
+|---|---|
+| < `0x258` (600) | `id + 0x64` |
+| ≥ `0x258` | `id + 0x144F7` |
+
+xim's `getSubAreaResourcePath` switches at `0x271` instead (`id + (0x14768 - 0x271)`, the
+same `+0x144F7`). No retail zone has an id in 600–624, so both agree on the data:
+Ru'Aun Gardens 524–539 → 624–639 (`ROM2/21/117` … `ROM2/22/4`), Escha - Ru'Aun 625–640 →
+83816–83831 (`ROM/337/43` … `58`). `xi.zone.xi_bridge._subarea_file_id` and the XI Model
+Viewer (`subAreaFileId`) follow the client. See [zone/subareas.md](../zone/subareas.md).

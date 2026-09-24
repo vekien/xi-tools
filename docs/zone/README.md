@@ -30,7 +30,8 @@ a zone DAT (`ROM/<dir>/<dat>.DAT`). Mirrors the `xi zone` command group.
 
 `zone export` defaults to what the client actually draws: collision-only proxies,
 far-distance stand-in copies are filtered out (`--with-collision-proxies`, `--with-far-lod`
-add them back; `--no-subareas` drops shop/inn interiors) — see [export.md](export.md#options).
+add them back; `--no-subareas` drops the sub-area stand-ins, `--sub-areas` also writes each
+sub-area as its own `<stem>_<id>` file) — see [export.md](export.md#options).
 
 ## Individual objects — `object …`
 
@@ -43,8 +44,9 @@ compatibility alias.
 
 - **[format.md](format.md)** — the FFXI zone binary format (`0x2E` mesh, `0x1C` ZoneDef,
   decryption, the visibility structures).
-- **[subareas.md](subareas.md)** — sub-areas (shop / building interiors): the `0x36` trigger
-  volumes, the placeholder file-id link, interior-DAT resolution, and the editor feature.
+- **[subareas.md](subareas.md)** — sub-areas (shop / building interiors, Ru'Aun's island
+  platforms): the `0x36` trigger volumes, the stand-in file-id link, sub-area DAT
+  resolution, every zone that has them, `zone export --sub-areas`, the editor and viewer.
 - **[elevators.md](elevators.md)** — elevators / lifts: the `'@'` RID record, the two floor
   heights (`param/256 + record.Y`), paired antiphase motion, and viewer playback.
 - **[doors.md](doors.md)** — doors: the `'_'` RID volume, the `wt_b/door/<rid>/open|clos`

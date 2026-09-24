@@ -2460,14 +2460,15 @@ def _scene_resource(params: dict) -> dict:
 
 
 def _subarea_file_id(sub_area_id: int) -> int:
-    """Sub-area id → global file-table id (mirrors xim ``getSubAreaResourcePath``).
+    """Sub-area id → global file-table id, as FFXiMain.dll does it (0x10177850).
 
-    Almost every sub-area fits the first file-table section (``+0x64``); only
-    [Escha - Ru'Aun] sits in the high range (``+ (0x14768 - 0x271)``). The resulting
-    id resolves through the same FTABLE/VTABLE as any other file."""
-    if sub_area_id < 0x271:
-        return sub_area_id + 0x64
-    return sub_area_id + (0x14768 - 0x271)
+    Ids from 0x258 up sit in the high file-table range (``+0x144F7``), the rest
+    ``+0x64``. xim's ``getSubAreaResourcePath`` switches at 0x271 instead; no zone has
+    an id in between ([Escha - Ru'Aun]'s start at 0x271). The resulting id resolves
+    through the same FTABLE/VTABLE as any other file."""
+    if sub_area_id >= 0x258:
+        return sub_area_id + 0x144F7
+    return sub_area_id + 0x64
 
 
 def _subareas(params: dict) -> dict:

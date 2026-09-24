@@ -106,7 +106,7 @@ and per-object mesh (0x2A) import/export.
 | [zone/import-json.md](zone/import-json.md) | JSON change-set format used by the web level editor |
 | [zone/collision.md](zone/collision.md) | Player-collision mesh (MZB): format, export, adding blockers |
 | [zone/navmesh.md](zone/navmesh.md) | Server navmesh (`.nav`): bake from collision via Recast/Detour |
-| [zone/subareas.md](zone/subareas.md) | Client-side sub-areas (shop interiors): how they work |
+| [zone/subareas.md](zone/subareas.md) | Client-side sub-areas (shop interiors, Ru'Aun's island platforms): how they work, every zone that has them, `zone export --sub-areas` |
 | [zone/inject-legacy.md](zone/inject-legacy.md) | Legacy injection path |
 | [zone/lod-draw-distance.md](zone/lod-draw-distance.md) | LOD and draw-distance mechanics |
 | [zone/reset.md](zone/reset.md) | Restoring a zone DAT to pristine state |
@@ -326,7 +326,7 @@ Core lookup tables and named-DAT catalog.
 | [reference/ps2_decomp_crosscheck.md](reference/ps2_decomp_crosscheck.md) | 2003 PS2 client decompile vs. these docs: verified formulas, SE names for event/scheduler opcodes, 2003 packet opcode tables, section-type map |
 | [reference/ps2_beta_2001.md](reference/ps2_beta_2001.md) | 2001 PS2 beta disc (unstripped ELF): SE `RES_TYPE` names for every section code, SE names for all `0x05` generator and `0x07` scheduler opcodes, attach points, hide groups, POL library names and ciphers |
 | [ffximain/dll.md](ffximain/dll.md) | `xi dll` category: shared POL1 unpack/pack for FFXiMain / polcore / app |
-| [ffximain/ffximain.md](ffximain/ffximain.md) | FFXiMain.dll: POL1 algorithm, gear groups, model formulas, Ghidra |
+| [ffximain/ffximain.md](ffximain/ffximain.md) | FFXiMain.dll: POL1 algorithm, gear groups, model and sub-area file-id formulas, Ghidra |
 | [ffximain/polcore.md](ffximain/polcore.md) | polcore.dll: PlayOnline COM host, IPOLCoreCom, base collision with FFXiMain |
 | [ffximain/app.md](ffximain/app.md) | app.dll: PlayOnline Viewer UI / apps module |
 | [ffximain/inventory.md](ffximain/inventory.md) | FFXiMain.dll 80→120 inventory expansion: relocation root cause, object-relative patching, what's left |

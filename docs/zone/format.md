@@ -121,7 +121,7 @@ Each object record = **0x64 bytes** (full layout per xim `ZoneDefParser.parseZon
 | 0x44 | flags (4×u8; flags1 bit1 = skip-during-decal) |
 | 0x48 | culling-table link (ds-relative offset to a culling table, or 0) |
 | 0x4C | environment link (4-byte DatId) |
-| 0x50 | **file-id link** (u32) — for a "closed building" placeholder, the **sub-area id** whose interior replaces it (0 = none); see [subareas.md](subareas.md) |
+| 0x50 | **file-id link** (u32) — this placement is a **stand-in** for that **sub-area id** (0 = none): the closed shop room in the towns, Ru'Aun's low-poly island platforms. Drawn until the sub-area is active, then replaced by the sub-area's own DAT — it is *not* part of the sub-area. See [subareas.md](subareas.md) |
 | 0x54 | point-light indices (4×u32, 1-based into the light table below; 0 = none) — the ONLY lights that shine on this object |
 
 ### Generator-bound objects (animated placements)
@@ -182,8 +182,9 @@ meshes are absent from this table (drawn as environment around the camera).
 A plaintext `"RID"` section of `0x40`-byte OBB entries — zone lines, doors, and the
 **sub-area** (shop / building interior) links. Interiors are separate DATs swapped in
 without a zone change; the placeholder above (`0x50`) is what they replace. Full
-layout, the `subAreaId + 0x64` interior-DAT formula, and the runtime visibility rule
-are documented in **[subareas.md](subareas.md)**.
+layout, the interior-DAT formula (`subAreaId + 0x64`, `+0x144F7` from `0x258`), the
+runtime visibility rule and every zone that has them are documented in
+**[subareas.md](subareas.md)**.
 
 ## Visibility — space tree, culling tables, collision transforms
 
@@ -201,6 +202,12 @@ Three further sub-sections inside `0x1C` decide whether an object actually draws
   the floor's table is null, where everything draws. This is the real per-camera-position
   visibility gate: an object in no table is invisible from most camera spots.
   `object.cullingTableLink@0x48` points back to its table (or 0).
+  **Far copies** live here too: a zone can place a cheap stand-in and the detailed object
+  on the same spot and list them in tables that never overlap, so the camera's floor
+  decides which one draws (Ru'Aun Gardens' `m_bri_*` / `bri_*_h` bridge and `pip_*_n` /
+  `pip_*` pillars, Eastern Adoulin's `lowwall01` / `wall01` and `lowduct*` / `aqueduct*`).
+  A viewer that draws every object has to pick one; the XI Model Viewer keeps the richer
+  mesh of any two placements whose boxes overlap (IoU ≥ 0.5) and share no table.
 - **Collision transforms**: a contiguous `0xC0`-byte array indexed **1:1 by object
   index** (`[transformsOff, pairsOff)` in the collision section). Each = world matrix
   `@0x00` (16 f32), inverse `@0x40`, then the `@0x80…` tail: a **3×3 float matrix**

@@ -87,9 +87,10 @@ class Placement:
     # limit; anything else is a real range. Proto (0x54) records have no such
     # field and come through as 0.0.
     draw_dist: float = 0.0
-    # +0x50, the id of the sub-area this placement belongs to (shop and inn
-    # interiors; in Ru'Aun Gardens a whole low-detail copy of the sky). Same id
-    # space as the 0x36 'm' trigger volumes.
+    # +0x50, the sub-area this placement stands in for: the client draws it until
+    # the camera enters that sub-area, then skips it and draws the sub-area's own
+    # DAT instead (the closed shop room in the towns; Ru'Aun Gardens' low-detail
+    # island platforms). Same id space as the 0x36 'm' trigger volumes.
     sub_area_id: Optional[int] = None
 
 
@@ -426,7 +427,7 @@ def resolve_mesh_name(mesh_id: str, meshes: Dict[str, List[ZonePrimitive]]) -> O
 # The 0x1C record carries enough to tell three kinds of placement apart, and a
 # straight "draw everything" export stacks all three on top of the real zone.
 # Ru'Aun Gardens is the worst case in retail: 45% of its 3283 placements are
-# collision proxies, another 592 belong to sub-areas, and 139 are far copies.
+# collision proxies, another 592 stand in for sub-areas, and 139 are far copies.
 
 COLLISION_DRAW_DISTANCE = 1.0   # +0x40 sentinel: collision only, never rendered
 
@@ -1235,6 +1236,71 @@ def _subarea_list(data: bytes) -> list:
         return []
 
 
+def sub_area_dats(source: Path, use_base: bool = False) -> List[Tuple[int, Path]]:
+    """Every sub-area of the zone read from ``source`` as ``(id, DAT to read)``, in id
+    order: the live DAT, or the pristine original with ``use_base``. Ids the file
+    tables don't register are left out."""
+    out = []
+    for s in _subarea_list(Path(source).read_bytes()):
+        if not s["dat"]:
+            continue
+        resolved = resolve_dat_path(s["dat"])
+        pristine = _pristine_source(resolved) if use_base else None
+        out.append((s["id"], pristine if pristine and pristine.is_file() else read_path_for(resolved)))
+    return out
+
+
+def _exact_texture(name: str, textures: Dict[str, TextureImage]) -> Optional[str]:
+    if name in textures:
+        return name
+    n = _norm(name)
+    return next((t for t in textures if _norm(t) == n), None)
+
+
+def _sub_area_textures(meshes: Dict[str, List[ZonePrimitive]], own: Dict[str, TextureImage],
+                       parent: Dict[str, TextureImage], sub_id: int,
+                       taken: Dict[str, TextureImage]) -> Dict[str, TextureImage]:
+    """Textures for a sub-area's meshes: its own DAT's first, then the parent zone's.
+    A sub-area DAT ships a few and borrows the rest (Ru'Aun's islands use the zone's
+    `tu_*` atlases), the way xim resolves each area in its own directory first.
+
+    Each primitive is pointed at the exact key it resolved to. ``taken`` holds every
+    key already written by this export (the parent's, then earlier sub-areas'), since
+    they all share one folder of loose PNGs: an own texture reuses a key holding the
+    same pixels and otherwise gets `<name>@<id>`. Lower Jeuno's interiors ship 24
+    such clashes (`model   r_2ju02k` in three versions), every Ru'Aun sub-area its own
+    `model   tu_w04c`."""
+    merged = dict(parent)
+
+    def adopt(name: str) -> str:
+        img = own[name]
+        sig = (img.width, img.height, img.rgba)
+        key = next((k for k in (name, *(k for k in taken if k.startswith(f"{name}@")))
+                    if k in taken and (taken[k].width, taken[k].height, taken[k].rgba) == sig), None)
+        if key is None:
+            key = f"{name}@{sub_id}" if name in taken else name
+            taken[key] = img
+        merged[key] = taken[key]
+        return key
+
+    keys: Dict[str, Optional[str]] = {}
+    for prims in meshes.values():
+        for prim in prims:
+            name = prim.texture_name
+            if not name:
+                continue
+            if name not in keys:
+                hit = _exact_texture(name, own)
+                if hit:
+                    keys[name] = adopt(hit)
+                else:
+                    loose = None if _exact_texture(name, parent) else resolve_texture(name, own)
+                    keys[name] = adopt(loose) if loose else resolve_texture(name, parent)
+            if keys[name]:
+                prim.texture_name = keys[name]
+    return merged
+
+
 def export_zone_json(dat_path: Path, output_dir: Path,
                      source: Optional[Path] = None) -> Path:
     """Export zone metadata (placements, weather audio, companions, sub-areas) to JSON."""
@@ -1396,9 +1462,12 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                 weld: bool = True, weld_seams: bool = False,
                 mesh_merge_dp: int = 4, vertex_color: str = "baked",
                 alpha_split_mesh: bool = False, decal_offset: float = 0.00001,
-                decal_smooth_angle: float = 45.0, dedupe_opaque: bool = False) -> List[Path]:
+                decal_smooth_angle: float = 45.0, dedupe_opaque: bool = False,
+                sub_area_sources: Optional[List[Tuple[int, Path]]] = None) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
+    # `sub_area_sources` (--sub-areas, see sub_area_dats): each sub-area DAT is also
+    # written as <stem>_<id>, and its stand-ins leave the main file.
     src = source or dat_path
     meshes_by_name, placements, textures = parse_zone(src)
     if not meshes_by_name:
@@ -1406,6 +1475,19 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
     if alpha_split_mesh and objects:
         raise ValueError("--alpha-split-mesh builds one combined base/decal pair and "
                          "can't be combined with --objects (per-mesh export).")
+    if sub_area_sources and objects:
+        raise ValueError("--sub-areas writes one file per sub-area and can't be combined "
+                         "with --objects (per-mesh export).")
+    subs = []
+    taken = dict(textures)   # every texture key this export writes (see _sub_area_textures)
+    for sub_id, sub_src in sub_area_sources or []:
+        sub_meshes, sub_placements, sub_textures = parse_zone(sub_src)
+        if not sub_meshes:
+            print(f"Note: sub-area {sub_id} ({sub_src}) has no mesh geometry; skipped")
+            continue
+        subs.append((sub_id, sub_meshes, sub_placements,
+                     _sub_area_textures(sub_meshes, sub_textures, textures, sub_id, taken)))
+    exported = {s[0] for s in subs}
     # --weld-seams fuses the UV-seam vertex splits a glTF forces, but keeps the
     # per-corner UVs — only possible in the FBX (Blender merge-by-distance), since
     # a GLB stores one UV per vertex. So it is a merge distance handed to the FBX
@@ -1414,20 +1496,24 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
     if weld_seams and not fbx:
         print("Note: --weld-seams merges points in Blender (keeps UVs) and needs --fbx; "
               "a GLB can't hold merged points with split UVs, so the .glb is unchanged.")
-    # Default to what the client actually draws — see filter_placements.
-    kept = filter_placements(meshes_by_name, placements,
-                             collision_proxies=collision_proxies,
-                             far_lod=far_lod, sub_areas=sub_areas)
-    def _names(plcs):
-        return {n for n in (resolve_mesh_name(p.mesh_id, meshes_by_name) for p in plcs) if n}
-    dropped_meshes = _names(placements) - _names(kept)
-    placements = kept
-    drop_names = unplaced_vfx_meshes(meshes_by_name, placements) if no_vfx else None
-    if dropped_meshes:
-        # build_glb emits every mesh with no surviving placement at the origin as
-        # an "unplaced" node. Without this, filtering a mesh's last placement
-        # resurrects it at 0,0,0 instead of removing it.
-        drop_names = (drop_names or set()) | dropped_meshes
+    def _placed(meshes, plcs, stand_ins_for=frozenset()):
+        # Default to what the client actually draws — see filter_placements. The
+        # stand-ins for a sub-area exported on its own go too.
+        kept = [p for p in filter_placements(meshes, plcs, collision_proxies=collision_proxies,
+                                             far_lod=far_lod, sub_areas=sub_areas)
+                if p.sub_area_id not in stand_ins_for]
+        def _names(ps):
+            return {n for n in (resolve_mesh_name(p.mesh_id, meshes) for p in ps) if n}
+        dropped_meshes = _names(plcs) - _names(kept)
+        drop = unplaced_vfx_meshes(meshes, kept) if no_vfx else None
+        if dropped_meshes:
+            # build_glb emits every mesh with no surviving placement at the origin as
+            # an "unplaced" node. Without this, filtering a mesh's last placement
+            # resurrects it at 0,0,0 instead of removing it.
+            drop = (drop or set()) | dropped_meshes
+        return kept, drop
+
+    placements, drop_names = _placed(meshes_by_name, placements, exported)
     if objects:
         # Per-object mode: one <meshname>.glb/.fbx per mesh straight into output_dir
         # (alongside any --collision/--json), no combined zone glb. They share one set
@@ -1441,24 +1527,33 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
         if as_json:
             paths.append(export_zone_json(dat_path, output_dir, source=source))
         return paths
-    paths = build_glb(dat_path, output_dir, meshes_by_name, placements, textures,
-                      skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
-                      drop_names=drop_names, opaque_nonblend=opaque_nonblend,
-                      weld=weld, mesh_merge_dp=mesh_merge_dp, vertex_color=vertex_color,
-                      dedupe_opaque=dedupe_opaque)
-    if alpha_split_mesh:
-        # "(Test) Alpha Split Mesh": two FBX files (opaque base + separated decals)
-        # for a clean Unreal import — solves the coplanar decal z-fighting.
-        fbx_paths = convert_glb_to_fbx_alpha_split(
-            paths[0], decal_offset=decal_offset, smooth_angle=decal_smooth_angle,
-            weld_dp=mesh_merge_dp, linear_colors=(vertex_color == "raw"))
-        paths.extend(fbx_paths)
-        paths.append(_write_ue5_mat_script(fbx_paths[0], vertex_color=vertex_color))
-    elif fbx:
-        fbx_path = convert_glb_to_fbx(paths[0], merge_distance=merge_distance,
-                                      linear_colors=(vertex_color == "raw"))
-        paths.append(fbx_path)
-        paths.append(_write_ue5_mat_script(fbx_path, vertex_color=vertex_color))
+    def _model(meshes, plcs, texs, drop, stem=None):
+        out = build_glb(dat_path, output_dir, meshes, plcs, texs,
+                        skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
+                        drop_names=drop, opaque_nonblend=opaque_nonblend,
+                        weld=weld, mesh_merge_dp=mesh_merge_dp, vertex_color=vertex_color,
+                        dedupe_opaque=dedupe_opaque, out_stem=stem)
+        if alpha_split_mesh:
+            # "(Test) Alpha Split Mesh": two FBX files (opaque base + separated decals)
+            # for a clean Unreal import — solves the coplanar decal z-fighting.
+            fbx_paths = convert_glb_to_fbx_alpha_split(
+                out[0], decal_offset=decal_offset, smooth_angle=decal_smooth_angle,
+                weld_dp=mesh_merge_dp, linear_colors=(vertex_color == "raw"))
+            out.extend(fbx_paths)
+            out.append(_write_ue5_mat_script(fbx_paths[0], vertex_color=vertex_color))
+        elif fbx:
+            fbx_path = convert_glb_to_fbx(out[0], merge_distance=merge_distance,
+                                          linear_colors=(vertex_color == "raw"))
+            out.append(fbx_path)
+            out.append(_write_ue5_mat_script(fbx_path, vertex_color=vertex_color))
+        return out
+
+    paths = _model(meshes_by_name, placements, textures, drop_names)
+    for i, (sub_id, sub_meshes, sub_placements, sub_textures) in enumerate(subs, 1):
+        stem = f"{dat_path.stem}_{sub_id}"
+        print(f"  [{i}/{len(subs)}] sub-area {sub_id} -> {stem}")
+        sub_kept, sub_drop = _placed(sub_meshes, sub_placements)
+        paths.extend(_model(sub_meshes, sub_kept, sub_textures, sub_drop, stem))
     if collision:
         # The player-collision mesh lives in the 0x1C ZoneDef section, separate
         # from the visible 0x2E geometry. Emit it as <stem>.collision.obj in the
@@ -1498,7 +1593,9 @@ def main() -> int:
     parser.add_argument("--with-far-lod", dest="far_lod", action="store_true",
                         help="Include far-copy placements (m_/lnd_ stand-ins for richer geometry the zone also places, e.g. Ru'Aun's m_osid_*/m_bri_*)")
     parser.add_argument("--no-subareas", dest="sub_areas", action="store_false", default=True,
-                        help="Omit placements tagged with a sub-area id (shop/inn interiors; in Ru'Aun a second low-detail copy of the sky)")
+                        help="Omit the sub-area stand-ins (+0x50 link): the low-detail placeholder drawn for each sub-area until you enter it (closed shop rooms; Ru'Aun's island platforms)")
+    parser.add_argument("--sub-areas", dest="split_sub_areas", action="store_true",
+                        help="Also export each sub-area from its own DAT as <stem>_<id> beside the zone (Lower Jeuno ROM/1/41 -> 41_454 ... 41_466), leaving its stand-ins out of the main file")
     parser.add_argument("--alpha-scale", type=float, default=DEFAULT_ALPHA_SCALE,
                         help="Multiply texture alpha by this factor before export, clamped to 255 "
                              "(default 2.0 = opaque texels become fully opaque, matching the game; "
@@ -1536,6 +1633,9 @@ def main() -> int:
     else:
         source = read_path_for(dat_path)  # the live DAT (edits are in place)
     output_dir = args.output or default_output_dir(dat_path)
+    subs = sub_area_dats(source, use_base=args.base) if args.split_sub_areas else None
+    if args.split_sub_areas and not subs:
+        print("Note: --sub-areas: this zone has no sub-areas")
     for path in export_zone(dat_path, output_dir, fbx=fbx, skip_sky=args.skip_sky, raw=args.raw,
                             right_handed=right_handed, source=source,
                             collision=args.collision, alpha_scale=args.alpha_scale,
@@ -1545,7 +1645,8 @@ def main() -> int:
                             weld_seams=args.weld_seams, mesh_merge_dp=args.mesh_merge_dp,
                             vertex_color=vertex_color,
                             alpha_split_mesh=args.alpha_split_mesh, decal_offset=args.decal_offset,
-                            decal_smooth_angle=args.decal_smooth_angle, dedupe_opaque=args.unreal):
+                            decal_smooth_angle=args.decal_smooth_angle, dedupe_opaque=args.unreal,
+                            sub_area_sources=subs):
         print(f"Exported: {path}")
     return 0
 
@@ -1620,9 +1721,18 @@ import click as _click  # noqa: E402
                     "detailed one. Only fires where a richer same-stem twin is actually placed, so "
                     "ordinary m_ props (m_bed_02, m_pot, m_pol01_h) are never affected.")
 @_click.option("--no-subareas", "sub_areas", is_flag=True, flag_value=False, default=True,
-               help="Omit placements tagged with a sub-area id (+0x50): shop and inn interiors in the "
-                    "towns, and in Ru'Aun Gardens a whole second low-detail copy of the sky. Included "
-                    "by default — they are real geometry, drawn inside their own volume.")
+               help="Omit the sub-area stand-ins (+0x50 link): the low-detail placeholder the client "
+                    "draws for each sub-area until the camera enters it, then swaps for the sub-area's "
+                    "own DAT — the closed shop room in the towns, Ru'Aun Gardens' island platforms. "
+                    "Included by default. --sub-areas already leaves out the ones it exports.")
+@_click.option("--sub-areas", "split_sub_areas", is_flag=True, default=False,
+               help="Also export each sub-area (shop and inn interiors; Ru'Aun Gardens' island "
+                    "platforms at full detail) from its own DAT as <stem>_<id>.glb (+ .fbx) beside the "
+                    "zone, <id> being the sub-area id: Lower Jeuno ROM/1/41 gives 41.glb plus 41_454 "
+                    "... 41_466. The main file leaves out the stand-ins those sub-areas replace, so the "
+                    "zone and its sub-area files line up as the game shows them from inside each one. "
+                    "Geometry only (--collision/--json stay on the main zone); can't be combined with "
+                    "--objects.")
 @_click.option("--alpha-scale", type=float, default=DEFAULT_ALPHA_SCALE, show_default=True,
                help="Multiply texture alpha by this factor before export, clamped to 255. FFXI stores "
                     "alpha at half scale (0x80 = opaque), so the default 2.0 makes opaque texels fully "
@@ -1665,7 +1775,8 @@ import click as _click  # noqa: E402
                     "sharper than this stay hard.")
 def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool,
         unreal: bool, vertex_color, use_base: bool,
-        collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool, alpha_scale: float,
+        collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool,
+        split_sub_areas: bool, alpha_scale: float,
         opaque_nonblend: bool, weld: bool, weld_seams: bool, mesh_merge_dp: int,
         alpha_split_mesh: bool, decal_offset: float, decal_smooth_angle: float):
     """Export a zone's static mesh + textures to a self-contained .glb.
@@ -1701,6 +1812,9 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
     else:
         source = read_path_for(resolved)  # the live DAT (edits are in place)
     output_dir = output or default_output_dir(resolved)
+    subs = sub_area_dats(source, use_base=use_base) if split_sub_areas else None
+    if split_sub_areas and not subs:
+        _click.echo("Note: --sub-areas: this zone has no sub-areas")
     if alpha_split_mesh:
         fbx = True  # the split runs in Blender and emits FBX, so --fbx is implied
         if not right_handed:
@@ -1716,7 +1830,8 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
                             weld=weld, weld_seams=weld_seams, mesh_merge_dp=mesh_merge_dp,
                             vertex_color=vertex_color,
                             alpha_split_mesh=alpha_split_mesh, decal_offset=decal_offset,
-                            decal_smooth_angle=decal_smooth_angle, dedupe_opaque=unreal)
+                            decal_smooth_angle=decal_smooth_angle, dedupe_opaque=unreal,
+                            sub_area_sources=subs)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:

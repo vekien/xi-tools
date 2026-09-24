@@ -136,6 +136,11 @@ Planned: extend the collision gather to follow `RID 0x36`, load the referenced
 model DATs, and merge their `0x1C` collision (with transforms) so existing zones
 match stock coverage.
 
+The referenced DATs are the zone's sub-areas: `sub_area_dats()` in
+[`xi_export.py`](../../src/xi/zone/xi_export.py) already resolves them (it is what
+`zone export --sub-areas` reads), and each is in the zone's world space. See
+[subareas.md](subareas.md).
+
 ---
 
 ## Format reference

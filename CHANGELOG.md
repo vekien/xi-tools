@@ -6,6 +6,22 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
+## v1.12.0 — 2026-09-24
+
+[Compare v1.11.0...v1.12.0](https://github.com/vekien/xi-tools/compare/v1.11.0...v1.12.0)
+
+**Zone export**
+
+- `--sub-areas` — also export each sub-area from its own DAT as `<stem>_<id>` beside the zone: Lower Jeuno (`ROM/1/41`) gives `41` plus `41_454` … `41_466`, one per shop interior; Ru'Aun Gardens one per island platform, at full detail. The zone file leaves out the stand-ins those sub-areas replace, and texture names the sub-areas reuse for other pixels get their own PNG.
+- `--no-subareas` is described for what it drops: the low-detail stand-ins a zone draws for each sub-area until you enter it, not the sub-areas themselves.
+- Sub-area file ids follow the client (FFXiMain.dll `0x10177850`): the high range starts at id `0x258`, not xim's `0x271`. No zone has an id in between, so nothing resolves differently today.
+
+**Docs**
+
+- [`docs/zone/subareas.md`](docs/zone/subareas.md): sub-areas carry detail as well as interiors (Ru'Aun Gardens' 16 island platforms), how a sub-area DAT borrows the zone's textures, every zone that has sub-areas (282 in 30 zones), and how the export and the XI Model Viewer handle them.
+- [`docs/ffximain/ffximain.md`](docs/ffximain/ffximain.md): the client's sub-area file-id function.
+- [`docs/zone/format.md`](docs/zone/format.md) and [`lod-draw-distance.md`](docs/zone/lod-draw-distance.md): the `+0x50` link is a stand-in, and far copies are told apart by the culling tables.
+
 ## v1.11.0 — 2026-09-24
 
 [Compare v1.10.0...v1.11.0](https://github.com/vekien/xi-tools/compare/v1.10.0...v1.11.0)
