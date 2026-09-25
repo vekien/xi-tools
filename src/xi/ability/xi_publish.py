@@ -28,8 +28,9 @@ Kinds and where the client looks (docs/ability/inspect.md, docs/anim/weapon-skil
            (body + companion A at +16 + companion B at +32, all per race)
 
 Past those, each kind has a custom band only a client running a band plugin loads
-(xi_config FX_*_BAND_*, cexislots' values unless set): spells 1612+, job abilities 500+,
-weapon skills 272..527. The stock numbers are handed out first; ``xi ability slots``
+(xi_config FX_*_BAND_*, cexislots' values): spells 1612+, job abilities 1024+, weapon
+skills 272..527. Job abilities 500..1023 are a gap Publish never hands out: they keep the
+retail arithmetic, where the client finds its warp and teleport effects. The stock numbers are handed out first; ``xi ability slots``
 lists the weapon-skill ones and what holds each.
 
 The client has no spell table of its own: ``spell_list.animation`` rides in the action
@@ -177,7 +178,7 @@ def _band_off_hint(kind: str) -> str:
     return (f"The custom band is switched off ({name}=0), so only the numbers a stock client "
             "loads were tried. A client running a band plugin (cexislots) reaches hundreds "
             "more: tick Settings › XI Tools › Custom animation bands in the model viewer, or "
-            f"take {name}=0 out of the environment / .env.")
+            f"take {name}=0 out of the environment.")
 
 
 def ws_band() -> Optional[tuple]:
@@ -216,11 +217,20 @@ def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool,
     ours = ours or set()
     if kind in _SINGLE_DAT_KINDS:
         offset, first, last, _col = _SINGLE_DAT_KINDS[kind]
+        band_first = custom_band(kind)[0]
+        if wanted is not None and last < wanted < band_first:
+            effects = " (the warp and teleport effects are 596–656)" if kind == "ja" else ""
+            raise click.ClickException(
+                f"{kind} animation {wanted} is in the gap below the custom band: {last + 1}–"
+                f"{band_first - 1} keep the retail arithmetic, so the client would open file id "
+                f"{file_id_for(kind, wanted)}, which retail keeps for its own effects{effects}. "
+                f"Pick {first}–{last}, or {band_first}–{ANIMATION_MAX} for a client running the "
+                "band plugin; --force does not override this.")
         cands = [wanted] if wanted is not None else _candidates(kind)
         if wanted is None and start is not None:
             cands = range(max(cands.start, start), cands.stop)
         for n in cands:
-            if last < n < (custom_band(kind)[0] or n):
+            if last < n < (band_first or n):
                 continue                     # the gap between the retail band and a custom one
             fid = file_id_for(kind, n)
             cur = _placement(root, fid)
@@ -230,7 +240,6 @@ def _pick_animation(root: Path, kind: str, wanted: Optional[int], force: bool,
             raise click.ClickException(
                 f"{kind} animation {wanted} (file id {file_id_for(kind, wanted)}) is already "
                 f"registered to {_placement(root, file_id_for(kind, wanted))}; pass --force to repoint it")
-        band_first, _b = custom_band(kind)
         lo = max(first, start or first)
         if band_first:
             raise click.ClickException(f"no free {kind} animation number between {lo} and {ANIMATION_MAX}")

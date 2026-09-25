@@ -528,9 +528,12 @@ generator fired: each texture a generator draws is in the output with its own pi
 > plugin can patch it so numbers at or above a threshold resolve into a reserved
 > region instead, and the publisher allocates there once the numbers any client loads
 > are used up. The bands are **on by default with cexislots' values** (weapon skills
-> 272–527, job abilities 1024+, spells 1612+; `FX_*_BAND_*` in `xi_config.py`): set them
-> in `.env` only for a different plugin, and set a band's `FIRST` to `0` to switch it off
-> for a stock client. The plan prints a `⚠` line when the number it took needs the plugin.
+> 272–527, job abilities 1024+, spells 1612+; `FX_*_BAND_*` in `xi_config.py`). They are
+> never read from `.env`, so they move when the plugin does; to switch the bands off for a
+> stock client, untick Settings › XI Tools › Custom animation bands in the viewer (it
+> sends each band's `FIRST` as `0`). Job abilities 500–1023 are never handed out: they keep
+> the retail arithmetic, where the client finds its warp and teleport effects (596–656).
+> The plan prints a `⚠` line when the number it took needs the plugin.
 > Band numbers are built with `--pivot`: their file ids sit past the expanded tables, the
 > plugin merges them from the XIPivot overlay's ROM10 tables, and the build grows that pair
 > (to 437,488 entries) the first time — the install's tables are never touched for it.
