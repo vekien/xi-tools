@@ -45,7 +45,7 @@ import click
 from xi.common import xi_dmsg as D
 from xi.menu import xi_menu_table as MT
 
-CATEGORIES = ("strings", "items", "dialog")
+CATEGORIES = ("strings", "items", "dialog", "menu")
 
 _ROM_RE = re.compile(r"^ROM[0-9]*/[0-9]+/[0-9]+\.DAT$", re.I)
 
@@ -77,11 +77,15 @@ def build(action: dict, root, edits_path: Path, *, dry_run: bool = False) -> dic
     out_path = MT.target_path(root, rom)
     created = not out_path.exists()
 
+    options = action.get("options") or {}
     try:
         if category == "strings":
-            new, n, grew = apply_strings(data, edits, default_sub=target.get("entry"), grow=grow)
+            new, n, grew = apply_strings(data, edits, default_sub=target.get("entry"), grow=grow,
+                                         fill=options.get("fill"))
         elif category == "items":
-            new, n, grew = apply_items(data, edits, rom, grow=grow)
+            new, n, grew = apply_items(data, edits, rom, grow=grow, fill=options.get("fill"))
+        elif category == "menu":
+            new, n, grew = apply_menu(data, edits, grow=grow, counts=options.get("records"))
         else:
             new, n, grew = apply_dialog(data, edits, grow=grow)
     except TableError as e:
@@ -159,8 +163,12 @@ def _template_block(table: D.DmsgTable) -> bytearray | None:
     return None
 
 
-def apply_strings(data: bytes, edits: list, *, default_sub=None, grow: bool = True):
-    """(new bytes, entries written, grown-to or None) for a d_msg table."""
+def apply_strings(data: bytes, edits: list, *, default_sub=None, grow: bool = True, fill=None):
+    """(new bytes, entries written, grown-to or None) for a d_msg table.
+
+    ``fill``: the text a filler block gets when the table grows past an id (a
+    clone of the table's own blocks holding that text, as some tables pad with
+    "."); None pads with empty blocks."""
     try:
         table = D.parse(data)
     except D.DmsgError as e:
@@ -171,8 +179,8 @@ def apply_strings(data: bytes, edits: list, *, default_sub=None, grow: bool = Tr
     for entry in edits:
         idx = _entry_id(entry, "strings")
         text = entry.get("text")
-        if not isinstance(text, str):
-            raise TableError(f"strings: edit {idx} needs a \"text\" string.")
+        if not isinstance(text, str) and entry.get("block_hex") is None:
+            raise TableError(f"strings: edit {idx} needs a \"text\" string (or \"block_hex\").")
         sub = entry.get("sub", default_sub)
         if idx >= len(table.blocks):
             if not grow:
@@ -183,9 +191,30 @@ def apply_strings(data: bytes, edits: list, *, default_sub=None, grow: bool = Tr
             template = template or _template_block(table)
             if template is None:
                 raise TableError("strings: no block with text to model a new entry on.")
-            D.ensure_len(table, idx)             # fillers up to the id, empty like retail's
+            if isinstance(fill, str):
+                slot = _text_slot(template, sub)
+                if slot < 0:
+                    raise TableError("strings: the table's blocks have no text slot to fill.")
+                filler = bytearray(D.set_text(template, slot, fill, stride=table.stride))
+                while len(table.blocks) < idx:
+                    table.blocks.append(bytearray(filler))
+            else:
+                D.ensure_len(table, idx)         # fillers up to the id, empty like retail's
             table.blocks.append(bytearray(template))
             grew = len(table.blocks)
+        block_hex = entry.get("block_hex")
+        if block_hex is not None:
+            # The whole block, byte for byte: for a table whose blocks carry more
+            # than the text (per-block metadata a rebuild must not normalise).
+            try:
+                raw = bytes.fromhex(str(block_hex).replace(" ", ""))
+            except ValueError:
+                raise TableError(f"strings: block_hex of {idx} is not hex.")
+            if table.stride and len(raw) != table.stride:
+                raise TableError(f"strings: block_hex of {idx} is {len(raw)} bytes; this table's blocks are {table.stride}.")
+            table.blocks[idx] = bytearray(raw)
+            n += 1
+            continue
         block = table.blocks[idx]
         slot = _text_slot(block, sub)
         if slot < 0 and _is_filler(block):
@@ -226,10 +255,18 @@ def item_table(rom: str):
     return None
 
 
-def apply_items(data: bytes, edits: list, rom: str, *, grow: bool = True):
-    """(new bytes, entries written, grown-to or None) for an item table."""
+def apply_items(data: bytes, edits: list, rom: str, *, grow: bool = True, fill=None):
+    """(new bytes, entries written, grown-to or None) for an item table.
+
+    An edit is either fields (only those given are written; a record past the
+    end is built from them) or ``"record_hex"``: the whole decrypted record,
+    the exact bytes ``xi ui items <group> json --header-bytes`` shows, for an
+    edit that has to land byte for byte — an icon, a field the layout does not
+    name. ``fill``: what a filler record holds when the table grows — a name
+    (default ".", retail's own placeholder) or an entry in an edit's shape
+    (fields, or ``record_hex``); every filler gets its own item id either way."""
     from xi.ui.items.xi_parser import _decrypt, _encrypt, _patch_record, build_record
-    from xi.ui.items.xi_layout import detect_stride, format_for_stride
+    from xi.ui.items.xi_layout import detect_stride, format_for_stride, layout_for_type, write_field
 
     info = item_table(rom)
     if info is None:
@@ -248,17 +285,26 @@ def apply_items(data: bytes, edits: list, rom: str, *, grow: bool = True):
         idx = item_id - base_id
         if idx < 0:
             raise TableError(f"items: id {item_id} is below {rom}'s first id {base_id}.")
+        raw = entry.get("record_hex")
         if idx >= count:
             if not grow:
                 raise TableError(f"items: id {item_id} is past the table ({count} records, ids "
                                  f"{base_id}..{base_id + count - 1}) and options.grow is off.")
             # Retail's unused slots hold ".", which is what the item tools treat as free.
-            filler = filler or build_record({"name": "."}, item_type, fmt)
+            if filler is None:
+                if isinstance(fill, dict) and fill.get("record_hex") is not None:
+                    filler = bytearray(_record_bytes(fill["record_hex"], stride, "options.fill"))
+                else:
+                    spec = dict(fill) if isinstance(fill, dict) else {"name": fill if isinstance(fill, str) else "."}
+                    filler = bytearray(build_record(spec, item_type, fmt))
             while count <= idx:
+                write_field(filler, layout_for_type(item_type), fmt, "id", base_id + count)
                 buf += filler
                 count += 1
             grew = count
-            rec = build_record(dict(entry), item_type, fmt)
+            rec = _record_bytes(raw, stride, item_id) if raw is not None else build_record(dict(entry), item_type, fmt)
+        elif raw is not None:
+            rec = _record_bytes(raw, stride, item_id)
         else:
             rec = bytearray(buf[idx * stride:(idx + 1) * stride])
             _patch_record(rec, dict(entry), item_type, fmt)
@@ -266,6 +312,68 @@ def apply_items(data: bytes, edits: list, rom: str, *, grow: bool = True):
         buf[idx * stride:(idx + 1) * stride] = rec
         n += 1
     return _encrypt(bytes(buf)), n, grew
+
+
+def _record_bytes(raw, stride: int, what) -> bytes:
+    try:
+        rec = bytes.fromhex(str(raw).replace(" ", ""))
+    except ValueError:
+        raise TableError(f"record_hex of {what} is not hex.")
+    if len(rec) != stride:
+        raise TableError(f"record_hex of {what} is {len(rec)} bytes; this table's records are {stride:#x}.")
+    return rec
+
+
+# ── menu: the spell and command records of ROM/118/114.DAT ─────────────────────
+
+def apply_menu(data: bytes, edits: list, *, grow: bool = True, counts=None):
+    """(new bytes, entries written, grown-to or None) for the menu table.
+
+    An edit names ``"kind"`` (``spell`` or ``command``), the record ``"id"``,
+    and either ``"record_hex"`` — the whole decoded record, what
+    ``capture_record`` keeps — or the fields ``xi ui spells export`` shows,
+    written over the record that is there. ``counts``: ``{"spell": N,
+    "command": N}`` grows each section to at least N records, empty like the
+    ones the client ignores; an edit past the end grows it too. The other
+    sections of the file are carried over as they are."""
+    try:
+        menu = MT.parse(data)
+    except MT.MenuError as e:
+        raise TableError(f"not a menu table: {e}")
+    grew = {}
+    for kind, want in (counts or {}).items():
+        if kind not in MT.KINDS:
+            raise TableError(f"menu: options.records names {kind!r}; the kinds are spell and command.")
+        if int(want) > menu.count(kind):
+            menu.ensure_count(kind, int(want))
+            grew[kind] = menu.count(kind)
+    n = 0
+    for entry in edits:
+        kind = entry.get("kind")
+        if kind not in MT.KINDS:
+            raise TableError(f"menu: every edit needs \"kind\": spell or command (got {kind!r}).")
+        idx = _entry_id(entry, "menu")
+        k = MT.KINDS[kind]
+        if idx >= k.ceiling:
+            raise TableError(f"menu: {kind} {idx} is past the client ceiling {k.ceiling - 1}.")
+        if idx >= menu.count(kind):
+            if not grow:
+                raise TableError(f"menu: {kind} {idx} is past the table ({menu.count(kind)} records) "
+                                 "and options.grow is off.")
+            menu.ensure_count(kind, idx + 1)
+            grew[kind] = menu.count(kind)
+        raw = entry.get("record_hex")
+        if raw is not None:
+            rec = _record_bytes(raw, k.stride, f"{kind} {idx}")
+        else:
+            fields = {key: v for key, v in entry.items() if key not in ("kind", "id", "name")}
+            try:
+                rec = MT.write_fields(kind, menu.records(kind)[idx], fields)
+            except (MT.MenuError, KeyError, ValueError) as e:
+                raise TableError(f"menu: {kind} {idx}: {e}")
+        menu.set_record(kind, idx, rec)
+        n += 1
+    return menu.serialize(), n, (grew or None)
 
 
 # ── dialog: a zone's dialog table ──────────────────────────────────────────────
@@ -282,15 +390,19 @@ def apply_dialog(data: bytes, edits: list, *, grow: bool = True):
     for entry in edits:
         idx = _entry_id(entry, "dialog")
         raw_hex = entry.get("raw_hex")
+        gap_hex = entry.get("gap_hex")
         text = entry.get("text")
         try:
-            if isinstance(raw_hex, str):
+            if isinstance(gap_hex, str):
+                # the entry's whole byte-gap, terminator included: what raw_entry_blobs yields
+                blob = bytes.fromhex(gap_hex.replace(" ", ""))
+            elif isinstance(raw_hex, str):
                 blob = bytes.fromhex(raw_hex.replace(" ", "")) + b"\x00"
             elif isinstance(text, str):
                 blob = (XD.replace_entry_text(blobs[idx], text) if idx < len(blobs)
                         else XD.encode_event_string(text) + b"\x00")
             else:
-                raise TableError(f"dialog: edit {idx} needs \"text\" or \"raw_hex\".")
+                raise TableError(f"dialog: edit {idx} needs \"text\", \"raw_hex\" or \"gap_hex\".")
         except (ValueError, XD.DialogError) as e:
             raise TableError(f"dialog: entry {idx}: {e}")
         if idx >= len(blobs):

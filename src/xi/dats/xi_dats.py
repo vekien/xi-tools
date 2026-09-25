@@ -1600,7 +1600,7 @@ def json_cmd(manifest: Path, output: Path | None):
               help="Spell / command definitions: the record id to take (default auto = highest free above the retail band).")
 @click.option("--menu-index", type=int, default=None,
               help="Spell definitions: the menu slot to sort into (default auto = next after retail's).")
-@click.option("--category", type=click.Choice(["strings", "items", "dialog"]), default=None,
+@click.option("--category", type=click.Choice(["strings", "items", "dialog", "menu"]), default=None,
               help="Table edits (--type ui): which kind of table --target is.")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,

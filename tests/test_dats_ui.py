@@ -209,6 +209,83 @@ def test_dialog_text_raw_and_append(game):
     assert _result("ui.dialog")["grown_to"] == 5
 
 
+# ── byte-exact forms, fillers, and the menu table ─────────────────────────────
+
+def test_strings_fill_and_block_hex(game):
+    root, pivot = game
+    src = D.parse((root / Path(*NAMES.split("/"))).read_bytes())
+    exact = bytes(src.blocks[5])
+    _project([_ui("ui.names", NAMES, "strings", "names", options={"fill": "."})],
+             {"names": [{"id": 10, "text": "Tenth"}, {"id": 1, "block_hex": exact.hex()}]})
+    assert _build("--pivot").exit_code == 0
+    out = D.parse((pivot / Path(*NAMES.split("/"))).read_bytes())
+    assert len(out.blocks) == 11 and D.get_text(out.blocks[10], 0) == "Tenth"
+    assert all(D.get_text(out.blocks[i], 0) == "." for i in (8, 9))     # fillers carry the fill text
+    assert bytes(out.blocks[1]) == exact                                # block_hex lands verbatim
+
+
+def test_items_record_hex_lands_verbatim(game):
+    root, pivot = game
+    src = ItemDat.load(root / Path(*ITEMS.split("/")))
+    rec = bytearray(src.record(2))
+    rec[0x40:0x44] = b"\xde\xad\xbe\xef"                                # a field no layout names
+    _project([_ui("ui.items", ITEMS, "items", "items")],
+             {"items": [{"id": 2, "record_hex": bytes(rec).hex()}, {"id": 9, "record_hex": bytes(rec).hex()}]})
+    assert _build("--pivot").exit_code == 0
+    out = ItemDat.load(pivot / Path(*ITEMS.split("/")))
+    assert out.record(2) == bytes(rec) and out.record(9) == bytes(rec) and out.count == 10
+    _project([_ui("ui.items", ITEMS, "items", "short")], {"short": [{"id": 2, "record_hex": "0000"}]})
+    r = _build("--pivot")
+    assert r.exit_code != 0 and "record_hex" in r.output
+
+
+def test_items_fill_record_gets_each_slots_id(game):
+    root, pivot = game
+    src = ItemDat.load(root / Path(*ITEMS.split("/")))
+    placeholder = bytearray(src.record(3))
+    placeholder[0x40:0x44] = b"\xca\xfe\xf0\x0d"                        # e.g. a shared "no image" icon
+    _project([_ui("ui.items", ITEMS, "items", "items", options={"fill": {"record_hex": bytes(placeholder).hex()}})],
+             {"items": [{"id": 8, "name": "Eighth"}]})
+    assert _build("--pivot").exit_code == 0
+    out = ItemDat.load(pivot / Path(*ITEMS.split("/")))
+    assert out.count == 9 and _name(out, 8) == "Eighth"
+    for i in (4, 5, 6, 7):
+        rec = out.record(i)
+        assert int.from_bytes(rec[:4], "little") == i and rec[4:] == bytes(placeholder[4:])
+
+
+def test_dialog_gap_hex_lands_verbatim(game):
+    root, pivot = game
+    blobs, _ = XD.raw_entry_blobs((root / Path(*DIALOG.split("/"))).read_bytes())
+    gap = b"Odd end\x00\x07"                                             # a gap that does not end in NUL
+    _project([_ui("ui.dialog", DIALOG, "dialog", "dialog")],
+             {"dialog": [{"id": 1, "gap_hex": gap.hex()}, {"id": 4, "gap_hex": blobs[0].hex()}]})
+    assert _build("--pivot").exit_code == 0
+    out, _ = XD.raw_entry_blobs((pivot / Path(*DIALOG.split("/"))).read_bytes())
+    assert out[1] == gap and out[4] == blobs[0] and out[2] == blobs[2] and len(out) == 5
+
+
+def test_menu_records_fields_hex_and_growth(game):
+    root, pivot = game
+    menu_rom = MT.MENU_DAT
+    src = MT.parse((root / Path(*menu_rom.split("/"))).read_bytes())
+    exact = src.records("command")[1]
+    _project([_ui("ui.menu", menu_rom, "menu", "menu", options={"records": {"spell": 16}})],
+             {"menu": [{"kind": "spell", "id": 3, "mp": 99, "levels": {"BLM": 40}},
+                       {"kind": "command", "id": 9, "record_hex": exact.hex()},
+                       {"kind": "spell", "id": 20, "record_hex": src.records("spell")[2].hex()}]})
+    r = _build("--pivot")
+    assert r.exit_code == 0, r.output
+    out = MT.parse((pivot / Path(*menu_rom.split("/"))).read_bytes())
+    assert out.count("spell") == 21 and out.count("command") == 10      # 16 asked, 21 needed; 10 by the edit
+    f = MT.read_fields("spell", out.records("spell")[3])
+    assert f["mp"] == 99 and f["levels"].get("BLM") == 40
+    assert out.records("command")[9] == exact and out.records("spell")[20] == src.records("spell")[2]
+    assert all(MT.is_empty(r_) for r_ in out.records("spell")[8:20])      # growth is empty records
+    assert [s.tag for s in out.sections] == [s.tag for s in src.sections]  # other sections carried over
+    assert _result("ui.menu")["grown_to"] == {"spell": 21, "command": 10}
+
+
 # ── undo / prepare ────────────────────────────────────────────────────────────
 
 def test_undo_deletes_what_the_build_created(game):
@@ -265,7 +342,8 @@ def test_retail_tables_pass_through_unchanged(root):
         return (base if base.exists() else p).read_bytes()
     for rel, fn in ((NAMES, lambda d: T.apply_strings(d, [])),
                     (ITEMS, lambda d: T.apply_items(d, [], ITEMS)),
-                    (DIALOG, lambda d: T.apply_dialog(d, []))):
+                    (DIALOG, lambda d: T.apply_dialog(d, [])),
+                    (MT.MENU_DAT, lambda d: T.apply_menu(d, []))):
         if not (root / rel).exists():
             pytest.skip(f"{rel} not in this install")
         data = pristine(rel)

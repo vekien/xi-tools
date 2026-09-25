@@ -187,25 +187,35 @@ Full detail: [../menu/records.md](../menu/records.md).
 
 ### Table edits (`ui` action)
 
-Most of what a server changes in the client is not a new file but a few entries of a
-retail table: a spell's name, an item's description, the line an NPC says. A `ui` action
-holds those edits and nothing else; the build reads the table as the target sees it,
-applies them, and writes the whole table back at its own ROM path. Untouched entries are
-carried over byte for byte, so a build is reproducible from the edits plus the install and
-a repository need only hold the edits.
+A `ui` action carries a retail table's edits at the level of the table's own bytes: the
+build reads the table as the target sees it, applies them, and writes the whole table back
+at its own ROM path. Untouched entries are carried over byte for byte, so a build is
+reproducible from the edits plus the install and a repository need only hold the edits.
 
-Three kinds of table, each edited with the JSON its export command writes:
+It sits beside the [`database`](#database-records-edit-or-add-items-key-items-titles-)
+action, which is the way to *author* a record edit — by field name, in both languages,
+with the server rows — and reaches for what that action does not: **growing** a table past
+its retail count (a text table to 4,096 rows, an item table past its band, the menu
+records), an entry's **exact bytes** where a rebuild must not normalise them (an icon, a
+field no layout names, a table migrated from another tool), a zone's **dialog** table, and
+the spell and command **records** of `ROM/118/114.DAT`.
+
+Four kinds of table, each edited with the JSON its export command writes:
 
 | `target.category` | The table | Edits (`resources.json`) |
 |---|---|---|
 | `strings` | any d_msg table — `xi ui strings list` names the common ones | `[{"id": 12, "text": "…"}]` from `xi ui strings export`; an entry's `"sub"` (else `target.entry`) picks the sub-string, default the block's first text |
 | `items` | an item table `xi ui items info` knows | `[{"id": 30720, "name": "…", "level": 5, "jobs_list": ["WAR"]}]` from `xi ui items <group> json`; `id` is the item id, only the fields given are written, and an id past the end is built the way `xi ui items <group> inject` builds one |
-| `dialog` | a zone's dialog table (what `xi event dialogue` edits) | `[{"id": 3, "text": "…"}]` from `xi event dialogue export`, with `edit`'s escapes (`\n`, `\v`, `{player}`); `"raw_hex"` instead of `text` writes those exact bytes |
+| `dialog` | a zone's dialog table (what `xi event dialogue` edits) | `[{"id": 3, "text": "…"}]` from `xi event dialogue export`, with `edit`'s escapes (`\n`, `\v`, `{player}`); `"raw_hex"` instead of `text` writes those exact bytes, `"gap_hex"` the entry's whole byte-gap, terminator included |
+| `menu` | the spell and command records of `ROM/118/114.DAT` | `[{"kind": "spell", "id": 84, "mp": 40, "levels": {"BLM": 75}}]` — the fields `xi ui spells export` shows, written over the record; `"record_hex"` instead writes the whole decoded record. `options.records` (`{"spell": 4096, "command": 4096}`) grows each section with empty records; the file's other sections are carried over |
 
 One language's DAT per action: a JP table is a second action. An id past the end of the
 table grows it (empty entries up to the id, then the entry) unless `options.grow` is
-false. Edits layer — two actions on one DAT both land, the second reading the first's
-copy from the target — so a project can split a big table's edits by theme.
+false; `options.fill` gives the filler entries a text (strings) or a name or whole record (items)
+where a table's convention is a placeholder rather than an empty entry. Edits layer — two actions
+on one DAT both land, the second reading the first's copy from the target — so a project
+can split a big table's edits by theme. An entry can always carry its exact bytes instead
+of fields (`block_hex`, `record_hex`, `gap_hex`), for a table a rebuild must not normalise.
 
 ```bash
 uv run xi ui strings export Spell_Names -o edits/spell_names_en.json     # then keep only the changed entries
