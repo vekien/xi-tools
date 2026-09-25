@@ -231,8 +231,11 @@ span 468–498).
 sub-area. `--sub-areas` also writes each sub-area from its own DAT as `<stem>_<id>`
 beside the zone (Lower Jeuno: `41` plus `41_454` … `41_466`) and leaves the stand-ins
 it replaces out of the main file, so the files line up as the game shows each one from
-inside. `--no-subareas` drops the stand-ins without writing the sub-areas. Details, the
-texture naming for clashes, and the limits: [export.md](export.md#sub-areas-as-files---sub-areas).
+inside. `--no-subareas` drops the stand-ins without writing the sub-areas. With `--objects`
+each sub-area is a `<stem>_<id>/` folder of per-object files instead. `--json` lists every
+sub-area with its own placements (zone world space), and `--zero-coords` adds where each
+zeroed file goes back. Details, the texture naming for clashes, and the limits:
+[export.md](export.md#sub-areas-as-files---sub-areas).
 
 ## How the XI Model Viewer implements it
 

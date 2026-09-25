@@ -1,6 +1,6 @@
 """A small JSON Schema (2020-12) checker for the subset the xi-tools schema files use:
 type, const, enum, required, properties, additionalProperties, items, minItems,
-maxItems, minimum, maximum, pattern and ``$ref`` (local ``#/$defs/…`` and sibling
+maxItems, minimum, maximum, pattern, anyOf and ``$ref`` (local ``#/$defs/…`` and sibling
 ``<file>.json#/$defs/…``). ``jsonschema`` isn't a dependency; this keeps a command's
 real output honest against its schema file in the tests."""
 import json
@@ -39,6 +39,8 @@ def errors(schema: dict, value, path: str = "$", root: dict | None = None) -> li
     if "$ref" in schema:
         sub, sub_root = _resolve(schema["$ref"], root)
         return errors(sub, value, path, sub_root)
+    if "anyOf" in schema and all(errors(s, value, path, root) for s in schema["anyOf"]):
+        out.append(f"{path}: matches none of anyOf")
     t = schema.get("type")
     if t is not None:
         ts = t if isinstance(t, list) else [t]

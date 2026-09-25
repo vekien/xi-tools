@@ -72,6 +72,7 @@ from xi.entity.mesh.xi_export import (
     DEFAULT_ALPHA_SCALE,
     build_gltf,
     convert_glb_to_fbx,
+    convert_glb_to_fbx_zeroed,
     parse_textures,
     rom_relative,
 )
@@ -337,7 +338,7 @@ def build_pose(sources: List[PoseSource], output_dir: Path, name: str = "pose",
                occlusion: bool = True, draw_ranged: bool = False,
                fbx: bool = False, alpha_scale: float = DEFAULT_ALPHA_SCALE,
                mesh_merge_dp: int = 4, weld: bool = True,
-               split_tex: bool = False) -> dict:
+               split_tex: bool = False, zero_coords: bool = False) -> dict:
     """Merge every DAT in ``sources`` onto one skeleton and write ``<name>.glb`` (+ PNGs,
     + ``.fbx`` when asked) into ``output_dir``.
 
@@ -492,7 +493,11 @@ def build_pose(sources: List[PoseSource], output_dir: Path, name: str = "pose",
                          mesh_merge_dp=mesh_merge_dp, weld=weld, split_tex=split_tex)
     glb_path = written[0]
     if fbx:
-        written.append(convert_glb_to_fbx(glb_path, bake_anim=bool(embedded)))
+        if zero_coords:
+            # A rigged model keeps its skeleton root at the origin, so nothing moves.
+            written.append(convert_glb_to_fbx_zeroed(glb_path, bake_anim=bool(embedded))[0])
+        else:
+            written.append(convert_glb_to_fbx(glb_path, bake_anim=bool(embedded)))
 
     return {
         "ok": True,
@@ -630,10 +635,12 @@ def _resolve_dat(spec: str) -> Path:
               help="Weld vertices by world position + UV across all parts.")
 @click.option("--split-tex", is_flag=True, default=False,
               help="Unmirror the skin into a stacked 2-up texture atlas and remap the UVs.")
+@click.option("--zero-coords", "--zero-cords", "zero_coords", is_flag=True, default=False,
+              help='Every object in the FBX imports at location 0,0,0 with no rotation: the orientation fix is baked into the armature and mesh instead of a rotated root. The skeleton root stays the origin. Needs --fbx; the .glb is unchanged.')
 @click.option("--json", "as_json", is_flag=True, default=False, help="Emit the summary as JSON.")
 def pose_cmd(dats, look_hex, race, slots_spec, main_dats, sub_dats, ranged_dats, skeleton_dat,
              anim_dats, output, name, anim, frame, pose_file, all_frames, fbx, keep_hidden,
-             draw_ranged, alpha_scale, mesh_merge_dp, weld, split_tex, as_json):
+             draw_ranged, alpha_scale, mesh_merge_dp, weld, split_tex, zero_coords, as_json):
     """Export a fully dressed character — every slot and the weapons — as one GLB/FBX.
 
     Unlike merging the DATs by hand, this drops the pieces the worn set hides: the
@@ -699,7 +706,7 @@ def pose_cmd(dats, look_hex, race, slots_spec, main_dats, sub_dats, ranged_dats,
             anim=(anim or None), frame=frame, all_frames=all_frames,
             pose_file=(Path(pose_file) if pose_file else None),
             occlusion=not keep_hidden, draw_ranged=draw_ranged, fbx=fbx, alpha_scale=alpha_scale,
-            mesh_merge_dp=mesh_merge_dp, weld=weld, split_tex=split_tex)
+            mesh_merge_dp=mesh_merge_dp, weld=weld, split_tex=split_tex, zero_coords=zero_coords)
     except (ValueError, FileNotFoundError) as exc:
         raise click.ClickException(str(exc))
 

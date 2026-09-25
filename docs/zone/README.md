@@ -31,7 +31,9 @@ a zone DAT (`ROM/<dir>/<dat>.DAT`). Mirrors the `xi zone` command group.
 `zone export` defaults to what the client actually draws: collision-only proxies,
 far-distance stand-in copies are filtered out (`--with-collision-proxies`, `--with-far-lod`
 add them back; `--no-subareas` drops the sub-area stand-ins, `--sub-areas` also writes each
-sub-area as its own `<stem>_<id>` file) — see [export.md](export.md#options).
+sub-area as its own `<stem>_<id>` file, or with `--objects` a `<stem>_<id>/` folder of its
+objects). `--zero-coords` puts every FBX at 0,0,0 with no rotation and records where each
+goes back in the `.zone.json` — see [export.md](export.md#options).
 
 ## Individual objects — `object …`
 

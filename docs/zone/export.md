@@ -5,10 +5,11 @@ texture-embedded `.fbx`, with every object instanced and placed in world space.
 
 ```bash
 uv run xi zone export <dat> [--fbx] [--no-sky] [--no-vfx] [--objects] [--collision] [--json] [--base] [--raw] [--right-handed] [--unreal] [--vertex-color raw|baked] [--alpha-scale N] [--opaque]
-                            [--with-collision-proxies] [--with-far-lod] [--no-subareas] [--sub-areas] [--no-weld] [--weld-seams] [--mesh-merge-dp N]
+                            [--with-collision-proxies] [--with-far-lod] [--no-subareas] [--sub-areas] [--zero-coords] [--no-weld] [--weld-seams] [--mesh-merge-dp N]
                             [--alpha-split-mesh] [--decal-offset N] [--decal-smooth-angle DEG]
 uv run xi zone export ROM/1/41            # Lower Jeuno
 uv run xi zone export ROM/1/41 --sub-areas   # + 41_454 ... 41_466, one file per shop interior
+uv run xi zone export ROM/1/41 --unreal --objects --sub-areas --zero-coords   # every FBX at 0,0,0 + where it goes in 41.zone.json
 uv run xi zone export ROM/1/41 --alpha-split-mesh --right-handed   # Unreal: base + decal FBX pair
 ```
 
@@ -39,18 +40,19 @@ Zones are a different format from entity models (no skeleton); see
 | `--fbx` | Also export a texture-embedded `.fbx` via Blender (for editors like C4D that can't open `.glb`). Import always expects `.glb`. |
 | `--no-sky` | Omit the skybox/celestial chunks (sun, moon, stars, clouds). |
 | `--no-vfx` | Omit every **unplaced** (non-world) mesh — any `0x2E` mesh with no `0x1C` placement that isn't sky. Covers effect-placed VFX (water jets, light glows, `lcut`/`lightstp`, prop generators) **and** dead/unreferenced geometry the client never renders (`cyst`, `sh-u`). Combine with `--no-sky` to leave only placed world geometry (empty `unplaced_skybox` node). |
-| `--objects` | Export **each mesh as its own file** — `<meshname>.glb` (and `<meshname>.fbx` with `--fbx`) into a `<stem>_objects/` subfolder, instead of one combined zone file. Each object is emitted in local space at the origin (its raw geometry) with textures embedded, oriented by the same `ffxi_root_correction` node. Honors `--no-sky`/`--no-vfx` for which meshes are written. **Note:** with `--fbx` this spawns Blender once per object, so a full zone (100s of meshes) takes a while. |
+| `--objects` | Export **each mesh as its own file** — `<meshname>.glb` (and `<meshname>.fbx` with `--fbx`) straight into the output folder, instead of one combined zone file. Each object is emitted in local space at the origin (its raw geometry) with textures embedded, oriented by the same `ffxi_root_correction` node. Honors `--no-sky`/`--no-vfx` for which meshes are written. With `--sub-areas`, each sub-area's objects go in a `<stem>_<id>/` folder. **Note:** with `--fbx` this spawns Blender once per object, so a full zone (100s of meshes) takes a while. |
 | `--collision` | Also dump the **player-collision mesh** (the `0x1C` MZB triangle soup) to `<stem>.collision.obj` + `.mtl` + `.collision.json`. Same frame as the `.glb` so it overlays. See [collision.md](collision.md). |
 | `--base` | Export from the pristine original instead of your edited DAT — handy to regenerate a clean model after edits. |
 | `--raw` | Omit the orientation-correction node (raw FFXI coords). View-only — a raw export is not meant to be re-imported. |
 | `--right-handed` | Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into geometry (engines drop the negative node scale, mirroring the zone and breaking collision) **and** flip winding to CCW-front so single-sided engines light the terrain instead of culling it black. See below. |
 | `--unreal` | Unreal preset: `--right-handed` + `--opaque` + `--fbx` + `--vertex-color raw`. One flag for a UE-facing FBX with correct winding/orientation, no clipped floors, and FFXI's `×2` left to the zone material. The generated `*.ue5_mat.py` states the material contract. An explicit `--vertex-color` still wins. See below. |
 | `--vertex-color raw\|baked` | Where FFXI's baked-lighting `×2` (modulate2x) lives in `COLOR_0`. **Default `baked`** folds it in and clamps it, so a shaderless glTF/DCC viewer shows in-game brightness. `raw` emits the untouched DAT colour (and real vertex alpha) and leaves the `×2` to the engine material — matches `entity mesh export`. `--unreal` implies `raw`. See below. |
-| `--json` | Also write `<stem>.zone.json`: every placement (full TRS, LOD, links), mesh list, textures, per-weather ambient sounds, companion event/dialog/NPC DAT paths, sub-area interior DATs. |
+| `--json` | Also write `<stem>.zone.json`: every placement (full TRS, LOD, links), mesh list, textures, per-weather ambient sounds, companion event/dialog/NPC DAT paths, and each sub-area's DAT with its own placements (in the zone's world space). Format: [`schema/zone_export.json`](../../schema/zone_export.json) (`xi.zone-export.v1`). |
 | `--with-collision-proxies` | Include **collision-only placements** — draw distance exactly `1.0`, the sentinel the client treats as never-render (`hitwall_*`, `kabe-atariyou`, `hit_*`, `id_board*` / `id_box*`). Retail has 15,835 of them; Ru'Aun Gardens is 45% proxies. Off by default: they stack invisible geometry on the zone. |
 | `--with-far-lod` | Include **far copies** — `m_` / `lnd_` meshes that stand in for richer geometry the zone also places (Ru'Aun's `m_osid_*` islands, `m_bri_*` bridge). The client shows one or the other by region, so exporting both puts the cheap copy inside the detailed one. Only fires where a richer same-stem twin is actually placed, so ordinary `m_` props (`m_bed_02`, `m_pot`) are never affected. |
 | `--no-subareas` | Omit the **sub-area stand-ins** (`0x1C` `+0x50` link): the low-detail placeholder the client draws for each sub-area until the camera enters it, then swaps for the sub-area's own DAT — the closed shop room in the towns, Ru'Aun Gardens' island platforms. Kept by default. `--sub-areas` already leaves out the ones it exports. See [subareas.md](subareas.md). |
-| `--sub-areas` | Also export **each sub-area from its own DAT** as `<stem>_<id>` beside the zone, `<id>` being the sub-area id — see [Sub-areas as files](#sub-areas-as-files---sub-areas). Can't be combined with `--objects`. |
+| `--sub-areas` | Also export **each sub-area from its own DAT** as `<stem>_<id>` beside the zone, `<id>` being the sub-area id — see [Sub-areas as files](#sub-areas-as-files---sub-areas). With `--objects`, each sub-area is a `<stem>_<id>/` folder of its objects instead. |
+| `--zero-coords` | Every FBX imports at **location 0,0,0 with no rotation**, and `--json` (implied) records where each goes back — see [Zero coords](#zero-coords---zero-coords). Needs `--fbx`. `--zero-cords` works too. |
 | `--alpha-scale N` | Multiply texture alpha by `N` (clamped to 255) before writing the PNGs. **Default `2.0`** — see below. Pass `1.0` for the raw FFXI alpha, or higher to force more opacity. |
 | `--opaque` | Write non-blend materials as `alphaMode: OPAQUE` instead of `MASK`. Fixes the checkerboard/eaten floors and walls some zones show in Blender — see below. |
 | `--no-weld` | Keep the original per-triangle vertices. **Welding is on by default** — see below. |
@@ -310,8 +312,8 @@ empty `unplaced_skybox` node and only your placed world geometry.
 
 ## Per-object export (`--objects`)
 
-Instead of one combined zone file, `--objects` writes **one file per mesh** into a
-`<stem>_objects/` subfolder — e.g. `t_obj05.glb`, `tower_a1.glb` (and `.fbx` too
+Instead of one combined zone file, `--objects` writes **one file per mesh** straight
+into the output folder — e.g. `t_obj05.glb`, `tower_a1.glb` (and `.fbx` too
 with `--fbx`). Each object is emitted in **local space at the origin** (its raw
 geometry, not its world placements), textures embedded, oriented by the same
 `ffxi_root_correction` node as the full export. This is the way to pull a zone's
@@ -320,12 +322,22 @@ props out as a reusable asset library.
 ```bash
 # Every placed world object as its own fbx (sky + vfx pruned)
 uv run xi zone export ROM/1/41 --objects --fbx --no-sky --no-vfx
-#   -> exports/zone/.../41_objects/t_obj05.fbx, tower_a1.fbx, ...
+#   -> exports/zone/.../t_obj05.fbx, tower_a1.fbx, ...
+
+# ...and every sub-area's objects too, one folder per sub-area
+uv run xi zone export ROM/1/41 --objects --sub-areas --fbx --no-sky --no-vfx
+#   -> exports/zone/.../t_obj05.fbx, ...  +  41_454/*.fbx ... 41_466/*.fbx
 ```
 
 `--no-sky` / `--no-vfx` decide which meshes are written (same filtering as the
 combined export). With `--fbx`, Blender is spawned once per object, so a full zone
 (100s of meshes) takes a while — progress prints per object.
+
+With `--sub-areas` (below) the zone's objects stay in the output folder and each
+sub-area's go in a `<stem>_<id>/` folder beside them, with its own loose PNGs. The
+zone leaves out the stand-ins those sub-areas replace, as in the combined export.
+`--collision` and `--json` still write the zone's `<stem>.collision.obj` /
+`<stem>.zone.json` next to the objects.
 
 ## Sub-areas as files (`--sub-areas`)
 
@@ -348,6 +360,58 @@ uv run xi zone export ROM2/12/107 --sub-areas        # Ru'Aun Gardens: 107 + 107
   versions), so no file's FBX points at another's texture.
 - Geometry only: `--collision` and `--json` stay on the main zone. Every other
   option (`--fbx`, `--unreal`, `--alpha-split-mesh`, weld, alpha…) applies to each file.
+- With `--objects` each sub-area is a `<stem>_<id>/` folder of per-object files
+  instead of one file (see [Per-object export](#per-object-export---objects)).
+
+## Zero coords (`--zero-coords`)
+
+For placing a zone by hand, or from the JSON, in an engine. Every FBX the export writes
+imports at location 0,0,0 with rotation 0 and scale 1:
+
+- The `ffxi_root_correction` orientation fix and every placement are baked into the
+  geometry, and the empties that held them are dropped, so no object carries a
+  transform.
+- Each file is then moved so the centre of its base (bounds centre across, lowest point
+  up) sits on the origin: the zone file, each `--sub-areas` file and each `--objects`
+  file, each on its own.
+
+```bash
+uv run xi zone export ROM/1/41 --unreal --sub-areas --zero-coords            # 41.fbx, 41_454.fbx ... each at 0,0,0
+uv run xi zone export ROM/1/41 --unreal --objects --sub-areas --zero-coords  # every object at 0,0,0
+```
+
+`--zero-coords` implies `--json`. `<stem>.zone.json` gains `fbx_zero_coords`, one entry per FBX:
+
+```json
+"fbx_zero_coords": {
+  "frame": "The FBX as Blender imports it: Z-up, right-handed, 1 unit = 1 FFXI unit. ...",
+  "files": [
+    {"file": "41.fbx", "kind": "zone", "offset": [x, y, z]},
+    {"file": "41_454.fbx", "kind": "sub_area", "sub_area": 454, "offset": [x, y, z]},
+    {"file": "41_454/lamp2.fbx", "kind": "object", "mesh": "lamp2", "sub_area": 454,
+     "offset": [x, y, z],
+     "instances": [{"placement": 13, "matrix": [[...], [...], [...], [0, 0, 0, 1]],
+                    "location": [x, y, z], "rotation": [0.0, 0.0, -30.0], "scale": [1, 1, 1]}]}
+  ]
+}
+```
+
+- `offset` is how far the file was moved. Putting a zone or sub-area file at its
+  `offset` puts it back where the game has it, so they all line up.
+- An object file has one `instances` entry per placement of that mesh (a mesh the zone
+  never places, drawn at the origin, gets one entry with no `placement`). Each is the
+  object's full transform, offset included: a row-major 4x4 `matrix`, and the same as
+  `location`, `rotation` (XYZ Euler, degrees, Blender's order) and `scale`. `placement`
+  is the record's `index` in `placements`, or in the sub-area's `placements`. A mirrored
+  placement has `"mirrored": true` and a negative X scale.
+- Everything is in the frame the FBX imports in (Blender's): FFXI `(x, y, z)` is
+  `(-x, -z, -y)` there, or `(x, -z, y)` with `--raw`.
+- `--collision`'s OBJ is not moved; it lines up with the zone FBX placed at its offset.
+- The `.glb` is unchanged; with no `--fbx` the flag does nothing. It can't be combined
+  with `--alpha-split-mesh`.
+
+`xi mesh export` and `xi gear pose` take `--zero-coords` too: the orientation fix is baked
+into the armature and mesh, and the skeleton root stays the origin.
 
 ## Requirements & limits
 
