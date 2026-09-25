@@ -135,6 +135,7 @@ reference, camera handling, and a cutscene authoring guide.
 | [events/opcodes.md](events/opcodes.md) | Complete event-VM opcode reference (0x00–0xD9) |
 | [events/cutscenes.md](events/cutscenes.md) | How a scripted scene plays: trigger → run → release, camera, resource graph |
 | [events/authoring.md](events/authoring.md) | Authoring custom cutscenes and NPC dialogue events; the `xi.cutscene.v1` JSON step vocabulary; `explain` / `survey` / `lint` / `npc` |
+| [events/zone_events.md](events/zone_events.md) | The `zone_events` dats action: cutscenes and dialogues compiled into a zone's event + EN/JP dialog tables, camera scene DATs, recorded and undone exactly |
 | [events/retail-events.md](events/retail-events.md) | Decompile any retail event to JSON, edit it, recompile byte-exact; `sweep` proves whole zones |
 | [events/typed_opcodes.md](events/typed_opcodes.md) | The typed opcode table the decompiler and compiler share |
 | [events/cutscene-dev-guide.md](events/cutscene-dev-guide.md) | Browser editor + compile pipeline for custom cutscenes |
@@ -160,6 +161,8 @@ the event DAT that triggers it.
 |-----|---------|
 | [dialog/format.md](dialog/format.md) | Container format: 24-bit length, XOR-`0x80`, offset table, `0x7F` prompt codes |
 | [dialog/export.md](dialog/export.md) | Decoding to JSON: text, opcodes, hex |
+| [zone/zone_npcs.md](zone/zone_npcs.md) | The `zone_npcs` dats action: rename or add a zone's NPCs (name table + proposed `npc_list` SQL) |
+| [dialog/zone_dialog.md](dialog/zone_dialog.md) | The `zone_dialog` dats action: edit or add a zone's dialog lines by id, EN + JP, recorded and undone exactly |
 | [dialog/edit.md](dialog/edit.md) | Authoring custom dialog: `\n`, `\v`, `{player}`, `{npc}`, faithful rebuild |
 
 ---

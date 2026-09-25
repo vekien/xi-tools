@@ -161,7 +161,7 @@ See [events/README.md](events/README.md) for the big picture + per-zone file IDs
 - `uv run xi event explain <zone> <actor|name> [--event N]` ([docs](events/retail-events.md)) — annotated disassembly: every operand resolved, dialog text inline; `--list` shows a zone's actors
 - `uv run xi event decompile <zone> <actor> --event N -o out.json --check` ([docs](events/retail-events.md)) — retail event → `xi.cutscene.v1` JSON, then recompile and compare
 - `uv run xi event sweep <zone…> --check --jobs 8` ([docs](events/retail-events.md)) — decompile and round-trip every event of one or more zones
-- `uv run xi event cutscene compile my_event.json` ([docs](events/authoring.md)) — JSON → event/dialog DATs; resolves the zone's DATs from the JSON
+- `uv run xi event cutscene compile my_event.json` ([docs](events/zone_events.md)) — JSON → the zone's event/dialog DATs through a `zone_events` action (`xi dats undo` takes it out)
 - `uv run xi event lint <zone> <actor>` / `survey --op 0x71` / `npc list|add <zone>` ([docs](events/authoring.md)) — pre-flight checks, opcode surveys, the entity-name table
 - [events/format.md](events/format.md) — Event DAT binary format (per-actor blocks, event-id table, scene bytecode)
 - [events/opcodes.md](events/opcodes.md) — the complete event-VM opcode reference (0x00–0xD9)
@@ -214,12 +214,12 @@ optional), a **zone id**, a **zone name**, or a zone's **model DAT** — the lat
 three route to the zone's dialog DAT and tell you which one.
 
 - `uv run xi event dialogue actors <DAT>` ([docs](events/authoring.md)) — list a zone's NPC actor ids (pick one for `new --actor`)
-- `uv run xi event dialogue new <DAT> --json lines.json --actor <id>` ([docs](events/authoring.md)) — append lines + splice a new event that prints them
+- `uv run xi event dialogue new <DAT> --json lines.json --actor <id>` ([docs](events/authoring.md)) — append lines + splice a new event that prints them (a dialogue event of a `zone_events` action)
 - `uv run xi event dialogue info <DAT>` ([docs](dialog/export.md)) — entry count + opcode histogram
 - `uv run xi event dialogue search <DAT> "text"` ([docs](dialog/export.md)) — find the index + entry for some text (substring/`--regex`, spans line breaks) — pairs with `edit --index`
 - `uv run xi event dialogue export <DAT>` ([docs](dialog/export.md)) — decode to 3 sibling files under `exports/event/dialogue/<rom>/`: `<stem>.json` (text), `.opcodes.json`, `.hex.json` (`-o` base, `--no-opcodes`/`--no-raw`, `--json` stdout, `--preview`, `--grep`, `--prompts-only`)
 - `uv run xi event dialogue edit <DAT> --index <N> --text "<text>"` ([docs](dialog/edit.md)) — author custom dialog: `\n` newline, `\v` press-enter ▼, `{player}`/`{npc}`/`{auto:N}`; rebuilds the DAT to the output mirror (`--dry-run`)
-- `uv run xi event dialogue reset <DAT>` ([docs](dialog/edit.md)) — undo all edits: delete the output mirror, or restore from `<dat>.base` in-place (`--dry-run`); `--full` also resets the zone's **event** DAT, fully undoing a `dialogue new`
+- `uv run xi event dialogue reset <DAT>` ([docs](dialog/edit.md)) — undo all edits: delete the output mirror, or restore from `<dat>.base` in-place (`--dry-run`); `--full` also resets the zone's **event** DAT (a `dialogue new` is undone by `xi dats undo`)
 
 #### References
 

@@ -167,6 +167,12 @@ itself. Blocks are the client's rotate-left-3 "encryption", undone here.
 rows are `{idx, offset, length, subs}`; `subs` is a list of decoded text, or the integer
 marker for a non-text sub-string.
 
+**Spell and ability data** (`spellData`, `abilityData`): the spell and command records of
+`ROM/118/114.DAT`, one per non-empty record, `{idx, offset, name, help, fields, levels, hex}` —
+the decoded fields (`xi.menu.xi_menu_table`), the jobs that learn a spell, the record's bytes,
+and the name and help from the language's `spells` / `spellHelp` or `abilities` / `abilityHelp`.
+The viewer shows them under *Spells & Abilities*.
+
 The table registry, block layouts and row shapes mirror `ui/js/database.js` in
 xi-model-viewer and must stay in step with it.
 

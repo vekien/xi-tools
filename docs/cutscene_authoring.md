@@ -131,8 +131,11 @@ player-paced, not clock-timed. `0x23` is *not* the same as a Wait.
 
 ### Bridge endpoints (`src/xi/zone/xi_bridge.py`)
 
-`zone.cutscene` (decode → beats), `zone.compileCutscene` (compile + write), `zone.loadCutsceneDef`
-(the saved def), `zone.deleteEvent`. `_mark_custom_events` sets a per-event **`isCustom`** flag
+`zone.cutscene` (decode → beats), `zone.compileCutscene` (preview with `dryRun`, else publish),
+`zone.loadCutsceneDef` (the saved def), `zone.deleteEvent`. A publish saves the def as
+`cutscene-defs/{zone}_{actor}_{event}.json` and makes it an event of the zone's `zone_events`
+action in the project's `dats.json`, then builds that (see
+[events/zone_events.md](events/zone_events.md#from-the-zone-editor)); a delete takes it back out. `_mark_custom_events` sets a per-event **`isCustom`** flag
 by diffing the live Event DAT against the `.base` pristine backup — the editor gates the Delete
 button to user-added events only.
 

@@ -57,11 +57,13 @@ def item_dat(layout: str, fmt: str, first: int, rows: dict, count: int, lang: st
     return _encrypt(bytes(out))
 
 
-def key_items(rows: dict) -> bytes:
-    """A key-item table: sub[0] id and sub[1] category are numbers, then text."""
-    blocks = [bytearray(D._assemble_block([num_sub(kid), num_sub(1), text_sub(b""), text_sub(b""),
-                                           text_sub(name), text_sub(name + b"s"), text_sub(desc)], 700))
-              for kid, (name, desc) in rows.items()]
+def key_items(rows: dict, jp: bool = False) -> bytes:
+    """A key-item table: sub[0] id and sub[1] category are numbers, then text. The Japanese
+    table keeps only id, name and description (as both installs' ROM/175/34.DAT do)."""
+    blocks = [bytearray(D._assemble_block(
+        [num_sub(kid), text_sub(name), text_sub(desc)] if jp else
+        [num_sub(kid), num_sub(1), text_sub(b""), text_sub(b""), text_sub(name), text_sub(name + b"s"),
+         text_sub(desc)], 700)) for kid, (name, desc) in rows.items()]
     prefix = bytearray(D.HEADER_SIZE)
     prefix[:5] = b"d_msg"
     struct.pack_into("<8I", prefix, 0x10, 0, 0, D.HEADER_SIZE, 0, 700, 0, len(blocks), 0)
@@ -85,8 +87,14 @@ def install(root: Path, fmt: str = "legacy") -> Path:
     write(root, WEAPON_JP, item_dat("weapon", fmt, 16384, weapons, 4, "jp"))
     ki = {1: (b"Zeruhn report", b"The Galka seem to suffer."), 2: (b"Palborough map", b"A map.")}
     write(root, KI_EN, key_items(ki))
-    write(root, KI_JP, key_items(ki))
+    write(root, KI_JP, key_items(ki, jp=True))
+    from test_menu_table import dmsg_table
+    write(root, TITLES_EN, dmsg_table(["Fodderchief Flayer", "Worm Wrangler", "Kupo Keeper"], 256))
+    write(root, TITLES_JP, dmsg_table(["ﾌｫﾀﾞｰ", "ワーム", "クポ"], 256))
     return root
+
+
+TITLES_EN, TITLES_JP = "ROM/180/78.DAT", "ROM/180/77.DAT"
 
 
 @pytest.fixture
@@ -322,3 +330,28 @@ def test_changelog_and_package_see_the_records(game):
     assert "armor 10241 jp" in r.output and "keyitems 2 en" in r.output
     rels, _ = _project_dat_rels(_read_manifest(Path("projects/tweaks.json")))
     assert rels == sorted({"ROM/118/109.DAT", "ROM/0/7.DAT", "ROM/175/35.DAT"})
+
+
+def test_a_text_row_past_the_end_needs_like_and_grows_both_languages(game):
+    en0, jp0 = (game / TITLES_EN).read_bytes(), (game / TITLES_JP).read_bytes()
+    prepare([{"table": "titles", "id": 6, "strings": {"en": {"name": "Abyssea Delver"}}}])
+    r = build()
+    assert r.exit_code != 0 and "give like: <row> to add it" in r.output
+    prepare([{"table": "titles", "id": 6, "like": 1, "strings": {"en": {"name": "Abyssea Delver"}}}],
+            "tweaks", "--replace")
+    r = build()
+    assert r.exit_code == 0, r.output
+    for rel, name in ((TITLES_EN, "Abyssea Delver"), (TITLES_JP, "Abyssea Delver")):   # JP takes the EN text
+        t = D.parse((game / Path(*rel.split("/"))).read_bytes())
+        assert t.num == 7
+        assert [DB.sub_value(DB._block_subs(t.blocks[i])[0]) for i in (3, 4, 5)] == [".", ".", "."]
+        assert DB.sub_value(DB._block_subs(t.blocks[6])[0]) == name
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / TITLES_EN).read_bytes() == en0 and (game / TITLES_JP).read_bytes() == jp0
+
+
+def test_like_on_an_existing_text_row_is_refused(game):
+    prepare([{"table": "titles", "id": 1, "like": 0, "strings": {"en": {"name": "x"}}}])
+    r = build()
+    assert r.exit_code != 0 and "already has row 1; like only adds a new one" in r.output

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/zone_events.json",
+  "title": "xi dats zone_events action",
+  "description": "Events put on a zone's NPCs: cutscenes (xi.cutscene.v1, from the zone editor or xi event decompile) and plain dialogues, compiled into the zone's event table (file id 5820 + zone; the zone model's + 1100 from zone 256) with their lines in its dialog tables (6420 + zone English, 6120 + zone Japanese; + 1700 / + 1400 from zone 256). Each block and line a build changes is recorded per build target: a rebuild converges and undo is exact. An auto event keeps the id its first build took. A cutscene's camera gets its own scene DAT, placed and registered like any DAT an action places. The SQL that hides the cast's names and the Lua that starts each event are written beside the project, never run.",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "zone", "events"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "zone_events"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "depends_on": {"type": "array", "items": {"$ref": "common.json#/$defs/actionId"}, "uniqueItems": true},
+    "zone": {"type": "integer", "minimum": 0, "maximum": 4095, "description": "The zone id (xi zone json)."},
+    "events": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/event"}},
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The server's part: the SQL that hides cast names, the Lua that starts each event. Written, never run.",
+      "properties": {
+        "emit": {"type": "boolean", "default": true},
+        "sql": {"type": "string", "pattern": "\\.sql$", "description": "Relative to the file holding this action. Default: <project>.sql beside the project file."},
+        "lua": {"type": "string", "pattern": "\\.lua$", "description": "Relative to the file holding this action. Default: <project>.lua beside the project file."}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Recorded by dats build: per build target, each event's id and every event-table block and dialog line it changed (what the next build and undo put back).",
+      "properties": {
+        "targets": {"type": "array", "items": {"type": "string"}},
+        "sql": {"type": ["string", "null"]},
+        "lua": {"type": ["string", "null"]},
+        "roots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "name": {"type": "string"},
+                "zone": {"type": "integer"},
+                "event": {"type": "integer", "description": "The event id the build took (the server script starts it)."},
+                "actor": {"type": "string", "description": "The owning NPC's entity id (0x01…)."},
+                "dat": {"$ref": "common.json#/$defs/romPath"},
+                "blocks": {"type": "array", "items": {"type": "object"}, "description": "Each event-table block changed: its position, entity, sha1 after, and the splices that put it back (or created)."},
+                "lines": {"type": "array", "items": {"type": "object"}, "description": "Each dialog line changed or added (zone_dialog's record form)."},
+                "camera": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "file_id": {"type": "integer"},
+                    "dat": {"$ref": "common.json#/$defs/romPath"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One event: a cutscene or a dialogue.",
+      "oneOf": [{"required": ["cutscene"]}, {"required": ["dialogue", "name"]}],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "description": "What the build records the event by (its id is kept under it). Default: the cutscene file's name; an inline event needs one."},
+        "cutscene": {
+          "oneOf": [
+            {"type": "string", "minLength": 1, "description": "A cutscene file: relative to the file holding this action, the project's resources, or the project folder. Its cast and dialog may be files beside it."},
+            {"$ref": "event_cutscene.json"}
+          ]
+        },
+        "dialogue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["actor", "lines"],
+          "description": "A plain dialogue: the lines an NPC says, one box each (or one paged box), as xi event dialogue new builds it.",
+          "properties": {
+            "actor": {"oneOf": [{"type": "string", "pattern": "^0x[0-9a-fA-F]{1,8}$"}, {"type": "integer", "minimum": 0}], "description": "The NPC's entity id (xi event dialogue actors <zone>)."},
+            "lines": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "Each line; the escapes of xi dialog edit (\\n, \\v for the ▼ prompt, {player})."},
+            "paged": {"type": "boolean", "default": false}
+          }
+        },
+        "eventId": {"oneOf": [{"type": "string", "const": "auto"}, {"type": "integer", "minimum": 0, "maximum": 65533}], "default": "auto", "description": "The event id. auto: a free one (kept on rebuilds); a cutscene's own eventId otherwise. An id the NPC already has is replaced, and undo puts it back."},
+        "camera": {"type": "string", "pattern": "^[Rr][Oo][Mm][0-9]*/[0-9]+/[0-9]+\\.[Dd][Aa][Tt]$", "description": "A cutscene with a camera: where its scene DAT goes. Default: the cutscene's cameraDat."},
+        "cameraFileId": {"type": "integer", "minimum": 56941, "maximum": 57240, "description": "The camera scene's file id (the safe band only; the high band crashes the client). Default: the one a build took, else the lowest free."},
+        "note": {"type": "string"}
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "zone_events.ru_lude_gardens",
+      "type": "zone_events",
+      "zone": 243,
+      "events": [
+        {"name": "maat_hello", "dialogue": {"actor": "0x010F3031", "lines": ["Hmph. Another one.", "Come back when you've grown some."]}},
+        {"name": "maat_greeting", "cutscene": {
+          "schema": "xi.cutscene.v1",
+          "actor": "maat",
+          "cast": {"schema": "xi.cutscene.npc.v1", "cast": [
+            {"id": "player", "entity": "player"},
+            {"id": "maat", "entity": "0x010F3031", "name": "Maat"}
+          ]},
+          "dialog": {"schema": "xi.cutscene.dialog.v1", "lines": [
+            {"id": "greet", "text": "So you're the one they sent.", "speaker": "maat"}
+          ]},
+          "steps": [
+            {"op": "face", "actor": "maat", "target": "player"},
+            {"op": "say", "speaker": "maat", "text": "greet"},
+            {"op": "end"}
+          ]
+        }}
+      ]
+    }
+  ]
+}

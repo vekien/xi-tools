@@ -82,7 +82,9 @@ copied to `…/pivot/ROM{vt}/…`.
 > ROM{vt} resolves identically under either model. The earlier "ROM10 crashes" belief conflated this with the high-`p`/71k-file-id
 > crash (the only A/B-proven cause) **and** with a stale pivot `ROM10` entry *shadowing* the
 > registration — which is exactly what patching (not zeroing) the pivot ROM10 table now
-> prevents. See `_write_camera_scene` / `_publish_pivot_tables` in `xi_bridge.py`.
+> prevents. A publish is now a `zone_events` build ([zone_events.md](zone_events.md)): the scene
+> DAT is placed and registered like any DAT a `xi dats` action places, in the base install and,
+> with *Publish Cutscenes to Pivot*, in the pivot folder's own tables.
 
 ## Scene DAT content (must match retail)
 
@@ -160,11 +162,10 @@ Retail Maat 93 also uses `0x55 wait_sched` after fades/cameras; our Ambrotien-st
 
 | Piece | Location |
 |--------|----------|
-| `p` ↔ file id | `xi_event._datid_helper`, `xi_bridge._scene_p_for` |
-| Safe allocate | `xi_bridge._camera_scene_fileid` / `_camera_scene_id_safe` |
-| Parse + gate placement | `xi_bridge._parse_camera_dat` (ROM/Path/Filename → `vt, subdir, slot`) |
-| Write DAT + base tables (root + ROM{vt}) | `xi_bridge._write_camera_scene`, `_ensure_output_rom_table` |
-| Pivot mirror (root + ROM{vt}) | `xi_bridge._publish_pivot_tables` |
+| `p` ↔ file id | `xi_event._datid_helper`, `xi_cutscene_publish.scene_p_for` |
+| Safe allocate | `xi_cutscene_publish.free_camera_file_id` / `camera_scene_id_safe`; the editor's preview: `xi_bridge._camera_scene_fileid` |
+| Parse + gate placement | `xi_cutscene_publish.parse_camera_dat` / `camera_dat_rel` (ROM/Path/Filename → `ROM10/490/55.DAT`), `camera_path_collision` |
+| Write DAT + tables (per build target) | `xi_zone_events.build` → `xi_dats._build_zone_events` → `_place_raw_dat_in_build` |
 | Editor UI | `panels/cutscene-author.js` `renderCameraDat` / `wireCameraDat` (Settings tab) |
 | Build scene bytes | `xi_compile.build_scene_resource` |
 | Look sanitize | `xi_compile._sanitize_look` |

@@ -7,7 +7,8 @@ formats, and the cutscene bytecode VM, drawn from the existing DAT research, our
 code, and the reference implementations in `thirdparty/`.
 
 > **Status.** `xi event decompile` turns any retail event into `xi.cutscene.v1` JSON and
-> `xi event cutscene compile` writes it back byte-exact; `xi event sweep` proves whole zones
+> `xi event cutscene compile` writes it back byte-exact (through the `zone_events` action of
+> `xi dats`, see [zone_events.md](zone_events.md)); `xi event sweep` proves whole zones
 > (see [retail-events.md](retail-events.md)). `xi event cutscene export`, `xi event dialogue new`,
 > and `xi event dialogue` ship too. The event export disassembles a zone's events and **resolves operand
 > references**: dialogue ids show as `→ msg N`, and `load_zone` (`0x34`/`0x35`) targets as
@@ -87,6 +88,10 @@ full per-zone Model/Dialog/NPC/Event table (294 zones) is in
   encoding). The shipped slice of [prototype.md](prototype.md). Also the `xi.cutscene.v1`
   JSON step vocabulary the compiler reads, and the reading tools `xi event explain`,
   `survey`, `lint` and `npc list` / `npc add` (the zone entity-name table).
+- **[zone_events.md](zone_events.md)** — the **`zone_events` action of `xi dats`**: cutscenes
+  and dialogues compiled into a zone's event and EN/JP dialog tables, camera scene DATs placed,
+  each change recorded so a rebuild converges and `xi dats undo` is exact. `cutscene compile`
+  and `dialogue new` are its aliases.
 - **[retail-events.md](retail-events.md)** — **decompile any retail event to JSON, edit it,
   recompile it byte-exact**: `explain` → `decompile --check` → `sweep` (whole zones, all
   293 retail zones clean) → `cutscene compile`.

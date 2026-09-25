@@ -156,98 +156,122 @@
       ],
       "properties": {
         "table": {
-          "type": "string",
-          "description": "The viewer's table key (ui/js/database.js, xi.mv.xi_database). Item tables: general, usable, puppet, armor, weapons, maze, monst1, items7, roeObj, items6, gil. d_msg tables: the quest (q_*) and mission (m_*) logs, keyitems, titles, jobs, spells, spellHelp, abilities, abilityHelp, bluHelp, status, mounts, mountHelp, monsterFamilies, slots, augments, merits, jobPoints, jobGifts, soulplates, trust, emoteHelp, chatHelp, mazeRunes, headings, servers.",
-          "enum": [
-            "general",
-            "usable",
-            "puppet",
-            "armor",
-            "weapons",
-            "maze",
-            "monst1",
-            "items7",
-            "roeObj",
-            "items6",
-            "gil",
-            "q_sandoria",
-            "q_bastok",
-            "q_windurst",
-            "q_jeuno",
-            "q_other",
-            "q_toau",
-            "q_wotg",
-            "q_abyssea",
-            "q_assault",
-            "q_campaign",
-            "q_adoulin",
-            "q_coalition",
-            "m_sandoria",
-            "m_bastok",
-            "m_windurst",
-            "m_zilart",
-            "m_cop",
-            "m_toau",
-            "m_wotg",
-            "m_acp",
-            "m_amk",
-            "m_asa",
-            "m_adoulin",
-            "m_rov",
-            "keyitems",
-            "titles",
-            "jobs",
-            "spells",
-            "spellHelp",
-            "abilities",
-            "abilityHelp",
-            "bluHelp",
-            "status",
-            "mounts",
-            "mountHelp",
-            "monsterFamilies",
-            "slots",
-            "augments",
-            "merits",
-            "jobPoints",
-            "jobGifts",
-            "soulplates",
-            "trust",
-            "emoteHelp",
-            "chatHelp",
-            "mazeRunes",
-            "headings",
-            "servers"
+          "description": "The viewer's table key (ui/js/database.js, xi.mv.xi_database). Item tables: general, usable, puppet, armor, weapons, maze, monst1, items7, roeObj, items6, gil. d_msg tables: the quest (q_*) and mission (m_*) logs, keyitems, titles, jobs, spells, spellHelp, abilities, abilityHelp, bluHelp, status, mounts, mountHelp, monsterFamilies, slots, augments, merits, jobPoints, jobGifts, soulplates, trust, emoteHelp, chatHelp, mazeRunes, headings, servers. Spell and command records of ROM/118/114.DAT (one file for every client language): spellData, abilityData. A d_msg table the viewer doesn't name may be given by its ROM path (ROM/181/72.DAT): its sub-strings are then sub0, sub1, …, a row is its index, and the one file is edited whatever the language.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "general",
+                "usable",
+                "puppet",
+                "armor",
+                "weapons",
+                "maze",
+                "monst1",
+                "items7",
+                "roeObj",
+                "items6",
+                "gil",
+                "q_sandoria",
+                "q_bastok",
+                "q_windurst",
+                "q_jeuno",
+                "q_other",
+                "q_toau",
+                "q_wotg",
+                "q_abyssea",
+                "q_assault",
+                "q_campaign",
+                "q_adoulin",
+                "q_coalition",
+                "m_sandoria",
+                "m_bastok",
+                "m_windurst",
+                "m_zilart",
+                "m_cop",
+                "m_toau",
+                "m_wotg",
+                "m_acp",
+                "m_amk",
+                "m_asa",
+                "m_adoulin",
+                "m_rov",
+                "keyitems",
+                "titles",
+                "jobs",
+                "spells",
+                "spellHelp",
+                "abilities",
+                "abilityHelp",
+                "bluHelp",
+                "status",
+                "mounts",
+                "mountHelp",
+                "monsterFamilies",
+                "slots",
+                "augments",
+                "merits",
+                "jobPoints",
+                "jobGifts",
+                "soulplates",
+                "trust",
+                "emoteHelp",
+                "chatHelp",
+                "mazeRunes",
+                "headings",
+                "servers",
+                "spellData",
+                "abilityData"
+              ]
+            },
+            {
+              "type": "string",
+              "pattern": "^[Rr][Oo][Mm][0-9]*/[0-9]+/[0-9]+\\.[Dd][Aa][Tt]$"
+            }
           ]
         },
         "id": {
           "type": "integer",
           "minimum": 0,
-          "description": "Item tables: the item id; the id decides which DAT of the table holds it (armor 10240-16383 -> ROM/118/109, 23040-28671 -> ROM/286/73). d_msg tables: the row index, except where each row carries its own id (keyitems, the q_* and m_* logs), where it is that id."
+          "description": "Item tables: the item id; the id decides which DAT of the table holds it (armor 10240-16383 -> ROM/118/109, 23040-28671 -> ROM/286/73). d_msg tables: the row index, except where each row carries its own id (keyitems, the q_* and m_* logs), where it is that id. spellData / abilityData: the spell or command id (the record index)."
         },
         "like": {
           "type": "integer",
           "minimum": 0,
-          "description": "Create the record: copy record `like` of the same table into the empty slot `id`, then apply this edit. The proposed SQL copies the donor's server rows the same way."
+          "description": "Create the record. Item tables: copy record `like` of the same table into the empty slot `id`, then apply this edit (the proposed SQL copies the donor's server rows the same way). Text tables: add row `id` past the end, copying row `like` (the rows in between hold '.'), or for key items and the quest / mission logs a new id, copying the record with id `like`. A new text row goes in both languages; the Japanese one takes the English text unless strings.jp gives its own. spellData / abilityData: copy that record into the empty slot `id` (past the end grows the section, as a client that reads them needs)."
         },
         "note": {
           "type": "string",
           "description": "Why — kept in the changelog."
         },
         "set": {
-          "$ref": "#/$defs/set"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/set"
+            },
+            {
+              "$ref": "#/$defs/menuSet"
+            }
+          ]
         },
         "strings": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "en": {
-              "$ref": "#/$defs/strings"
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "en": {
+                  "$ref": "#/$defs/strings"
+                },
+                "jp": {
+                  "$ref": "#/$defs/strings"
+                }
+              }
             },
-            "jp": {
-              "$ref": "#/$defs/strings"
+            {
+              "$ref": "#/$defs/subStrings"
             }
-          }
+          ]
         },
         "icon": {
           "type": "object",
@@ -265,7 +289,7 @@
           }
         },
         "server": {
-          "description": "Item tables only: the item's server rows, or false to leave the server out of this edit (no mirroring either).",
+          "description": "Item tables: the item's server rows, or false to leave the server out of this edit (no mirroring either). spellData: false only — its spell_list row is mirrored from mp, cast, recast, element, skill and levels unless the action's server.mirror is off.",
           "oneOf": [
             {
               "type": "boolean",
@@ -273,6 +297,26 @@
             },
             {
               "$ref": "#/$defs/serverRows"
+            }
+          ]
+        },
+        "hex": {
+          "description": "The whole record, exactly: item tables the decrypted record (0xC00 legacy / 0x1400 retail bytes), d_msg tables the block, spell / command records the decoded record (0x64 / 0x30 bytes). Per language for the named item and d_msg tables; one text for a record of 114.DAT or a table by path. Given alone: no set, strings, icon or like. Undo puts the record back as it was.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/hexText"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "en": {
+                  "$ref": "#/$defs/hexText"
+                },
+                "jp": {
+                  "$ref": "#/$defs/hexText"
+                }
+              }
             }
           ]
         }
@@ -369,7 +413,7 @@
     "strings": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The record's sub-strings, by the viewer's names. Items: name, article, logName, logPlural, description in English; name and description in Japanese. d_msg tables name theirs per table (quests: name, description; key items: name, plural, description, category; spell help: name, help; …). A sub-string not named is kept byte for byte. Text is written as the client shows it with \\n for a line break; {Fire} {Ice} {Wind} {Earth} {Lightning} {Water} {Light} {Dark} are the element icons, {at:xxxxxxxx} an auto-translate phrase and {x:hh} a byte cp932 can't show (the changelog shows record text the same way).",
+      "description": "The record's sub-strings, by the viewer's names. Items: name, article, logName, logPlural, description in English; name and description in Japanese. d_msg tables name theirs per table (quests: name, description; key items: name, plural, description, category; the help tables: help; the Japanese key items keep only name and description, the Japanese status names only name; …). A sub-string not named is kept byte for byte. Text is written as the client shows it with \\n for a line break; {Fire} {Ice} {Wind} {Earth} {Lightning} {Water} {Light} {Dark} are the element icons, {at:xxxxxxxx} an auto-translate phrase and {x:hh} a byte cp932 can't show (the changelog shows record text the same way).",
       "properties": {
         "name": {
           "$ref": "#/$defs/text"
@@ -867,13 +911,191 @@
           "maximum": 255
         }
       ]
+    },
+    "menuSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Fields of a spell (spellData) or command (abilityData) record, as xi.menu.xi_menu_table reads them. Spells: kind, element, targets, skill, mp, cast and recast (quarter seconds), menu_index, icon, icon2, requirements, and levels. Commands: type, icon, icon2, charges, targets, tp, level, range, radius, aoe, valid_targets, tp_modifier.",
+      "properties": {
+        "targets": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "skill": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "mp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "menu_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "icon": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "icon2": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "charges": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "tp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "valid_targets": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "cast": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "recast": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "requirements": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "type": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "range": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "radius": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "aoe": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "tp_modifier": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "kind": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            {
+              "enum": [
+                "white",
+                "black",
+                "summon",
+                "ninjutsu",
+                "song",
+                "blue",
+                "geomancy",
+                "trust"
+              ]
+            }
+          ]
+        },
+        "element": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            {
+              "enum": [
+                "fire",
+                "ice",
+                "wind",
+                "earth",
+                "lightning",
+                "water",
+                "light",
+                "dark",
+                "none"
+              ]
+            }
+          ]
+        },
+        "levels": {
+          "type": "object",
+          "description": "The jobs that can learn the spell, merged into the record's: {\"WHM\": 1}; null takes a job off. MON is the Monstrosity column.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65534
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "subStrings": {
+      "type": "object",
+      "description": "A table by path: its sub-strings by position, sub0, sub1, … — text (as in strings), {\"replace\": {…}}, or a number where the sub-string is one.",
+      "propertyNames": {
+        "pattern": "^sub[0-9]+$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/text"
+          },
+          {
+            "type": "integer",
+            "minimum": 0
+          }
+        ]
+      }
+    },
+    "hexText": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F ]+$"
     }
   },
   "examples": [
     {
       "id": "database.gear_tweaks",
       "type": "database",
-      "description": "Decennial Coat +1 at level 50, Scorpion Harness at HP+30, a new earring copied from Moonshade Earring and a key item reworded.",
+      "description": "Decennial Coat +1 at level 50, Scorpion Harness at HP+30, a new earring copied from Moonshade Earring and a key item reworded. Cure costs 5 MP and Red Mage learns it at 1.",
       "server": {
         "emit": true,
         "mirror": true
@@ -948,6 +1170,17 @@
           "strings": {
             "en": {
               "description": "A report on the morale of the Galka working the Zeruhn Mines."
+            }
+          }
+        },
+        {
+          "table": "spellData",
+          "id": 1,
+          "note": "A cheaper Cure",
+          "set": {
+            "mp": 5,
+            "levels": {
+              "RDM": 1
             }
           }
         }

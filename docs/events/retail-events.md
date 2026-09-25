@@ -93,19 +93,23 @@ clean but plays the wrong sub-events in game.
 ## 5. Compile and install: `cutscene compile`
 
 ```bash
-uv run xi event cutscene compile laityn_10003.json --dry-run    # event id, opcode count, Lua stub; no write
-uv run xi event cutscene compile laityn_10003.json              # writes the zone's event + dialog DATs in place
+uv run xi event cutscene compile laityn_10003.json --dry-run    # event id, blocks, lines, Lua; no write
+uv run xi event cutscene compile laityn_10003.json              # builds it into the zone's event + dialog DATs
+uv run xi dats undo <zone name>                                 # takes it back out, byte-exact
 ```
 
-With `eventId` set to a retail id the event replaces retail's copy on that actor (same
-slot, new bytes appended to the actor's scene). With `"eventId": "auto"` a new event id
-is allocated and appended. Every DAT the compiler touches keeps a pristine `<dat>.base`
-next to it; the decompiler and the checker read the `.base` copies by default, so your
-edits never contaminate the reference (`decompile --installed` reads the live DAT when
-you want to inspect your own event).
+The command is shorthand for `xi dats prepare` + `xi dats build`: the event goes into the
+zone's `zone_events` action in `projects/<zone name>.json` (`--project` picks another), which
+records what the build changed. See [zone_events.md](zone_events.md). With `eventId` set to a
+retail id the event replaces retail's copy on that actor (same slot, new bytes appended to the
+actor's scene). With `"eventId": "auto"` a new event id is allocated and kept on rebuilds. The
+decompiler lists every NPC the event involves in the cast, and a rewritten line keeps its retail
+tail, so an unedited recompile changes only the owner's block. Every DAT a build touches keeps
+a pristine `<dat>.base` next to it. The decompiler and the checker read the `.base` copies by
+default, so your edits never contaminate the reference (`decompile --installed` reads the live
+DAT when you want to inspect your own event).
 
-To revert, copy the `.base` file back over the DAT (`xi event dialogue reset` does it for
-the dialog table).
+To revert, `xi dats undo` the project.
 
 ## 6. Verify in game
 

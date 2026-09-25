@@ -261,8 +261,9 @@ Scene resource structure:
 
 **Parser**: `parse_camera_routes()` in `xi_event.py`. Bridge caches routes+routines
 per scene file via `_scene_data()`. Editor drives viewport camera along the spline.
-**Writer**: `build_scene_resource` + `_write_camera_scene` (user-chosen `ROM{vt}/{path}/{file}`
-from Settings ▸ Camera DAT; mid-band file id; registers root + ROM{vt} tables, base + pivot).
+**Writer**: `build_scene_resource`, placed by the `zone_events` build at the user-chosen
+`ROM{vt}/{path}/{file}` from Settings ▸ Camera DAT; mid-band file id; registered in each build
+target's tables (see [zone_events.md](zone_events.md)).
 
 **Open item**: the exact easing curve each `mode` value (0..4) applies is not yet
 pinned. Best guess is xiclient's 5 `CameraSmoothType` names (Linear, Decelerate,
@@ -387,7 +388,10 @@ in a routine points at a `0x2A` section instead of a skeleton animation, it's a 
 | `src/xi/event/xi_event.py` | `build_cutscene_timeline`, `parse_effect_routines`, `parse_routine_clip`, `parse_routine_motion`, `parse_pointlist`, `event_entity_positions`, `build_motion_index`, `derive_anim_base`, `parse_camera_routes` |
 | `src/xi/gear/xi_character.py` | `build_character_glb`, `_facing_axis`, `resolve_event_clips`, `_load_external_clips`, `_collect_clips` |
 | `src/xi/gear/xi_core.py` | `parse_look`, `resolve_gear_dat`, `race_skeleton_dat`, `model_file_id` |
-| `src/xi/zone/xi_bridge.py` | `_cutscene`, `_camera_scene_fileid`, `_write_camera_scene`, `_publish_pivot_tables`, `_scene_data` |
+| `src/xi/zone/xi_bridge.py` | `_cutscene`, `_compile_cutscene` (preview), `_publish_cutscene`, `_camera_scene_fileid`, `_scene_data` |
+| `src/xi/zone/xi_bridge_dats.py` | the editor's publishes as `xi dats` actions in the project's `dats.json` |
+| `src/xi/event/xi_zone_events.py` | the `zone_events` action: compile, record, rebuild, undo |
+| `src/xi/event/xi_cutscene_publish.py` | camera scene ids and placement, animation tags, the lint gate (shared) |
 | `docs/events/camera_scene_ids.md` | ★ `p` / file-id bands — custom camera crash rules |
 
 ### Frontend (JavaScript)

@@ -543,6 +543,18 @@ def _detect_source_type(source: Path, explicit_type: str | None) -> tuple[str, d
         raise click.ClickException(f"Cannot infer action type for {source}. Pass --type.")
     if isinstance(data.get("edits"), list) and not data.get("type"):
         return "database", data
+    # A zone's dialog lines (schema/zone_dialog.json): {"zone", "lines"}.
+    if isinstance(data.get("lines"), list) and "zone" in data and not data.get("type"):
+        return "zone_dialog", data
+    # A zone's NPC list (schema/zone_npcs.json): {"zone", "npcs"}.
+    if isinstance(data.get("npcs"), list) and "zone" in data and not data.get("type"):
+        return "zone_npcs", data
+    # A zone's events (schema/zone_events.json): {"zone", "events"}, or one cutscene
+    # (xi.cutscene.v1 — the zone editor's, or `xi event decompile`'s).
+    from xi.event.xi_zone_events import SCHEMAS as CUTSCENE_SCHEMAS
+    if (isinstance(data.get("events"), list) and "zone" in data and not data.get("type")
+            and not isinstance(data.get("sources"), dict)) or data.get("schema") in CUTSCENE_SCHEMAS:
+        return "zone_events", data
     if source.name == "zone-changes.json" or "placements" in data or "vfx" in data or "zone" in data:
         return "zone", data
     # A spell / command definition (schema/spell_definition.json, command_definition.json).
@@ -918,12 +930,12 @@ def _resolve_raw_source(value: str, manifest_path: Path, manifest: dict) -> Path
                                f"{manifest_path.parent}, and CWD).")
 
 
-def _place_raw_dat_in_build(src: Path, place_rel: str, file_id: int, *, force: bool,
-                            action_id: str, dry_run: bool = False) -> dict:
-    """Copy ``src`` verbatim into the active target at ``place_rel`` and register
-    ``file_id`` -> that placement in its base + ROM{rom} tables. When ``dry_run``
-    nothing is written: the plan (incl. any occupant of file_id) is returned and
-    a collision is reported rather than raised."""
+def _place_raw_dat_in_build(src: Path | None, place_rel: str, file_id: int, *, force: bool,
+                            action_id: str, dry_run: bool = False, data: bytes | None = None) -> dict:
+    """Copy ``src`` (or write ``data``, a DAT the build made) verbatim into the active
+    target at ``place_rel`` and register ``file_id`` -> that placement in its base +
+    ROM{rom} tables. When ``dry_run`` nothing is written: the plan (incl. any occupant
+    of file_id) is returned and a collision is reported rather than raised."""
     place_rel = _rom_rel(place_rel)
     rom, subdir, file_idx = _parse_rom_placement(place_rel)
     _check_registrable(file_id, place_rel, rom, action_id)
@@ -937,13 +949,14 @@ def _place_raw_dat_in_build(src: Path, place_rel: str, file_id: int, *, force: b
             f"target — this build would repoint it to {place_rel}. Pass "
             "--force if that's intentional.")
 
+    blob = data if data is not None else src.read_bytes()
     if not dry_run:
         out_dat.parent.mkdir(parents=True, exist_ok=True)
-        out_dat.write_bytes(src.read_bytes())
+        out_dat.write_bytes(blob)
         _patch_active_tables(file_id, ftval, rom)
 
     result = {"output": str(out_dat), "target_dat": place_rel, "file_id": file_id,
-              "rom": rom, "source": str(src), "bytes": src.stat().st_size,
+              "rom": rom, "source": str(src) if src is not None else "(built)", "bytes": len(blob),
               "registered": f"file_id {file_id} -> {place_rel} (rom={rom})"}
     if collision:
         result["occupied_by"] = existing
@@ -1380,6 +1393,7 @@ _DB_LABELS = {
     "items7": "Items 7 (retail, Sept 2026)", "roeObj": "RoE objectives", "items6": "Commands",
     "gil": "Currency", "keyitems": "Key items", "titles": "Titles", "spells": "Spell names",
     "spellHelp": "Spell help", "abilities": "Ability names", "abilityHelp": "Ability help",
+    "spellData": "Spell data (MP, cast, recast, levels)", "abilityData": "Ability data (TP, level, range)",
 }
 _MASK_FIELDS = ("flags", "jobs", "races", "slots")
 
@@ -1411,6 +1425,18 @@ def _wizard_change(edit: dict, table: str, raw: str) -> None:
         return
     if key == "note":
         edit["note"] = value
+        return
+    if table in C.MENU_KINDS:
+        # A spell / command record: its fields (mp=5, element=light) and levels.WHM=1
+        # (levels.WHM= : the job can't learn it).
+        values = edit.setdefault("set", {})
+        if key.startswith("levels."):
+            values.setdefault("levels", {})[key[7:].upper()] = int(value) if value else None
+        elif key in C.menu_fields(table):
+            values[key] = int(value) if value.lstrip("-").isdigit() else value.lower()
+        else:
+            raise ValueError(f"{table} has no {key!r} — it has {', '.join(C.menu_fields(table))} "
+                             "(levels as levels.WHM=1)")
         return
     lang, name = ("jp", key[3:]) if key.startswith("jp.") else ("en", key)
     if item and name in C.set_fields(table) and lang == "en":
@@ -1451,7 +1477,7 @@ def _wizard_database(slug: str, prev: dict | None, pivot: bool) -> dict:
         except DB.DbError as e:
             click.echo(click.style(f"  {e}", fg="yellow"))
             continue
-        if cur["empty"] and DB.is_item_table(table):
+        if cur["empty"] and (DB.is_item_table(table) or table in C.MENU_KINDS):
             click.echo(f"\n  {table} {rid} is an empty slot ({cur['dat']}).")
             if "like" not in edit:
                 edit["like"] = _ask("Copy which record into it? (an id of the same table)", type=int)
@@ -1463,7 +1489,8 @@ def _wizard_database(slug: str, prev: dict | None, pivot: bool) -> dict:
                 click.echo(f"    {k:<14} {_short(v, 90)}")
         click.echo("\n  Changes, one per line (blank when done):  level=50   jobs=WAR,PLD   flags=RARE,EX\n"
                    "    description=New text\\nSecond line   description~HP+15=>HP+30   jp.name=…\n"
-                   "    mod.HP=30 (the proposed SQL; mod.HP= removes it)   note=why")
+                   "    mod.HP=30 (the proposed SQL; mod.HP= removes it)   note=why\n"
+                   "    spell / ability data: mp=5   cast=8 (quarter seconds)   element=light   levels.RDM=3")
         while True:
             raw = click.prompt("  change", default="", show_default=False).strip()
             if not raw:
@@ -1485,6 +1512,193 @@ def _wizard_database(slug: str, prev: dict | None, pivot: bool) -> dict:
         if not click.confirm("\n>> Edit another record?", default=False):
             break
     action["edits"] = edits
+    return action
+
+
+def _wizard_zone_dialog(slug: str, prev: dict | None, pivot: bool) -> dict:
+    """`dats new` for a zone's dialog lines: the zone, then line by line — see the line,
+    type its new text (or old=>new to change part of it). `new` adds a line at the end."""
+    from xi.dialog import xi_zone_dialog as ZD
+    root = _target_root("pivot" if pivot else "dir")
+    action = dict(prev) if prev else {"id": f"zone_dialog.{slug}", "type": "zone_dialog", "lines": []}
+    zone = _ask("Which zone? (the zone id — xi zone search <name>)", type=int, default=action.get("zone"))
+    if zone != action.get("zone"):
+        action["lines"] = []
+    action["zone"] = zone
+    lines = list(action.get("lines") or [])
+    try:
+        info = ZD.describe(root, zone, 0)
+    except ZD.ZoneDialogError as e:
+        raise click.ClickException(str(e))
+    click.echo(f"\n  zone {zone}: {info['dat']}, {info['count']} lines  (xi event dialogue search to find one)")
+    while True:
+        raw = click.prompt("\n  Line id (or 'new' to add one at the end)", default="new")
+        if raw.strip().lower() == "new":
+            taken = [l["id"] for l in lines if l.get("new")]
+            lid = max([info["count"] - 1, *taken]) + 1
+            line = {"id": lid, "new": True}
+            click.echo(f"  new line {lid}")
+        else:
+            lid = int(raw)
+            at = next((i for i, l in enumerate(lines) if l.get("id") == lid), None)
+            line = dict(lines[at]) if at is not None else {"id": lid}
+            cur = ZD.describe(root, zone, lid)
+            if cur["en"] is None:
+                click.echo(click.style(f"  zone {zone} has no line {lid} ({cur['count']} lines)", fg="yellow"))
+                continue
+            click.echo(f"  en: {cur['en']!r}")
+            if cur.get("jp") is not None:
+                click.echo(f"  jp: {cur['jp']!r}")
+        click.echo("  Text: \\n new line in the box, \\v wait for a key, {player} {npc} …; old=>new changes part")
+        for lang in ("en", "jp"):
+            if lang == "jp" and line.get("new"):
+                hint = " (blank: the English text)"
+            else:
+                hint = " (blank: leave it)"
+            text = click.prompt(f"  {lang}{hint}", default="", show_default=False)
+            if not text:
+                continue
+            if "=>" in text and not line.get("new"):
+                old, new = text.split("=>", 1)
+                line[lang] = {"replace": {old.strip(): new.strip()}}
+            else:
+                line[lang] = text
+        errs = ZD.validate_action({"id": action["id"], "type": "zone_dialog", "zone": zone, "lines": [line]})
+        if errs:
+            for e in errs:
+                click.echo(click.style(f"  ⚠ {e}", fg="yellow"))
+        else:
+            at = next((i for i, l in enumerate(lines) if l.get("id") == line["id"]), None)
+            if at is None:
+                lines.append(line)
+            else:
+                lines[at] = line
+        if not click.confirm("\n>> Another line?", default=False):
+            break
+    action["lines"] = lines
+    return action
+
+
+def _wizard_zone_npcs(slug: str, prev: dict | None, pivot: bool) -> dict:
+    """`dats new` for a zone's NPC list: the zone, then rename an NPC by its id or add one
+    (`new`) — its name, model and status; the id comes from the custom band."""
+    from xi.entity import xi_custom_npc as CN
+    from xi.entity import xi_zone_npcs as ZN
+    root = _target_root("pivot" if pivot else "dir")
+    action = dict(prev) if prev else {"id": f"zone_npcs.{slug}", "type": "zone_npcs", "npcs": []}
+    zone = _ask("Which zone? (the zone id — xi zone search <name>)", type=int, default=action.get("zone"))
+    if zone != action.get("zone"):
+        action["npcs"] = []
+    action["zone"] = zone
+    npcs = list(action.get("npcs") or [])
+    try:
+        info = ZN.describe(root, zone)
+    except ZN.ZoneNpcsError as e:
+        raise click.ClickException(str(e))
+    click.echo(f"\n  zone {zone}: {info['dat']}, {len(info['names'])} NPC names; "
+               f"next free custom id {info['free']:#x}")
+    names = dict((local, n) for n, local in info["names"])
+    while True:
+        raw = click.prompt("\n  NPC id to rename (hex like 0x2A or decimal), or 'new'", default="new").strip()
+        if raw.lower() == "new":
+            taken = {n["id"] for n in npcs if isinstance(n.get("id"), int)}
+            local = info["free"]
+            while local in taken or local in names:
+                local += 1
+            name = click.prompt("  name")
+            model = click.prompt("  model id (a placed entity model — xi model json --free)", type=int)
+            status = click.prompt("  status (0 normal, 2 hidden, 3 invisible, 6 cutscene only)", type=int,
+                                  default=CN.NPC_STATUS_CUTSCENE_ONLY)
+            server = {"model": model, "status": status}
+            if status != CN.NPC_STATUS_CUTSCENE_ONLY:
+                pos = click.prompt("  position x y z", default="0 0 0")
+                server["pos"] = [float(v) for v in pos.split()[:3]]
+                server["rot"] = click.prompt("  rotation (0-255)", type=int, default=0)
+            npc = {"id": local, "new": True, "name": name, "server": server}
+            click.echo(f"  new NPC {local:#x} ({CN.make_npcid(zone, local):#010x})")
+        else:
+            local = int(raw, 0)
+            if local not in names:
+                click.echo(click.style(f"  zone {zone} has no NPC {local:#x}", fg="yellow"))
+                continue
+            click.echo(f"  {local:#x}: {names[local]!r}")
+            name = click.prompt("  new name", default=names[local])
+            npc = {"id": local, "name": name}
+        errs = ZN.validate_action({"id": action["id"], "type": "zone_npcs", "zone": zone, "npcs": [npc]})
+        if errs:
+            for e in errs:
+                click.echo(click.style(f"  ⚠ {e}", fg="yellow"))
+        else:
+            at = next((i for i, n in enumerate(npcs) if n.get("id") == npc["id"]), None)
+            if at is None:
+                npcs.append(npc)
+            else:
+                npcs[at] = npc
+        if not click.confirm("\n>> Another NPC?", default=False):
+            break
+    action["npcs"] = npcs
+    return action
+
+
+def _wizard_zone_events(slug: str, prev: dict | None, pivot: bool) -> dict:
+    """`dats new` for a zone's events: the zone, then a cutscene file (xi.cutscene.v1, from
+    the zone editor or `xi event decompile`) or a plain dialogue on an NPC."""
+    from xi.event import xi_cutscene_publish as CP
+    from xi.event import xi_zone_events as ZE
+    root = _target_root("pivot" if pivot else "dir")
+    action = dict(prev) if prev else {"id": f"zone_events.{slug}", "type": "zone_events", "events": []}
+    zone = _ask("Which zone? (the zone id — xi zone search <name>)", type=int, default=action.get("zone"))
+    if zone != action.get("zone"):
+        action["events"] = []
+    action["zone"] = zone
+    events = list(action.get("events") or [])
+    try:
+        info = ZE.describe(root, zone)
+    except ZE.ZoneEventsError as e:
+        raise click.ClickException(str(e))
+    with_events = [a for a in info["actors"] if a[2]]
+    click.echo(f"\n  zone {zone}: {info['dat']}, {len(info['actors'])} blocks, {len(with_events)} NPCs with events")
+    while True:
+        kind = _choose("Add a cutscene or a dialogue?", ["cutscene", "dialogue"], default="cutscene")
+        if kind == "cutscene":
+            path = _prompt_existing_dat("Cutscene file (xi.cutscene.v1 JSON)", "Enter path")
+            ev = {"cutscene": str(path.resolve())}
+            try:
+                cs, _src = ZE.load_cutscene(str(path.resolve()), lambda r: Path(r))
+            except ZE.ZoneEventsError as e:
+                click.echo(click.style(f"  ⚠ {e}", fg="yellow"))
+                continue
+            name = click.prompt("  name (what the build records it by)", default=path.stem)
+            ev["name"] = name
+            if CP.has_camera_track(cs):
+                place = click.prompt("  camera scene DAT (where it goes, like ROM10/490/55.DAT)",
+                                     default=CP.camera_dat_rel(cs) or "")
+                ev["camera"] = place.replace("\\", "/")
+        else:
+            actor = click.prompt("  NPC entity id (0x01… — xi event dialogue actors <zone>)")
+            lines = []
+            click.echo("  lines (an empty one ends):")
+            while True:
+                ln = click.prompt("   ", default="", show_default=False)
+                if not ln:
+                    break
+                lines.append(ln)
+            name = click.prompt("  name (what the build records it by)")
+            ev = {"name": name, "dialogue": {"actor": actor, "lines": lines,
+                                              "paged": click.confirm("  one paged box?", default=False)}}
+        errs = ZE.validate_action({"id": action["id"], "type": "zone_events", "zone": zone, "events": [ev]})
+        if errs:
+            for e in errs:
+                click.echo(click.style(f"  ⚠ {e}", fg="yellow"))
+        else:
+            at = next((i for i, e in enumerate(events) if ZE.event_key(e) == ZE.event_key(ev)), None)
+            if at is None:
+                events.append(ev)
+            else:
+                events[at] = ev
+        if not click.confirm("\n>> Another event?", default=False):
+            break
+    action["events"] = events
     return action
 
 
@@ -1661,16 +1875,222 @@ def _action_file(action: dict, manifest_path: Path, manifest: dict) -> Path:
 
 
 def _build_database(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
-                    dry_run: bool = False) -> dict:
+                    dry_run: bool = False, unwound: bool = False) -> dict:
     from xi.database import xi_build as DB
     root = _active_build_root()
     sql_path = DB.sql_path(action, _action_file(action, manifest_path, manifest), manifest_path)
     try:
         return DB.build(action, root=root, target=_root_target_name(root) or "dir", manifest=manifest,
                         sql_path=sql_path, project=manifest.get("name") or manifest_path.stem,
-                        force=force, dry_run=dry_run)
+                        force=force, dry_run=dry_run, unwound=unwound)
     except DB.DbError as e:
         raise click.ClickException(f"{action.get('id')}: {e}")
+
+
+def _build_zone_dialog(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                       dry_run: bool = False, unwound: bool = False) -> dict:
+    from xi.dialog import xi_zone_dialog as ZD
+    root = _active_build_root()
+    try:
+        return ZD.build(action, root=root, target=_root_target_name(root) or "dir", dry_run=dry_run,
+                        unwound=unwound)
+    except ZD.ZoneDialogError as e:
+        raise click.ClickException(f"{action.get('id')}: {e}")
+
+
+def _build_zone_npcs(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                     dry_run: bool = False, unwound: bool = False) -> dict:
+    from xi.database import xi_build as DB
+    from xi.entity import xi_zone_npcs as ZN
+    root = _active_build_root()
+    sql_path = DB.sql_path(action, _action_file(action, manifest_path, manifest), manifest_path)
+    try:
+        return ZN.build(action, root=root, target=_root_target_name(root) or "dir", manifest=manifest,
+                        sql_path=sql_path, project=manifest.get("name") or manifest_path.stem,
+                        force=force, dry_run=dry_run, unwound=unwound)
+    except ZN.ZoneNpcsError as e:
+        raise click.ClickException(f"{action.get('id')}: {e}")
+
+
+def _lua_path(action: dict, action_file: Path, project_file: Path) -> Path | None:
+    """Where the action's proposed Lua goes: ``server.lua`` relative to the file holding the
+    action, else ``<project>.lua`` beside the project file. None when ``server.emit`` is false."""
+    server = action.get("server") or {}
+    if not server.get("emit", True):
+        return None
+    if server.get("lua"):
+        return Path(action_file).parent / server["lua"]
+    return Path(project_file).with_suffix(".lua")
+
+
+_LUA_HEAD = ("-- Proposed by `xi dats build {project}`. xi-tools never runs this file: each section is the\n"
+             "-- server script that starts an event; paste it into the NPC's script under scripts/zones.\n")
+
+
+def _build_zone_events(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                       dry_run: bool = False, unwound: bool = False) -> dict:
+    """Compile the action's events into the zone (xi.event.xi_zone_events), place each camera
+    scene DAT like any DAT an action places, and write the server's part beside the project."""
+    from xi.database import xi_build as DB
+    from xi.event import xi_zone_events as ZE
+    root = _active_build_root()
+    target = _root_target_name(root) or "dir"
+    action_file = _action_file(action, manifest_path, manifest)
+    project = manifest.get("name") or manifest_path.stem
+
+    def resolve(ref: str) -> Path:
+        p = Path(ref)
+        if p.is_absolute():
+            if p.is_file():
+                return p
+            raise ZE.ZoneEventsError(f"{ref}: no such file")
+        for base in (action_file.parent, _resource_root(manifest_path, manifest), manifest_path.parent, Path.cwd()):
+            if (base / p).is_file():
+                return base / p
+        raise ZE.ZoneEventsError(f"{ref}: not found beside {action_file.name}, under the project's "
+                                 "resources or here")
+
+    try:
+        built = ZE.build(action, root=root, target=target, resolve=resolve, manifest=manifest, project=project,
+                         force=force, dry_run=dry_run, unwound=unwound)
+    except ZE.ZoneEventsError as e:
+        raise click.ClickException(f"{action.get('id')}: {e}")
+    # Each camera scene DAT is placed and registered like a verbatim DAT; one a previous build
+    # placed that this one no longer does comes out again.
+    placed = []
+    for cam in built["cameras"]:
+        rom = _parse_rom_placement(_rom_rel(cam["dat"]))[0]
+        if rom != 1 and not all((root / f"ROM{rom}" / f"{t}TABLE{rom}.DAT").is_file() for t in "FV"):
+            # What the build's registration would stop on, said by a dry run too.
+            raise click.ClickException(
+                f"{action['id']}: {root} has no ROM{rom} tables, so camera scene {cam['file_id']} "
+                f"({cam['dat']}) can't be registered there. Run `xi ftable expand` on it, or place "
+                "the camera under a ROM that has them.")
+        placed.append(_place_raw_dat_in_build(None, cam["dat"], cam["file_id"], force=force,
+                                              action_id=action["id"], dry_run=dry_run, data=cam.pop("data")))
+    now = {(c["file_id"], _rom_rel(c["dat"]).upper()) for c in built["cameras"]}
+    dropped = []
+    for rec in (((action.get("result") or {}).get("roots") or {}).get(target)) or []:
+        cam = rec.get("camera")
+        if isinstance(cam, dict) and (cam["file_id"], _rom_rel(cam["dat"]).upper()) not in now:
+            dropped.append(cam)
+            if not dry_run:
+                p = root / Path(*_rom_rel(cam["dat"]).split("/"))
+                if p.is_file() and p.read_bytes()[:4] == b"evte":
+                    p.unlink()
+                _unregister_file_id(root, cam["file_id"], _parse_rom_placement(_rom_rel(cam["dat"]))[0])
+    built["placements"], built["dropped"] = placed, dropped
+    sql_path = DB.sql_path(action, action_file, manifest_path)
+    lua_path = _lua_path(action, action_file, manifest_path)
+    if not dry_run:
+        for path, text, head in ((sql_path, built["sql"], None), (lua_path, built["lua"], _LUA_HEAD)):
+            if path is None:
+                continue
+            if text:
+                DB.write_sql_section(path, action["id"], text, project, head=head)
+            else:
+                DB.remove_sql_section(path, action["id"])
+    built["server"] = str(sql_path) if built["sql"] and sql_path is not None else None
+    built["lua_file"] = str(lua_path) if built["lua"] and lua_path is not None else None
+    return built
+
+
+def _zone_list_action_from_source(kind: str, key: str, source: Path, data, action_id: str | None,
+                                  manifest_path: Path, manifest: dict, merge: bool, zone: int | None) -> dict:
+    """A zone_dialog / zone_npcs action from a source: a whole action, ``{"zone", key}``, or a
+    bare list with --zone. With ``merge`` its entries go into the project's action of the same
+    id, replacing an entry of the same id (an "auto" NPC: of the same name)."""
+    if kind == "zone_dialog":
+        from xi.dialog.xi_zone_dialog import validate_action
+    else:
+        from xi.entity.xi_zone_npcs import validate_action
+    body = {key: data} if isinstance(data, list) else \
+        {k: v for k, v in data.items() if k not in ("schema", "$schema", "result")}
+    if zone is not None:
+        body["zone"] = zone
+    if not isinstance(body.get(key), list) or not isinstance(body.get("zone"), int):
+        raise click.ClickException(f"{source}: a {kind} source is an action, {{\"zone\", \"{key}\"}}, "
+                                   f"or a list of {key} with --zone.")
+    action_id = action_id or body.get("id") or f"{kind}.{_slug(source.stem)}"
+    action = {"id": action_id, "type": kind, **{k: v for k, v in body.items() if k not in ("id", "type")}}
+    existing = next((a for a in manifest.get("actions", []) if a.get("id") == action_id), None)
+    if merge and existing:
+        def ident(e):
+            return ("name", e.get("name")) if e.get("id") == "auto" else ("id", e.get("id"))
+        items = list(existing.get(key) or [])
+        at = {ident(e): i for i, e in enumerate(items)}
+        for e in action[key]:
+            if ident(e) in at:
+                items[at[ident(e)]] = e
+            else:
+                items.append(e)
+        action = {**existing, **{k: v for k, v in action.items() if k != key}, key: items}
+    errs = validate_action(action)
+    if errs:
+        raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
+    return action
+
+
+def _zone_events_action_from_source(source: Path, data, action_id: str | None, manifest_path: Path,
+                                    manifest: dict, merge: bool, zone: int | None, camera: str | None,
+                                    event_name: str | None) -> tuple[dict, bool]:
+    """A zone_events action from a source: a whole action or ``{"zone", "events"}`` (its
+    cutscene paths are taken relative to the source), or one cutscene file, which becomes an
+    event of the zone's action (``zone_events.<zone>``), replacing one of the same name.
+    Returns ``(action, merge)``."""
+    from xi.event import xi_zone_events as ZE
+
+    def ref(path: str) -> str:
+        # A cutscene the project names: relative to its resources when it lives there, else absolute.
+        p = Path(path)
+        p = p if p.is_absolute() else (source.parent / p)
+        return _relative_to_resources(p, _resource_root(manifest_path, manifest)) if p.exists() else path
+
+    if data.get("schema") in ZE.SCHEMAS:
+        z = zone if zone is not None else data.get("zone")
+        if not isinstance(z, int):
+            raise click.ClickException(f"{source}: the cutscene has no zone field; pass --zone")
+        ev = {"name": event_name or source.stem, "cutscene": ref(str(source.resolve()))}
+        if camera:
+            ev["camera"] = _rom_rel(camera)
+        if data.get("eventId") not in (None, "auto"):
+            ev["eventId"] = data["eventId"]
+        body, merge = {"zone": z, "events": [ev]}, True
+        action_id = action_id or next((a.get("id") for a in manifest.get("actions", [])
+                                       if a.get("type") == "zone_events" and a.get("zone") == z), None) \
+            or f"zone_events.{_zone_slug(z)}"
+    else:
+        body = {k: v for k, v in data.items() if k not in ("schema", "$schema", "result")}
+        if zone is not None:
+            body["zone"] = zone
+        body["events"] = [({**e, "cutscene": ref(e["cutscene"])} if isinstance(e, dict)
+                           and isinstance(e.get("cutscene"), str) else e) for e in body.get("events") or []]
+        action_id = action_id or body.get("id") or f"zone_events.{_slug(source.stem)}"
+    action = {"id": action_id, "type": "zone_events", **{k: v for k, v in body.items() if k not in ("id", "type")}}
+    existing = next((a for a in manifest.get("actions", []) if a.get("id") == action_id), None)
+    if merge and existing:
+        events = list(existing.get("events") or [])
+        at = {ZE.event_key(e): i for i, e in enumerate(events)}
+        for e in action["events"]:
+            if ZE.event_key(e) in at:
+                events[at[ZE.event_key(e)]] = e
+            else:
+                events.append(e)
+        action = {**existing, **{k: v for k, v in action.items() if k != "events"}, "events": events}
+    errs = ZE.validate_action(action)
+    if errs:
+        raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
+    return action, merge
+
+
+def _zone_slug(zone: int) -> str:
+    """A zone's name as an id part (``lower_jeuno``), else ``zone_<id>``."""
+    try:
+        from xi.event.xi_event import zone_name_for
+        name = zone_name_for(zone)
+    except Exception:
+        name = None
+    return _slug(name) if name else f"zone_{zone}"
 
 
 def _database_result(built: dict | None, previous: dict | None) -> dict:
@@ -1679,7 +2099,10 @@ def _database_result(built: dict | None, previous: dict | None) -> dict:
     b = built or {}
     roots = dict((previous or {}).get("roots") or {})
     roots[b.get("target") or "dir"] = b.get("records") or []
-    return {"roots": roots, "sql": b.get("server")}
+    out = {"roots": roots, "sql": b.get("server")}
+    if b.get("type") == "zone_events":
+        out["lua"] = b.get("lua_file")
+    return out
 
 
 def _database_action_from_source(source: Path, data, action_id: str | None, manifest: dict,
@@ -1758,13 +2181,21 @@ def json_cmd(manifest: Path, output: Path | None):
 @click.option("--menu-index", type=int, default=None,
               help="Spell definitions: the menu slot to sort into (default auto = next after retail's).")
 @click.option("--merge", is_flag=True, default=False,
-              help="Database edits: add them to the project's action of the same id, replacing an edit "
-                   "of the same table and id (the rest stay).")
+              help="Database edits / zone dialog lines: add them to the project's action of the same id, "
+                   "replacing an edit of the same table and id (or a line of the same id); the rest stay.")
+@click.option("--zone", "zone_id", type=int, default=None,
+              help="Zone dialog lines / zone NPCs / a cutscene: the zone a bare list (or a cutscene with no "
+                   "zone field) belongs to.")
+@click.option("--camera", default=None,
+              help="A cutscene with a camera: where its camera scene DAT goes (like ROM10/490/55.DAT).")
+@click.option("--event-name", default=None,
+              help="A cutscene: the name its event is recorded by (default: the file's name).")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
                 record_id: int | None = None, menu_index: int | None = None,
-                animation_from: int | None = None, merge: bool = False):
+                animation_from: int | None = None, merge: bool = False, zone_id: int | None = None,
+                camera: str | None = None, event_name: str | None = None):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -1798,6 +2229,16 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         action_id = action["id"]
     elif kind == "database":
         action = _database_action_from_source(source, data, action_id, manifest_data, merge)
+        action_id = action["id"]
+        replace = replace or merge
+    elif kind in ("zone_dialog", "zone_npcs"):
+        action = _zone_list_action_from_source(kind, "lines" if kind == "zone_dialog" else "npcs", source, data,
+                                               action_id, manifest, manifest_data, merge, zone_id)
+        action_id = action["id"]
+        replace = replace or merge
+    elif kind == "zone_events":
+        action, merge = _zone_events_action_from_source(source, data, action_id, manifest, manifest_data, merge,
+                                                        zone_id, camera, event_name)
         action_id = action["id"]
         replace = replace or merge
     elif kind == "zone":
@@ -1893,7 +2334,7 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         # Same rule: the recorded id survives a re-prepare; the target too unless set here.
         explicit = record_id is not None or menu_index is not None
         preserve = ("result",) + (() if explicit else ("target",))
-    elif kind == "database":
+    elif kind in RESTORABLE_TYPES:
         # What each build changed (the values undo and the next build put back) survives.
         preserve = ("result",)
     else:
@@ -1933,14 +2374,34 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
         aid = action.get("id", "?")
         typ = action.get("type", "?")
         res = action.get("result") or {}
-        if typ == "database":
+        if typ == "zone_events":
+            recorded = [(t, e) for t, recs in (res.get("roots") or {}).items() for e in recs]
+            for t, e in recorded:
+                cam = e.get("camera") or {}
+                rows.append((aid, f"{typ} ({t})", e.get("dat") or "-",
+                             f"zone {e.get('zone')} event {e.get('event')} on {e.get('actor')} ({e.get('name')})",
+                             str(cam.get("file_id", "-"))))
+            if not recorded:
+                from xi.event.xi_zone_events import event_key
+                rows += [(aid, typ, "-", f"zone {action.get('zone')} {event_key(ev)}", "-")
+                         for ev in action.get("events") or []]
+            continue
+        if typ in ("database", "zone_dialog", "zone_npcs"):
             recorded = [(t, e) for t, recs in (res.get("roots") or {}).items() for e in recs]
             for t, e in recorded:
                 tag = " new" if e.get("created") else ""
-                rows.append((aid, f"database ({t})", e.get("dat") or "-",
-                             f"{e.get('table')} {e.get('id')} {e.get('lang')}{tag}", "-"))
+                what = (f"zone {e.get('zone')} line {e.get('id')}" if typ == "zone_dialog" else
+                        f"zone {e.get('zone')} NPC {e.get('local', 0):#x}" if typ == "zone_npcs" else
+                        f"{e.get('table')} {e.get('id')}")
+                lang = f" {e['lang']}" if e.get("lang") else ""
+                rows.append((aid, f"{typ} ({t})", e.get("dat") or "-", f"{what}{lang}{tag}", "-"))
             if not recorded:
-                rows += [(aid, typ, "-", f"{e.get('table')} {e.get('id')}", "-") for e in action.get("edits") or []]
+                todo = ([f"zone {action.get('zone')} line {l.get('id')}" for l in action.get("lines") or []]
+                        if typ == "zone_dialog" else
+                        [f"zone {action.get('zone')} NPC {n.get('id')}" for n in action.get("npcs") or []]
+                        if typ == "zone_npcs" else
+                        [f"{e.get('table')} {e.get('id')}" for e in action.get("edits") or []])
+                rows += [(aid, typ, "-", w, "-") for w in todo]
             continue
         if typ in RECORD_TYPES:
             rid = res.get("record_id", (action.get("target") or {}).get("id", "auto"))
@@ -1991,6 +2452,25 @@ def _action_summary(action: dict) -> str:
     if model_id is not None:
         parts.append(f"model {model_id}")
     line = " - ".join(parts)
+    if action.get("type") == "zone_events":
+        evs = action.get("events") or []
+        from xi.event.xi_zone_events import event_key
+        names = [f"{event_key(e) or '?'}{' (dialogue)' if 'dialogue' in e else ''}" for e in evs[:4]]
+        line += (f" - zone {action.get('zone')}: {len(evs)} event{'s' if len(evs) != 1 else ''} "
+                 f"({', '.join(names)}{' …' if len(evs) > 4 else ''})")
+        return line
+    if action.get("type") == "zone_npcs":
+        npcs = action.get("npcs") or []
+        names = [f"{'+' if n.get('new') else ''}{n.get('name') or n.get('id')}" for n in npcs[:5]]
+        line += (f" - zone {action.get('zone')}: {len(npcs)} NPC{'s' if len(npcs) != 1 else ''} "
+                 f"({', '.join(names)}{' …' if len(npcs) > 5 else ''})")
+        return line
+    if action.get("type") == "zone_dialog":
+        lines = action.get("lines") or []
+        ids = [f"{'+' if l.get('new') else ''}{l.get('id')}" for l in lines[:6]]
+        line += (f" - zone {action.get('zone')}: {len(lines)} line{'s' if len(lines) != 1 else ''} "
+                 f"({', '.join(ids)}{' …' if len(lines) > 6 else ''})")
+        return line
     if action.get("type") == "database":
         edits = action.get("edits") or []
         names = [f"{e.get('table')} {e.get('id')}" for e in edits[:4]]
@@ -2213,49 +2693,62 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_ability(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind in RECORD_TYPES:
             return _build_record(action, manifest, manifest_data, force=force, dry_run=dry_run)
+        # The restorable types: the project's last build of them was put back first (_unwind).
         if kind == "database":
-            return _build_database(action, manifest, manifest_data, force=force, dry_run=dry_run)
+            return _build_database(action, manifest, manifest_data, force=force, dry_run=dry_run, unwound=True)
+        if kind == "zone_dialog":
+            return _build_zone_dialog(action, manifest, manifest_data, force=force, dry_run=dry_run, unwound=True)
+        if kind == "zone_npcs":
+            return _build_zone_npcs(action, manifest, manifest_data, force=force, dry_run=dry_run, unwound=True)
+        if kind == "zone_events":
+            return _build_zone_events(action, manifest, manifest_data, force=force, dry_run=dry_run, unwound=True)
         raise click.ClickException(
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
     results = []
     server_pairs = []           # (action, build result) of the ability actions, for the server pass
-    for action in active_actions:
-        kind = action.get("type")
-        if kind == "zone":
-            # Zone actions use the standard/hd package roots, not the live target.
-            if dry_run:
-                continue  # zone dry-run preview not modelled; skip
-            with _package_config(standard_root, hd_root):
-                result = _build_zone(action, manifest, manifest_data, redirect_root)
-        else:
-            # Place into every selected target (a dry-run just previews once).
-            result = None
-            for _name, root in (target_roots[:1] if dry_run else target_roots):
-                _set_target_root(root)
-                result = _dispatch(action, kind)
-        results.append(result)
-        if kind == "ability" and isinstance(result, dict):
-            server_pairs.append((action, result))
-        # Record the allocation INLINE on the action (idempotent — overwrites the
-        # same key), so the manifest itself is the single source of truth. Track
-        # every target the DATs have been built into (union across builds).
-        if not dry_run and kind != "zone":
-            prior = set((action.get("result") or {}).get("targets") or [])
-            built = prior | {name for name, _ in target_roots}
-            # An ability's allocation (animation number, per-race placements) is
-            # decided by the build against the live tables, not by the definition
-            # alone, so it is taken from the build result rather than re-planned.
-            if kind == "ability":
-                res = _ability_result(result, action.get("result"))
-            elif kind in RECORD_TYPES:
-                res = _record_result(result)   # the id is decided against the live table too
-            elif kind == "database":
-                res = _database_result(result, action.get("result"))
+    from xi.dats import xi_stage
+    with xi_stage.session(dry_run):
+        # A dry run holds what it would write, so each step sees the ones before it.
+        unwound = _unwind(active_actions, target_roots[:1] if dry_run else target_roots, dry_run)
+        for action in active_actions:
+            kind = action.get("type")
+            if kind == "zone":
+                # Zone actions use the standard/hd package roots, not the live target.
+                if dry_run:
+                    continue  # zone dry-run preview not modelled; skip
+                with _package_config(standard_root, hd_root):
+                    result = _build_zone(action, manifest, manifest_data, redirect_root)
             else:
-                res = _plan_result(action)
-            res["targets"] = [n for n in ("pivot", "dir", "hd") if n in built]
-            action["result"] = res
+                # Place into every selected target (a dry-run just previews once).
+                result = None
+                for _name, root in (target_roots[:1] if dry_run else target_roots):
+                    _set_target_root(root)
+                    result = _dispatch(action, kind)
+            if unwound.get(action.get("id")) and isinstance(result, dict):
+                result["warnings"] = unwound[action["id"]] + list(result.get("warnings") or [])
+            results.append(result)
+            if kind == "ability" and isinstance(result, dict):
+                server_pairs.append((action, result))
+            # Record the allocation INLINE on the action (idempotent — overwrites the
+            # same key), so the manifest itself is the single source of truth. Track
+            # every target the DATs have been built into (union across builds).
+            if not dry_run and kind != "zone":
+                prior = set((action.get("result") or {}).get("targets") or [])
+                built = prior | {name for name, _ in target_roots}
+                # An ability's allocation (animation number, per-race placements) is
+                # decided by the build against the live tables, not by the definition
+                # alone, so it is taken from the build result rather than re-planned.
+                if kind == "ability":
+                    res = _ability_result(result, action.get("result"))
+                elif kind in RECORD_TYPES:
+                    res = _record_result(result)   # the id is decided against the live table too
+                elif kind in RESTORABLE_TYPES:
+                    res = _database_result(result, action.get("result"))
+                else:
+                    res = _plan_result(action)
+                res["targets"] = [n for n in ("pivot", "dir", "hd") if n in built]
+                action["result"] = res
 
     _set_target_root(None)
 
@@ -2314,6 +2807,37 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         click.echo(db_line)
 
 
+RESTORABLE_TYPES = ("database", "zone_dialog", "zone_npcs", "zone_events")
+
+
+def _restorable_module(kind: str):
+    """The library of a restorable type: its ``undo(action, root, target, dry_run)``."""
+    if kind == "database":
+        from xi.database import xi_build as mod
+    elif kind == "zone_dialog":
+        from xi.dialog import xi_zone_dialog as mod
+    elif kind == "zone_npcs":
+        from xi.entity import xi_zone_npcs as mod
+    else:
+        from xi.event import xi_zone_events as mod
+    return mod
+
+
+def _unwind(actions: list[dict], roots, dry_run: bool) -> dict[str, list[str]]:
+    """Put back what the last build of each restorable action changed, newest first, before
+    any of them is applied again: a stack taken down in order. Every action then gets back
+    the tables it changed, even where several change one table (two that add a zone's
+    dialog lines, events on one NPC). Returns each action's warnings by id."""
+    out: dict[str, list[str]] = {}
+    for name, root in roots:
+        for action in reversed([a for a in actions if a.get("type") in RESTORABLE_TYPES]):
+            if not (((action.get("result") or {}).get("roots") or {}).get(name)):
+                continue
+            _n, warns = _restorable_module(action["type"]).undo(action, root, name, dry_run=dry_run)
+            out.setdefault(action["id"], []).extend(warns)
+    return out
+
+
 def _project_built_targets(manifest_data: dict) -> list[str]:
     """Targets any of the project's actions have been built into (union), in
     canonical order — read from each action's recorded ``result.targets``."""
@@ -2340,6 +2864,15 @@ def _action_placements(action: dict) -> list[tuple[int, str]]:
         for p in res.get("placements", []):
             if p.get("file_id") is not None and p.get("dat"):
                 out.append((int(p["file_id"]), _rom_rel(p["dat"])))
+    elif action.get("type") == "zone_events":
+        # Each camera scene DAT an event placed (the event and dialog tables are restored).
+        for recs in (res.get("roots") or {}).values():
+            for rec in recs:
+                cam = rec.get("camera")
+                if isinstance(cam, dict) and (int(cam["file_id"]), _rom_rel(cam["dat"])) not in out:
+                    out.append((int(cam["file_id"]), _rom_rel(cam["dat"])))
+    elif action.get("type") in RESTORABLE_TYPES:
+        pass
     elif res.get("file_id") is not None and res.get("dat"):
         out.append((int(res["file_id"]), _rom_rel(res["dat"])))
     return out
@@ -2410,11 +2943,16 @@ def _project_dat_rels(manifest_data: dict, target: str | None = None) -> tuple[l
             # The shared menu table plus the name/help tables the build edited.
             rels += [_rom_rel(res.get("dat") or "ROM/118/114.DAT")]
             rels += [_rom_rel(s) for s in res.get("strings") or []]
-        elif typ == "database":
-            # The item DATs / string tables whose records it changed, in each target.
+        elif typ in RESTORABLE_TYPES:
+            # The item DATs / string / dialog / event tables whose records it changed, in each
+            # target, and a zone_events action's camera scene DATs.
             for tname, recs in (res.get("roots") or {}).items():
                 if target is None or tname == target:
                     rels += [_rom_rel(e["dat"]) for e in recs if e.get("dat")]
+                    for e in recs:
+                        rels += [_rom_rel(ln["dat"]) for ln in e.get("lines") or [] if ln.get("dat")]
+                        if isinstance(e.get("camera"), dict):
+                            rels.append(_rom_rel(e["camera"]["dat"]))
         elif res.get("dat"):
             rels.append(_rom_rel(res["dat"]))
         if typ == "mount":
@@ -2727,29 +3265,35 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
                 # The Client Menu Record: put back the placeholder, only while the row still
                 # holds the bytes the build wrote (a retail update may have taken it since).
                 cleared += undo_menu_in(action, name, root, menu_left)
-            if action.get("type") == "database":
-                # Each record back to what it held before the build (field by field; a field
-                # something else changed since is left, and said).
-                from xi.database import xi_build as DB
-                n, warns = DB.undo(action, root, name)
+        # The records, lines, names and events the restorable types changed go back to what
+        # they held before the build, newest action first (a stack: where two changed one
+        # table, each gets back what it changed). What something else changed since is left,
+        # and said.
+        for action in reversed(live):
+            if name in _action_targets(action) and action.get("type") in RESTORABLE_TYPES:
+                n, warns = _restorable_module(action["type"]).undo(action, root, name)
                 here += n
                 db_left.extend(warns)
         restored += here
         click.echo(f"  ✓ {name}: DATs deleted + table entries cleared"
                    + (f", {here} record{'s' if here != 1 else ''} put back" if here else ""))
         for w in db_left:
-            click.echo(click.style(f"  ⚠ database: {w}", fg="yellow"))
+            click.echo(click.style(f"  ⚠ {w}", fg="yellow"))
         db_left.clear()
         for w in menu_left:
             click.echo(click.style(f"  ⚠ menu: {w}", fg="yellow"))
 
-    # A database action's proposed SQL goes with it.
+    # The proposed SQL (and a zone_events action's Lua) goes with the action.
     for action in live:
-        sql = (action.get("result") or {}).get("sql") if action.get("type") == "database" else None
-        if sql:
-            from xi.database import xi_build as DB
-            if DB.remove_sql_section(Path(sql), action["id"]):
-                click.echo(f"  ✓ removed {action['id']}'s SQL from {sql}")
+        if action.get("type") not in RESTORABLE_TYPES:
+            continue
+        res = action.get("result") or {}
+        for key, what in (("sql", "SQL"), ("lua", "Lua")):
+            path = res.get(key)
+            if isinstance(path, str) and path:
+                from xi.database import xi_build as DB
+                if DB.remove_sql_section(Path(path), action["id"]):
+                    click.echo(f"  ✓ removed {action['id']}'s {what} from {path}")
 
     # The menu records an earlier undo couldn't put back.
     for name in [n for n in ("pivot", "dir", "hd")
@@ -2969,6 +3513,71 @@ def _print_placements(results: list[dict], title: str) -> None:
             if r.get("sql"):
                 for line in r["sql"].splitlines():
                     click.echo(f"       {line}")
+        elif kind == "zone_npcs":
+            recs = r.get("records") or []
+            where = ", ".join(r.get("files") or []) or "no DAT changes"
+            click.echo(f"{head}: zone {r.get('zone')}, {len(recs)} name{'s' if len(recs) != 1 else ''} -> {where}")
+            for e in recs:
+                what = "new" if e.get("created") else f"renamed from {e['from']!r}"
+                click.echo(f"     - NPC {e['local']:#x} ({e['sid']:#010x}) {e['to']!r}: {what}")
+            for w in r.get("warnings") or []:
+                click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
+            if r.get("server"):
+                click.echo(f"     server (proposed, not run): {r['server']}")
+            if r.get("sql"):
+                for line in r["sql"].splitlines():
+                    click.echo(f"       {line}")
+        elif kind == "zone_events":
+            recs = r.get("records") or []
+            where = ", ".join(r.get("files") or []) or "no DAT changes"
+            click.echo(f"{head}: zone {r.get('zone')}, {len(recs)} event{'s' if len(recs) != 1 else ''} -> {where}")
+            for e in recs:
+                blocks = e.get("blocks") or []
+                new_blocks = sum(1 for b in blocks if b.get("created"))
+                en = [ln for ln in e.get("lines") or [] if ln.get("lang") == "en"]
+                n_lines = sum((ln["grew"][1] - ln["grew"][0]) if ln.get("grew") else 1 for ln in en)
+                who = f"{e['npc']} ({e['actor']})" if e.get("npc") else e["actor"]
+                click.echo(f"     - {e['name']}: event {e['event']} on {who} — {len(blocks)} block"
+                           f"{'s' if len(blocks) != 1 else ''} ({new_blocks} new), {n_lines} line"
+                           f"{'s' if n_lines != 1 else ''}")
+                for ln in en:
+                    if ln.get("grew"):
+                        for k, text in enumerate(ln.get("to") or []):
+                            click.echo(f"         line {ln['grew'][0] + k} (new): {_short(text)}")
+                    else:
+                        click.echo(f"         line {ln['id']}: {_short(ln['from'])} -> {_short(ln['to'])}")
+            for pl in r.get("placements") or []:
+                occ = pl.get("occupied_by")
+                note = f"   (occupied by {occ})" if occ else ""
+                click.echo(f"     - camera scene: file_id {pl['file_id']} -> {pl['target_dat']}{note}")
+                if occ:
+                    collisions += 1
+            for cam in r.get("dropped") or []:
+                click.echo(f"     - camera scene {cam['file_id']} ({cam['dat']}) is no longer used: removed")
+            for w in r.get("warnings") or []:
+                click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
+            if r.get("server"):
+                click.echo(f"     server (proposed, not run): {r['server']}")
+            if r.get("sql"):
+                for line in r["sql"].splitlines():
+                    click.echo(f"       {line}")
+            if r.get("lua_file"):
+                click.echo(f"     server scripts (proposed): {r['lua_file']}")
+            elif r.get("lua"):
+                for line in r["lua"].splitlines():
+                    click.echo(f"       {line}")
+        elif kind == "zone_dialog":
+            recs = r.get("records") or []
+            where = ", ".join(r.get("files") or []) or "no DAT changes"
+            click.echo(f"{head}: zone {r.get('zone')}, {len(recs)} line{'s' if len(recs) != 1 else ''} -> {where}")
+            for e in recs:
+                if e.get("created"):
+                    click.echo(f"     - line {e['id']} [{e['lang']}] {e['dat']}  (new): {_short(e['to'])}")
+                else:
+                    click.echo(f"     - line {e['id']} [{e['lang']}] {e['dat']}: {_short(e['from'])} -> "
+                               f"{_short(e['to'])}")
+            for w in r.get("warnings") or []:
+                click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
         elif kind == "ability":
             files = r.get("placements", [])
             click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "
@@ -4157,18 +4766,25 @@ def new_cmd(project: str | None, pivot: bool = False):
         "Spell menu record (a new spell id: name, help, MP, levels)": "spell",
         "Command menu record (a new job ability / weapon skill id)": "command",
         "Database records (edit or add items, key items, titles, …)": "database",
+        "Zone dialog (edit or add the lines a zone's NPCs say)": "zone_dialog",
+        "Zone NPCs (rename or add a zone's NPCs)": "zone_npcs",
+        "Zone events (cutscenes and dialogue on a zone's NPCs)": "zone_events",
     }[_choose("What type of content is being added?",
               ["Gear", "Mounts", "Entity (NPC / Monster / Object)",
                "NPC (costume: race + gear + weapons)",
                "Ability (recipe from the Ability Mixer / xi ability recipe)",
                "Spell menu record (a new spell id: name, help, MP, levels)",
                "Command menu record (a new job ability / weapon skill id)",
-               "Database records (edit or add items, key items, titles, …)"])]
+               "Database records (edit or add items, key items, titles, …)",
+               "Zone dialog (edit or add the lines a zone's NPCs say)",
+               "Zone NPCs (rename or add a zone's NPCs)",
+               "Zone events (cutscenes and dialogue on a zone's NPCs)"])]
     # The baked NPC is placed at a custom entity model id, so it needs the entity tables.
     # Abilities take retail-range ids (job-ability / spell bands, weapon-skill dummies),
     # so the tables need no expansion.
     ready_key = "entity" if ctype == "npc" else ctype
-    if ctype not in ("ability", "database", *RECORD_TYPES) and not ready.get(ready_key, True):
+    if ctype not in ("ability", *RESTORABLE_TYPES, *RECORD_TYPES) \
+            and not ready.get(ready_key, True):
         hint = {"gear": "Run `xi ftable expand gear` (expands the FTABLE and patches "
                         "FFXiMain.dll)",
                 "entity": "Run `xi ftable expand entity`",
@@ -4204,12 +4820,18 @@ def new_cmd(project: str | None, pivot: bool = False):
             new_actions = [_wizard_record(ctype, slug, prev, manifest_path, manifest)]
         elif ctype == "database":
             new_actions = [_wizard_database(slug, prev, pivot)]
+        elif ctype == "zone_dialog":
+            new_actions = [_wizard_zone_dialog(slug, prev, pivot)]
+        elif ctype == "zone_npcs":
+            new_actions = [_wizard_zone_npcs(slug, prev, pivot)]
+        elif ctype == "zone_events":
+            new_actions = [_wizard_zone_events(slug, prev, pivot)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 
     by_id = {a.get("id"): a for a in manifest.get("actions", [])}
     for action in new_actions:
-        if action.get("type") not in ("ability", "database", *RECORD_TYPES):
+        if action.get("type") not in ("ability", *RESTORABLE_TYPES, *RECORD_TYPES):
             # Allocated deterministically from the definition; abilities and menu
             # records are decided by the build against the live tables instead.
             action["result"] = _plan_result(action)  # record the allocation inline (same as build)

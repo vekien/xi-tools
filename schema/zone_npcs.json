@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/zone_npcs.json",
+  "title": "xi dats zone_npcs action",
+  "description": "A zone's NPC list: the names the client shows, in the zone's entity-name table (file id 6720 + zone, the zone model's + 2600 from zone 256), renamed or added by zone-local id, with each new or changed NPC's npc_list row written as proposed SQL beside the project (never run). New NPCs take ids from the custom band 0x380-0x3FF; \"auto\" picks a free one and a rebuild keeps it. Each name written is recorded per build target: a rebuild converges and undo is exact.",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "zone", "npcs"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "zone_npcs"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "depends_on": {"type": "array", "items": {"$ref": "common.json#/$defs/actionId"}, "uniqueItems": true},
+    "zone": {"type": "integer", "minimum": 0, "maximum": 4095, "description": "The zone id (xi zone json)."},
+    "npcs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/npc"}},
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The proposed SQL for the NPCs' npc_list rows. It is written, never run.",
+      "properties": {
+        "emit": {"type": "boolean", "default": true},
+        "sql": {"type": "string", "pattern": "\\.sql$", "description": "Relative to the file holding this action. Default: <project>.sql beside the project file."}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Recorded by dats build: per build target, every name written (entity id, before and after).",
+      "properties": {
+        "targets": {"type": "array", "items": {"type": "string"}},
+        "sql": {"type": ["string", "null"]},
+        "roots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "zone": {"type": "integer"},
+                "dat": {"$ref": "common.json#/$defs/romPath"},
+                "sid": {"type": "integer", "description": "The entity id: 0x01000000 | zone << 12 | local."},
+                "local": {"type": "integer"},
+                "from": {"type": ["string", "null"]},
+                "to": {"type": "string"},
+                "created": {"type": "boolean"},
+                "name_key": {"type": "string", "description": "An auto NPC: the name its id is kept under."}
+              }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+  },
+  "$defs": {
+    "npc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "description": "The NPC's zone-local id (0x001-0x3FF; the entity id is 0x01000000 | zone << 12 | id), or \"auto\" for a new NPC: the first free id from 0x380.",
+          "oneOf": [
+            {"type": "integer", "minimum": 1, "maximum": 1023},
+            {"type": "string", "const": "auto"}
+          ]
+        },
+        "name": {"type": "string", "minLength": 1, "description": "The name the client shows (up to 27 cp932 bytes). On an existing NPC: a rename — the SQL sets polutils_name and leaves npc_list.name, which binds its Lua script."},
+        "new": {"type": "boolean", "description": "Add the NPC: its name goes into the table and its full npc_list row into the SQL."},
+        "server": {
+          "description": "npc_list columns: a new NPC's row (model or look required; the rest default to a cutscene-only NPC: status 6, flag 1, speed 50, entityFlags 27), or the columns to change on an existing one. false leaves the server out.",
+          "oneOf": [
+            {"type": "boolean", "const": false},
+            {"$ref": "#/$defs/row"}
+          ]
+        },
+        "note": {"type": "string"}
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {"type": "integer", "minimum": 0, "maximum": 65535, "description": "A fixed model id (monster / entity / object): the look becomes size 0 + this id."},
+        "look": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$", "description": "The 20-byte look blob as hex (an equipped character: race, face and gear)."},
+        "name": {"type": "string", "description": "npc_list.name (default: the name, spaces as _): the key the server loads the NPC's Lua by."},
+        "polutils_name": {"type": "string"},
+        "pos": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}, "description": "x, y, z (npc_list's axes)."},
+        "rot": {"type": "integer", "minimum": 0, "maximum": 255},
+        "status": {"type": "integer", "enum": [0, 2, 3, 6], "description": "0 normal, 2 disappear, 3 invisible, 6 cutscene only (default: an event shows it)."},
+        "flag": {"type": "integer", "minimum": 0},
+        "speed": {"type": "integer", "minimum": 0},
+        "speedsub": {"type": "integer", "minimum": 0},
+        "animation": {"type": "integer", "minimum": 0},
+        "animationsub": {"type": "integer", "minimum": 0},
+        "namevis": {"type": "integer", "minimum": 0},
+        "entityFlags": {"type": "integer", "minimum": 0},
+        "name_prefix": {"type": "integer", "minimum": 0},
+        "content_tag": {"type": ["string", "null"]},
+        "widescan": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "zone_npcs.lower_jeuno",
+      "type": "zone_npcs",
+      "zone": 245,
+      "npcs": [
+        {"id": "auto", "new": true, "name": "Vekien",
+         "server": {"model": 25005, "status": 0, "pos": [-33.5, 0.0, -18.25], "rot": 64}},
+        {"id": 1, "name": "Wolfgang the Watchful", "note": "a title for the gate guard"}
+      ]
+    }
+  ]
+}

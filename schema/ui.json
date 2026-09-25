@@ -17,7 +17,7 @@
       "required": ["dat"],
       "properties": {
         "dat": {"$ref": "common.json#/$defs/romPath"},
-        "category": {"type": "string", "enum": ["texture", "layout", "strings", "items", "spells"]},
+        "category": {"type": "string", "enum": ["texture", "layout"], "description": "The visual interface: a UI texture sheet (title screen, menus, buttons) or its layout. Text and records are not ui: items, key items, titles and spell text are database actions, a zone's lines zone_dialog."},
         "entry": {"oneOf": [{"type": "string"}, {"type": "integer"}]}
       }
     },

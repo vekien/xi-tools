@@ -1147,6 +1147,13 @@ def decompile_loaded(actors, blobs, names, zf, actor_id: int, event_id: int, whi
     assets["note"] = "ids are retail's today; custom content replaces these entries and keeps the same keys"
 
     name = names.get(actor_id, f"0x{actor_id:08X}") if isinstance(names, dict) else f"0x{actor_id:08X}"
+    # The other NPCs the event involves: every block that lists the event id (retail's are
+    # mostly a one-byte `end`). The client prepares only those, so they belong in the cast:
+    # a recompile keeps their entries, where it would drop an involvement it wasn't told of.
+    involved = [{"id": f"involved_{x.actor_id & 0xFFFFFF:06x}", "entity": f"0x{x.actor_id:08X}",
+                 **({"name": str(names[x.actor_id])} if isinstance(names, dict) and x.actor_id in names else {})}
+                for x in actors if x.actor_id != actor_id and event_id in x.event_ids
+                and (x.actor_id & 0xFF000000) and (x.actor_id >> 24) != 0x7F]
     cs = {
         "schema": "xi.cutscene.v1",
         "spec": {
@@ -1159,7 +1166,7 @@ def decompile_loaded(actors, blobs, names, zf, actor_id: int, event_id: int, whi
         "zone": zone_id,
         "actor": "owner",
         "npcName": str(name),
-        "cast": {"cast": [{"id": "owner", "entity": f"0x{actor_id:08X}", "name": str(name)}]},
+        "cast": {"cast": [{"id": "owner", "entity": f"0x{actor_id:08X}", "name": str(name)}, *involved]},
         "dialog": {"lines": [ctx.lines[k] for k in sorted(ctx.lines)]},
         "template": template,
         "assets": assets,

@@ -44,6 +44,15 @@ def zone_dialog_file_id(zone_id: int) -> int:
         return 6420 + zone_id
     return zone_model_file_id(zone_id) + 1700
 
+def zone_dialog_jp_file_id(zone_id: int) -> int:
+    """The Japanese dialog table (the English one is zone_dialog_file_id). Checked on the
+    retail install: 6120 + zone below 0x100 (ROM/23/39-54 beside ROM/25/39-54), and the
+    model's file id + 1400 above (Mog Garden 280: ROM/303/30 beside ROM/303/32), each with
+    the English table's line count."""
+    if zone_id < 0x100:
+        return 6120 + zone_id
+    return zone_model_file_id(zone_id) + 1400
+
 def zone_npc_file_id(zone_id: int) -> int:
     if zone_id < 0x100:
         return 6720 + zone_id

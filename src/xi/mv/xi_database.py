@@ -14,6 +14,9 @@ registry, block layouts and JSON row shape must stay in step with it:
   decoded block base64-encoded (the non-item DATs the viewer decodes itself).
 * d_msg rows: ``{idx, offset, length, subs}`` — ``subs`` is a list of text or,
   for a non-text sub-string, its integer marker.
+* spell / ability rows (ROM/118/114.DAT): ``{idx, offset, name, help, fields,
+  levels, hex}`` — the decoded record (xi.menu.xi_menu_table) with the name and
+  help of the language baked.
 """
 
 from __future__ import annotations
@@ -108,7 +111,15 @@ DMSG_TABLES = [
     ("servers", "ROM/333/34.DAT", "ROM/333/33.DAT"),
 ]
 
-ALL_KEYS = [t[0] for t in ITEM_TABLES] + [t[0] for t in DMSG_TABLES]
+# The spell and command records of ROM/118/114.DAT (xi.menu.xi_menu_table): one file for
+# every client language (both language tables point MENU_Unk1 at file 81), joined here with
+# the names and help of the language baked. key -> (kind, names table, help table).
+MENU_TABLES = [
+    ("spellData", "spell", "spells", "spellHelp"),
+    ("abilityData", "command", "abilities", "abilityHelp"),
+]
+
+ALL_KEYS = [t[0] for t in ITEM_TABLES] + [t[0] for t in DMSG_TABLES] + [t[0] for t in MENU_TABLES]
 LANGS = ("en", "jp")
 
 # Legacy record stride. Files are read with the stride ``detect_stride`` finds
@@ -323,6 +334,61 @@ def bake_dmsg(game: Path, key: str, en: str, jp: str, lang: str):
             "num": num, "tableOffset": table_offset, "rows": rows}
 
 
+def menu_rows(data: bytes, kind: str, names: list | None = None, helps: list | None = None) -> list[dict]:
+    """The records of one section of a menu table, ``{idx, offset, name, help, fields, levels?,
+    hex}`` — the decoded fields (xi.menu.xi_menu_table), empty (all-zero) records left out."""
+    from xi.menu import xi_menu_table as MT
+    menu = MT.parse(data)
+    k = MT.KINDS[kind]
+    start = MT.FILE_HEADER
+    for s in menu.sections:
+        if s.tag == k.tag.encode("ascii"):
+            break
+        start += MT.SECTION_HEADER + len(s.body) + (-(MT.SECTION_HEADER + len(s.body)) % 16)
+    rows = []
+    for idx, rec in enumerate(menu.records(kind)):
+        if not any(rec):
+            continue
+        fields = MT.read_fields(kind, rec)
+        levels = fields.pop("levels", None)
+        row = {"idx": idx, "offset": start + MT.SECTION_HEADER + idx * k.stride,
+               "name": (names[idx] if names and idx < len(names) else ""),
+               "help": (helps[idx] if helps and idx < len(helps) else ""),
+               "fields": fields, "hex": rec.hex()}
+        if levels is not None:
+            row["levels"] = levels
+        rows.append(row)
+    return rows
+
+
+def _dmsg_texts(game: Path, key: str, lang: str, sub: int) -> list:
+    en, jp = next((e, j) for k, e, j in DMSG_TABLES if k == key)
+    doc = bake_dmsg(game, key, en, jp, lang)
+    if not doc:
+        return []
+    out = []
+    for row in doc["rows"]:
+        subs = row["subs"]
+        v = subs[sub] if sub < len(subs) else ""
+        out.append(v if isinstance(v, str) else "")
+    return out
+
+
+def bake_menu(game: Path, key: str, kind: str, names_key: str, help_key: str, lang: str):
+    from xi.menu import xi_menu_table as MT
+    path = game / MT.MENU_DAT
+    if not path.is_file():
+        return None
+    names = _dmsg_texts(game, names_key, lang, 0)
+    helps = _dmsg_texts(game, help_key, lang, 0)          # the help tables hold one sub-string
+    k = MT.KINDS[kind]
+    rows = menu_rows(path.read_bytes(), kind, names, helps)
+    files = [MT.MENU_DAT, next(e if lang == "en" else j for kk, e, j in DMSG_TABLES if kk == names_key),
+             next(e if lang == "en" else j for kk, e, j in DMSG_TABLES if kk == help_key)]
+    return {"kind": "menu", "key": key, "lang": lang, "menuKind": kind, "section": k.tag,
+            "stride": k.stride, "files": files, "rows": rows}
+
+
 def default_out_dir() -> Path:
     return Path(XI_TOOLS_DIR) / "mv" / "db"
 
@@ -370,12 +436,18 @@ def cmd(only: str | None, langs: str, out_dir: Path | None, game_dir: Path | Non
 
     items = {k: (layout, parts) for k, layout, parts in ITEM_TABLES}
     dmsgs = {k: (en, jp) for k, en, jp in DMSG_TABLES}
+    menus = {k: (kind, names, helps) for k, kind, names, helps in MENU_TABLES}
     t0 = time.time()
     for key in keys:
         for lang in lang_list:
             if key in items:
                 layout, parts = items[key]
                 doc = bake_items(game, key, layout, parts, lang)
+            elif key in menus:
+                doc = bake_menu(game, key, *menus[key], lang)
+                if doc is None:
+                    click.echo(f"  {key:16} {lang}  missing — skipped")
+                    continue
             else:
                 en, jp = dmsgs[key]
                 doc = bake_dmsg(game, key, en, jp, lang)

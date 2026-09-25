@@ -197,8 +197,8 @@ So the **end-to-end** for a custom cutscene is:
 |---|---|---|
 | `xi event cutscene export <zone>` | **shipped** | parse a zone's Event DAT → `.txt` disasm / `--json` (actors, eventIds, decoded bytecode, resolved `→ msg`/`→ zone`) — the inverse of compile, for learning from retail events |
 | `xi event dialogue actors <zone>` | **shipped** | list a zone's actor ids + names → pick the NPC for `dialogue new` |
-| `xi event dialogue new <zone> --json … --actor …` | **shipped** | append lines + synthesize a multi-line dialogue event → event id + Lua stub ([authoring.md](authoring.md)) |
-| `xi event cutscene compile <cutscene.json> --event-dat <path> [--dialog-dat <path>] [--dry-run]` | **shipped** | the full step compiler — splice a new/edited event + strings (+ camera/menus/branches) into the zone DATs, keep `<dat>.base`. `--event-dat` required; `--dialog-dat` auto-derived from `/21/`→`/25/` when possible |
+| `xi event dialogue new <zone> --json … --actor …` | **shipped** | append lines + synthesize a multi-line dialogue event → event id + Lua stub ([authoring.md](authoring.md)); a dialogue event of the zone's [`zone_events`](zone_events.md) action |
+| `xi event cutscene compile <cutscene.json> [--zone N] [--camera ROM10/…] [--dry-run]` | **shipped** | the full step compiler — a new/edited event + strings (+ camera/menus/branches) in the zone DATs, through the zone's [`zone_events`](zone_events.md) action (`xi dats prepare` + `build`; `xi dats undo` takes it out) |
 
 **Build order that de-risked it (followed):** `export` **first** (read-only; validated the
 format against retail), then a *byte-exact event-DAT round-trip*

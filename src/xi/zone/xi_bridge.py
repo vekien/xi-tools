@@ -1197,33 +1197,15 @@ def _character_glb(look: bytes, extra_clips=None) -> tuple:
 #   (Refs store p as a work value; high-tier ids also sit awkwardly near u16 limits.)
 
 
-def _scene_p_for(file_id: int) -> int | None:
-    """Inverse of the 0x45 scene datid map: a scene DAT at ``file_id`` → the ref value
-    ``p`` that reaches it, or ``None`` if the id isn't in a reachable band."""
-    if 30704 <= file_id < 31004:           # tier p<300      : file = 30704 + p
-        return file_id - 30704
-    if 56941 <= file_id <= 57240:          # tier 300<=p<600 : file = 56641 + p
-        return file_id - 56641
-    if 70947 <= file_id <= 76000:          # tier p>=600     : file = 70347 + p
-        return file_id - 70347
-    return None
+# The camera scene band, placements, animation-tag prep and the lint gate live in
+# xi.event.xi_cutscene_publish, shared with the `zone_events` action of `xi dats`.
+from xi.event import xi_cutscene_publish as _CP
 
-
-def _camera_scene_id_safe(file_id: int | None) -> bool:
-    """True if ``file_id`` is in the mid band we may use for custom cameras."""
-    if file_id is None:
-        return False
-    p = _scene_p_for(int(file_id))
-    return p is not None and 300 <= p < 600
-
-
-def _has_camera_track(cutscene: dict) -> bool:
-    # A camera exists if the legacy single 'camera' track OR the split Position sub-track
-    # ('campos', which defines the shots) carries keyframes. Post-Phase-3 the editor sends the
-    # three sub-tracks (campos/camrot/camzoom); older defs still send 'camera'.
-    tl = cutscene.get("timeline") or {}
-    return any(t.get("kind") in ("camera", "campos") and t.get("keyframes")
-               for t in (tl.get("tracks") or []))
+_scene_p_for = _CP.scene_p_for
+_camera_scene_id_safe = _CP.camera_scene_id_safe
+_has_camera_track = _CP.has_camera_track
+_gesture_bank_tags = _CP.gesture_bank_tags
+_NAMEVIS_HIDE_BIT = _CP.NAMEVIS_HIDE   # the npc_list.namevis bit that hides a name (0x20)
 
 
 def _camera_scene_fileid(zone_id: int, cutscene: dict) -> int | None:
@@ -1260,18 +1242,8 @@ def _camera_scene_fileid(zone_id: int, cutscene: dict) -> int | None:
                     return int(fid)
             except Exception:
                 pass
-    from xi.ftable.xi_core import load_all_tables, resolve_dat
-    tables = load_all_tables()
-
-    def _free(fid):
-        return not any(resolve_dat(fd, vd, fid)[0] for _, (fd, vd) in tables.items())
     # ★ Mid band ONLY (p 300..599 → file 56941..57240). Lowest free hole first.
-    for p in range(300, 600):
-        if _free(p + 56641):
-            return p + 56641
-    raise RuntimeError(
-        "no free camera-scene file id in the safe mid band (p 300..599 / file 56941..57240). "
-        "Free a mid-band slot or expand — high-tier 71k ids crash the client.")
+    return _CP.free_camera_file_id()
 
 
 # ── Camera-scene placement (user-controlled) ─────────────────────────────────
@@ -1290,317 +1262,22 @@ def _camera_scene_fileid(zone_id: int, cutscene: dict) -> int | None:
 # model — don't treat it as the real client.)
 
 
-def _rom_folder(vt: int) -> str:
-    """Disk folder for a VTABLE version byte: 1 → 'ROM', else 'ROM{vt}'."""
-    return "ROM" if vt == 1 else f"ROM{vt}"
-
-
-def _parse_camera_dat(cutscene: dict) -> tuple[int, int, int] | None:
-    """Parse the editor's Camera DAT fields → ``(vt, subdir, slot)``, or ``None`` when the
-    cutscene has no camera track (nothing to place). Raises ``ValueError`` with a user-facing
-    message when a camera track exists but the fields are missing/invalid — Publish is gated
-    on this."""
-    if not _has_camera_track(cutscene):
-        return None
-    cd = cutscene.get("cameraDat") or {}
-    rom_raw = str(cd.get("rom", "")).strip().upper()
-    if rom_raw.startswith("ROM"):
-        rom_raw = rom_raw[3:].strip()
-    path_raw = str(cd.get("path", "")).strip().strip("/\\")
-    file_raw = str(cd.get("file", "")).strip()
-    if not rom_raw or not path_raw or not file_raw:
-        raise ValueError(
-            "Set the Camera DAT (ROM, Path, Dat Filename) in Settings before publishing a "
-            "cutscene with a camera.")
-    try:
-        vt = int(rom_raw)
-    except ValueError:
-        raise ValueError(f"Camera DAT ROM must be a number like 10, got {cd.get('rom')!r}.")
-    # Path is the numeric subdir (tolerate a user pasting e.g. 'ROM10/490' — take the last part).
-    try:
-        subdir = int(path_raw.replace("\\", "/").split("/")[-1])
-    except ValueError:
-        raise ValueError(f"Camera DAT Path must be a folder number like 490, got {path_raw!r}.")
-    try:
-        slot = int(Path(file_raw).stem)
-    except ValueError:
-        raise ValueError(f"Camera DAT filename must be like 50.dat, got {file_raw!r}.")
-    if not (1 <= vt <= 10):
-        raise ValueError(f"Camera DAT ROM {vt} out of range (1..10).")
-    if not (0 <= subdir <= 511):
-        raise ValueError(f"Camera DAT Path {subdir} out of range (0..511).")
-    if not (0 <= slot <= 127):
-        raise ValueError(f"Camera DAT filename slot {slot} out of range (0..127).")
-    return vt, subdir, slot
-
-
-def _ensure_output_rom_table(vt: int) -> None:
-    """Make sure ``FFXI_DIR/ROM{vt}/(F|V)TABLE{vt}.DAT`` exist before patching,
-    else zero-filled to the root table size. No-op for vt==1 (patch_table
-    seeds the root tables itself)."""
-    if vt == 1:
-        return
-    import shutil
-    from xi.xi_config import FFXI_DIR
-    out_dir = Path(FFXI_DIR) / f"ROM{vt}"
-    out_ft, out_vt = out_dir / f"FTABLE{vt}.DAT", out_dir / f"VTABLE{vt}.DAT"
-    if out_ft.exists() and out_vt.exists():
-        return
-    out_dir.mkdir(parents=True, exist_ok=True)
-    base_ft = Path(FFXI_DIR) / f"ROM{vt}" / f"FTABLE{vt}.DAT"
-    base_vt = Path(FFXI_DIR) / f"ROM{vt}" / f"VTABLE{vt}.DAT"
-    root_ft, root_vt = Path(FFXI_DIR) / "FTABLE.DAT", Path(FFXI_DIR) / "VTABLE.DAT"
-    if not out_ft.exists():
-        shutil.copy2(base_ft, out_ft) if base_ft.is_file() else out_ft.write_bytes(b"\x00" * root_ft.stat().st_size)
-    if not out_vt.exists():
-        shutil.copy2(base_vt, out_vt) if base_vt.is_file() else out_vt.write_bytes(b"\x00" * root_vt.stat().st_size)
-
-
-def _camera_path_collision(vt: int, subdir: int, slot: int, file_id: int) -> str | None:
-    """Refuse Camera DAT placements that would clobber a non-camera file.
-
-    The editor's Camera DAT fields are free-form (ROM/path/file). If they land on a path
-    already holding an entity mesh (or anything that is not an ``evte`` camera scene), the
-    pivot overlay shadows the real DAT and the model vanishes in-game — that is exactly how
-    Battle Worn Byakko (ROM10/25/40.DAT) went invisible after a cutscene publish pointed its
-    camera there. Returns a user-facing error string, or ``None`` when the path is free/ours.
-    """
-    from xi.xi_config import FFXI_DIR, FFXI_PIVOT_DIR
-
-    rel = Path(_rom_folder(vt)) / str(subdir) / f"{slot}.DAT"
-    candidates = [
-        Path(FFXI_DIR) / rel,
-    ]
-    pivot = Path(FFXI_PIVOT_DIR) if str(FFXI_PIVOT_DIR or "").strip() else None
-    if pivot is not None:
-        candidates.append(pivot / rel)
-
-    for p in candidates:
-        if not p.is_file():
-            continue
-        try:
-            head = p.read_bytes()[:4]
-        except OSError:
-            continue
-        # Already a camera scene (ours or a previous publish of the same slot) — safe to overwrite.
-        if head == b"evte":
-            continue
-        kind = head.decode("ascii", "replace") if head else "?"
-        return (
-            f"Camera DAT {rel.as_posix()} already holds a non-camera file "
-            f"({kind!r}, {p.stat().st_size} bytes at {p}). "
-            f"Pick a free ROM/Path/Filename in Settings — overwriting it would hide the "
-            f"model that lives there (file id {file_id} would shadow it via the Ashita overlay)."
-        )
-    return None
-
-
-def _write_camera_scene(file_id: int, scene_bytes: bytes,
-                        vt: int, subdir: int, slot: int) -> tuple[str, int, list[str]]:
-    """Write ``scene_bytes`` to the base-game output mirror at ``ROM{vt}/{subdir}/{slot}.DAT``
-    and register ``file_id`` in BOTH the root and ROM{vt} FTABLE/VTABLE (same as
-    ``xi dats build``). Returns ``(scene_path, ftval, [game table paths written])``."""
-    from xi.ftable.xi_core import ftable_path, vtable_path, patch_table
-    from xi.xi_config import FFXI_DIR, editable_dat
-
-    hit = _camera_path_collision(vt, subdir, slot, file_id)
-    if hit:
-        raise ValueError(hit)
-
-    ftval = (subdir << 7) | slot
-    dst = Path(FFXI_DIR) / _rom_folder(vt) / str(subdir) / f"{slot}.DAT"
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_bytes(scene_bytes)
-
-    # Root table (always full-size) + ROM{vt} table, both set to the same (ftval, vt)
-    # so volume-direct lookup (and any overlay shadow) resolves this placement.
-    patch_table(ftable_path(1), vtable_path(1), file_id, ftval, vt)
-    table_paths = [
-        str(editable_dat(ftable_path(1), fresh=False)),
-        str(editable_dat(vtable_path(1), fresh=False)),
-    ]
-    if vt != 1:
-        _ensure_output_rom_table(vt)
-        patch_table(ftable_path(vt), vtable_path(vt), file_id, ftval, vt)
-        table_paths += [
-            str(editable_dat(ftable_path(vt), fresh=False)),
-            str(editable_dat(vtable_path(vt), fresh=False)),
-        ]
-    return str(dst), ftval, table_paths
-
-
-def _publish_pivot_tables(file_id: int, ftval: int, vt: int,
-                          scene_path: Path | str | None = None) -> tuple[list[str], list[str]]:
-    """Mirror one camera-scene registration into the pivot overlay pack the same way
-    ``xi dats build --target pivot`` does: patch the pack's root FTABLE/VTABLE AND its
-    ROM{vt} FTABLE{vt}/VTABLE{vt} to ``(ftval, vt)`` at ``file_id`` (seeding the ROM{vt} tables
-    from the base install if the pack doesn't ship them), then copy the scene DAT to the
-    matching ``ROM{vt}/{subdir}/{slot}.DAT`` under the pack. Returns ``(written paths,
-    warnings)``."""
-    import struct
-    import shutil
-    from xi.xi_config import FFXI_PIVOT_DIR, FFXI_DIR
-    written: list[str] = []
-    warnings: list[str] = []
-    root = Path(FFXI_PIVOT_DIR) if str(FFXI_PIVOT_DIR or "").strip() else None
-    if root is None or not root.is_dir():
-        return written, warnings
-
-    def _patch(ft: Path, vtp: Path) -> None:
-        try:
-            fdata = bytearray(ft.read_bytes())
-            vdata = bytearray(vtp.read_bytes())
-            if file_id * 2 + 2 > len(fdata) or file_id >= len(vdata):
-                warnings.append(f"pivot table too small for file id {file_id}: {ft}")
-                return
-            struct.pack_into("<H", fdata, file_id * 2, ftval)
-            vdata[file_id] = vt & 0xFF
-            ft.write_bytes(fdata)
-            vtp.write_bytes(vdata)
-            written.extend([str(ft), str(vtp)])
-        except OSError as exc:
-            warnings.append(f"pivot table patch failed ({ft.name}): {exc}")
-
-    # Root tables — authoritative for the client's vt lookup.
-    ft, vtp = root / "FTABLE.DAT", root / "VTABLE.DAT"
-    if ft.is_file() and vtp.is_file():
-        _patch(ft, vtp)
-    else:
-        warnings.append("pivot has no root FTABLE/VTABLE — camera scene not registered in pivot.")
-
-    # ROM{vt} tables — dats build patches these too. Seed from the base install (or the pack
-    # root) when the pack doesn't already ship them, so the entry is present without dropping
-    # any other customs the pack registered in ROM{vt}.
-    if vt != 1:
-        rdir = root / f"ROM{vt}"
-        rft, rvt = rdir / f"FTABLE{vt}.DAT", rdir / f"VTABLE{vt}.DAT"
-        if not (rft.is_file() and rvt.is_file()):
-            rdir.mkdir(parents=True, exist_ok=True)
-            base_rft = Path(FFXI_DIR) / f"ROM{vt}" / f"FTABLE{vt}.DAT"
-            base_rvt = Path(FFXI_DIR) / f"ROM{vt}" / f"VTABLE{vt}.DAT"
-            try:
-                if not rft.is_file():
-                    shutil.copy2(base_rft if base_rft.is_file() else ft, rft)
-                if not rvt.is_file():
-                    shutil.copy2(base_rvt if base_rvt.is_file() else vtp, rvt)
-            except OSError as exc:
-                warnings.append(f"pivot ROM{vt} table seed failed: {exc}")
-        if rft.is_file() and rvt.is_file():
-            _patch(rft, rvt)
-
-    # Copy scene DAT to ROM{vt}/<subdir>/<slot>.DAT under the pack (mirrors the Game layout).
-    if scene_path is not None:
-        sp = Path(scene_path)
-        if sp.is_file():
-            try:
-                rel = None
-                parts = sp.parts
-                for i, part in enumerate(parts):
-                    if part.upper() == _rom_folder(vt).upper() and i + 2 < len(parts):
-                        rel = Path(*parts[i:i + 3])
-                        break
-                dst = root / (rel if rel is not None else Path(_rom_folder(vt)) / sp.parent.name / sp.name)
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(sp, dst)
-                written.append(str(dst))
-            except OSError as exc:
-                warnings.append(f"pivot scene DAT copy failed: {exc}")
-        else:
-            warnings.append(f"pivot scene DAT missing on disk: {sp}")
-    return written, warnings
-
-
 def _cast_motion_maps(cutscene: dict) -> dict:
-    """Per-cast schedulable-motion maps for tag normalisation →
-    ``{castId: {"valid": set(routineTag), "clip2routine": {clipTag: routineTag}, "name"}}``.
-
-    Built from each fixed-model cast NPC's model DAT (its 0x07 routines + resolved clips,
-    via :func:`list_look_animations`). Equipped-look cast members are omitted — their
-    gestures ride the shared bank and their tags pass through untouched. '@'-prefixed
-    system routines (auto-turn @tl0/@tr0) stay VALID but never capture a clip mapping —
-    @tl0 references wlk?/idl? clips internally, and mapping 'wlk0'→'@tl0' would turn a
-    walk keyframe into a turn-in-place."""
-    out = {}
-    cast = ((cutscene.get("cast") or {}).get("cast")) or []
-    wanted = []
-    for c in cast:
-        ent = c.get("entity")
-        if not ent or ent == "player":
-            continue
-        try:
-            wanted.append((c.get("id"), int(str(ent).replace("0x", "").replace("0X", ""), 16),
-                           c.get("name")))
-        except ValueError:
-            continue
-    if not wanted:
-        return out
-    try:
-        rows = _npc_look_rows([aid for _cid, aid, _n in wanted])
-    except Exception:
-        return out
-    from xi.gear.xi_character import list_look_animations
-    for cid, aid, name in wanted:
-        row = rows.get(aid)
-        if not row:
-            continue
-        try:
-            r = list_look_animations(row["look"])
-        except Exception:
-            continue
-        if not r.get("ok") or r.get("type") == "equipped":
-            continue
-        motions = r.get("motions") or []
-        c2r = {}
-        for m in motions:
-            if not str(m["tag"]).startswith("@"):
-                c2r.setdefault(m["clip"], m["tag"])
-        out[cid] = {"valid": {m["tag"] for m in motions},
-                    "clip2routine": c2r, "name": name or cid}
-    return out
-
-
-_GESTURE_BANK_TAGS_CACHE: dict = {}
-
-
-def _gesture_bank_tags(bank: int = 60) -> frozenset:
-    """Routine tags ACTUALLY present in the shared gesture bank DAT — ground truth for
-    the compiler's 0x5B-vs-0x2C dispatch.
-
-    0x5B ReadEventMotionRes loads file ``32104 + bank`` (default bank 60 → 32164, the
-    humanoid talk/think/bow set) onto the entity and plays the tag from it. The compiler
-    used to trust its hardcoded ``_GESTURE_TAGS`` mirror of this file, which drifts (the
-    docstrings mention 'han0' yet the mirror omits it → a han0 keyframe no-oped). Parsing
-    the bank's 0x07 sections gives the real inventory. Cached per bank; empty frozenset on
-    any failure — the compiler then falls back to ``_GESTURE_TAGS``."""
-    if bank in _GESTURE_BANK_TAGS_CACHE:
-        return _GESTURE_BANK_TAGS_CACHE[bank]
-    tags = frozenset()
-    try:
-        from xi.xi_config import FFXI_DIR, read_path_for
-        from xi.ftable.xi_core import scan_file_ids
-        from xi.event.xi_event import _scene_sections
-        fid = 32104 + bank
-        # ☠ scan_file_ids compacts its result — match on file_id, never positionally.
-        hit = next((h for h in scan_file_ids([fid]) if h.get("file_id") == fid), None)
-        if hit:
-            data = read_path_for(Path(FFXI_DIR) / hit["dat"]).read_bytes()
-            tags = frozenset(t for _o, t, tc, _s in _scene_sections(data) if tc == 0x07)
-    except Exception:
-        tags = frozenset()
-    _GESTURE_BANK_TAGS_CACHE[bank] = tags
-    return tags
+    """Per-cast schedulable-motion maps for tag normalisation, with the NPC looks this
+    bridge resolves (custom registry, live ``npc_list``, bundled snapshot)."""
+    return _CP.cast_motion_maps(cutscene, _npc_look_rows)
 
 
 def _compile_cutscene(params: dict) -> dict:
-    """Compile a ``xi.cutscene.v1`` JSON to bytecode and (optionally) write to the mirror.
+    """Compile a ``xi.cutscene.v1`` JSON: a preview, or (without ``dryRun``) a publish.
 
-    ``{zone, zoneId?, cutscene, dryRun?}`` → resolve the zone Event + Dialog DATs, hand
-    them to :func:`xi.event.xi_compile.compile_cutscene`, return
-    ``{ok, eventId, luaStub, warnings, sizes, disasm}`` (dry-run) or the same plus
-    ``written: [<paths>]`` when actually persisted. Emits ``.base`` backups on first
-    write (same convention as ``event dialogue new``).
+    ``{zone, zoneId?, cutscene, dryRun?, publishPivot?}``. The preview resolves the zone's
+    Event + Dialog DATs, compiles in memory (:func:`xi.event.xi_compile.compile_cutscene`)
+    and returns ``{ok, eventId, luaStub, warnings, sizes, disasm}``; nothing is written. A
+    publish is an event of the zone's ``zone_events`` action in the project's ``dats.json``,
+    built into the game (:func:`_publish_cutscene`).
     """
-    from xi.xi_config import FFXI_DIR, read_path_for, output_path_for
+    from xi.xi_config import FFXI_DIR, read_path_for
     from xi.zone.xi_inject import zone_event_file_id, zone_dialog_file_id
     from xi.ftable.xi_core import scan_file_ids
     from xi.event import xi_compile, xi_event as _ev
@@ -1615,6 +1292,10 @@ def _compile_cutscene(params: dict) -> dict:
     if zone_id is None:
         return {"ok": False, "error": "could not determine zone id"}
     zone_id = int(zone_id)
+    if not params.get("dryRun"):
+        # Publish: an event of the zone's zone_events action in the project's dats.json,
+        # built into the game (xi.zone.xi_bridge_dats). The preview below compiles in memory.
+        return _publish_cutscene(params, cutscene, zone_id)
 
     ev_hits = scan_file_ids([zone_event_file_id(zone_id)])
     dg_hits = scan_file_ids([zone_dialog_file_id(zone_id)])
@@ -1632,24 +1313,6 @@ def _compile_cutscene(params: dict) -> dict:
     except Exception as e:
         return {"ok": False, "error": f"camera scene alloc failed: {e}"}
     cam_p = _scene_p_for(cam_fid) if cam_fid else None    # ref value that reaches this file (per-band)
-
-    # The Camera DAT placement (ROM / Path / Filename from Settings) is REQUIRED to publish a
-    # cutscene with a camera. Dry-run preview is allowed without it (nothing is written); a real
-    # publish with a camera but no/invalid placement fails fast with a clear message.
-    cam_place = None
-    if cam_fid:
-        try:
-            cam_place = _parse_camera_dat(cutscene)
-        except ValueError as e:
-            if not params.get("dryRun"):
-                return {"ok": False, "error": str(e)}
-        # Fail BEFORE compiling/writing when the Camera DAT path would clobber a mesh
-        # (or any non-evte file). Dry-run still compiles so Preview can show bytecode.
-        if cam_place and not params.get("dryRun"):
-            vt, subdir, slot = cam_place
-            hit = _camera_path_collision(vt, subdir, slot, cam_fid)
-            if hit:
-                return {"ok": False, "error": hit}
 
     # ★ Normalise animation tags BEFORE lowering: non-gesture tags emit as 0x2C SetAction,
     # which only fires the actor's OWN 0x07 routines — legacy defs stored raw 0x2B clip ids
@@ -1718,129 +1381,123 @@ def _compile_cutscene(params: dict) -> dict:
         "dialogDat": dg_hits[0]["dat"],
     }
 
-    if params.get("dryRun"):
-        payload["dryRun"] = True
-        return payload
-
-    ev_out = output_path_for(ev_src)
-    dg_out = output_path_for(dg_src)
-    written = []
-    for src, out, blob in [(ev_src, ev_out, res.event_dat),
-                            (dg_src, dg_out, res.dialog_dat)]:
-        out = Path(out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        base = Path(str(out) + ".base")
-        if not base.exists():
-            base.write_bytes(Path(src).read_bytes())
-        out.write_bytes(blob)
-        written.append(str(out))
-
-    # ☠ XIPivot shadowing: when the overlay pack carries this DAT (shipped there by
-    # `dats build --target pivot` / packaging), the client reads the PACK copy and a
-    # stale one silently undoes the publish — cast NPCs "don't appear" even though the
-    # Game-dir DAT is perfect. Mirror the fresh bytes into the pack whenever the file
-    # already exists there (absent file = no shadowing = nothing to do).
-    if params.get("publishPivot", True):
-        from xi.xi_config import FFXI_PIVOT_DIR
-        piv_root = Path(FFXI_PIVOT_DIR) if str(FFXI_PIVOT_DIR or "").strip() else None
-        if piv_root is not None:
-            for rel, blob in [(ev_hits[0]["dat"], res.event_dat),
-                              (dg_hits[0]["dat"], res.dialog_dat)]:
-                piv = piv_root / rel
-                if piv.is_file():
-                    try:
-                        piv.write_bytes(blob)
-                        written.append(str(piv))
-                    except Exception as exc:
-                        payload.setdefault("warnings", []).append(
-                            f"stale pivot copy NOT updated ({rel}): {exc} — the client "
-                            f"will keep loading the old cutscene from the overlay")
-
-    # Camera scene DAT: write the freshly-built evte+Route+EffectRoutine resource to the
-    # user-chosen ROM{vt}/<subdir>/<slot>.DAT and register its file-id (root + ROM{vt}, base
-    # + pivot) so the client can load it when the cutscene's 0x45 fires.
-    if res.scene_dat and cam_fid and cam_place:
-        vt, subdir, slot = cam_place
-        try:
-            scene_path, ftval, game_tables = _write_camera_scene(
-                cam_fid, res.scene_dat, vt, subdir, slot)
-            written.append(scene_path)
-            written += game_tables            # base root FTABLE/VTABLE + ROM{vt} FTABLE{vt}/VTABLE{vt}
-            # "Publish Cutscenes to Pivot" (editor setting, default ON): mirror the same
-            # registration into the pivot overlay pack's root + ROM{vt} F/VTABLEs AND copy the
-            # scene DAT into the pack, so the pack's tables shadow-resolve the file too.
-            if params.get("publishPivot", True):
-                pv_written, pv_warnings = _publish_pivot_tables(
-                    cam_fid, ftval, vt, scene_path=scene_path)
-                written += pv_written
-                for w in pv_warnings:
-                    payload.setdefault("warnings", []).append(w)
-        except Exception as exc:
-            payload.setdefault("warnings", []).append(f"camera scene DAT not written: {exc}")
-
-    # "Hide cast NPC names" — server-side, NOT an event opcode: retail cutscenes DO
-    # render floating names; nameless actors (the "???" qm markers) carry npc_list
-    # namevis bit 0x08 in their spawn packet. Flag ON → set the bit on every cast NPC
-    # except the trigger NPC; flag turned OFF after being on → clear it again (the
-    # previous saved def tells us whether we set it). Needs a server restart to load.
-    try:
-        _publish_cast_namevis(cutscene, zone_id, params, payload)
-    except Exception as exc:
-        payload.setdefault("warnings", []).append(f"cast namevis update failed: {exc}")
-
-    # Save the FULL cutscene definition keyed by zone+actor+eventId so Edit
-    # Cutscene can reload it losslessly. Actor is required: retail reuses the
-    # same event id on multiple NPCs (Maat 93 on 0x010F3031 and 0x010F3032).
-    try:
-        defs_dir = _cutscene_defs_dir()
-        defs_dir.mkdir(parents=True, exist_ok=True)
-        cs_out = dict(cutscene)
-        cs_out["eventId"] = res.event_id
-        owner_ent = None
-        try:
-            owner_ent = xi_compile._resolve_entity(
-                next(c for c in (cutscene.get("cast") or {}).get("cast") or []
-                     if c.get("id") == cutscene.get("actor")).get("entity"))
-        except Exception:
-            owner_ent = None
-        if owner_ent is not None:
-            cs_out["actorId"] = int(owner_ent) & 0xFFFFFFFF
-        if cam_fid:
-            cs_out["cameraSceneFileId"] = cam_fid    # reuse the same scene file on republish
-        if owner_ent is not None:
-            def_path = defs_dir / f"{zone_id}_{int(owner_ent) & 0xFFFFFFFF}_{res.event_id}.json"
-        else:
-            def_path = defs_dir / f"{zone_id}_{res.event_id}.json"
-        def_path.write_text(json.dumps(cs_out, indent=2), encoding="utf-8")
-        # Keep legacy zone_event.json in sync when actor is known so older
-        # loaders still find something (prefer actor-keyed on read).
-        if owner_ent is not None:
-            legacy = defs_dir / f"{zone_id}_{res.event_id}.json"
-            try:
-                legacy.write_text(json.dumps(cs_out, indent=2), encoding="utf-8")
-            except OSError:
-                pass
-    except Exception as exc:
-        payload.setdefault("warnings", []).append(f"could not save cutscene def: {exc}")
-
-    payload["written"] = written
+    payload["dryRun"] = True
     if cam_fid:
-        payload["cameraSceneFileId"] = cam_fid   # editor stores this + sends it back → stable file, no churn
+        payload["cameraSceneFileId"] = cam_fid
+    return payload
+
+def _publish_cutscene(params: dict, cutscene: dict, zone_id: int) -> dict:
+    """``zone.compileCutscene`` without ``dryRun``: save the definition under
+    ``cutscene-defs/{zone}_{actor}_{event}.json`` (its event id fixed now, so the file and the
+    action's event keep one name), put it in the zone's ``zone_events`` action in the
+    project's ``dats.json`` and build that into the base install, and into the pivot folder
+    with ``publishPivot``. The response keeps the preview's shape (``eventId``, ``written``,
+    ``sizes``, ``luaStub``, ``cameraSceneFileId``) plus ``dats`` (the manifest, action, build
+    log)."""
+    from xi import xi_config
+    from xi.dialog import xi_zone_dialog as ZD
+    from xi.event import xi_cutscene_publish as CP
+    from xi.event import xi_zone_events as ZE
+    from xi.zone import xi_bridge_dats as BD
+
+    owner = CP.owner_entity(cutscene)
+    if owner is None:
+        return {"ok": False, "error": f"the cutscene's actor {cutscene.get('actor')!r} isn't in its cast"}
+    root = Path(xi_config.FFXI_DIR)
+    ev_field = cutscene.get("eventId", "auto")
+    try:
+        event_id = ZE.next_event_id(root, zone_id, owner) if ev_field in (None, "auto") else int(ev_field)
+    except (ZE.ZoneEventsError, ValueError) as e:
+        return {"ok": False, "error": str(e)}
+    # The saved definition before this publish decides whether turning hideNpcNames off
+    # clears names this editor hid (see _publish_cast_namevis).
+    prev = _load_cutscene_def({"zoneId": zone_id, "eventId": event_id, "actorId": owner}).get("cutscene") or {}
+
+    stem = f"{zone_id}_{owner & 0xFFFFFFFF}_{event_id}"
+    defs_dir = _cutscene_defs_dir()
+    defs_dir.mkdir(parents=True, exist_ok=True)
+
+    def save_def(extra: dict) -> None:
+        cs_out = {**cutscene, "eventId": event_id, "actorId": owner & 0xFFFFFFFF, **extra}
+        text = json.dumps(cs_out, indent=2)
+        (defs_dir / f"{stem}.json").write_text(text, encoding="utf-8")
+        try:                                   # older loaders read {zone}_{event}.json
+            (defs_dir / f"{zone_id}_{event_id}.json").write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+
+    save_def({})
+    rels = [r for r in (ZE.event_rel(root, zone_id), ZD.dialog_rel(root, zone_id, "en")) if r]
+
+    def size(rel):
+        f = root / Path(*rel.split("/"))
+        return f.stat().st_size if f.is_file() else None
+
+    before = [size(r) for r in rels]
+    res = BD.publish_cutscene(zone_id, f"cutscene-defs/{stem}.json", stem,
+                              pivot=params.get("publishPivot", True) is not False)
+    dats = {"manifest": res.get("manifest"), "action": res.get("action"), "targets": res.get("targets"),
+            "log": res.get("log")}
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error") or "publish failed", "dats": dats}
+    rec = res.get("record") or {}
+    cam = (rec.get("camera") or {}).get("file_id")
+    if cam:
+        save_def({"cameraSceneFileId": cam})
+    written = []
+    for target in res.get("targets") or []:
+        troot = root if target == "dir" else Path(xi_config.FFXI_PIVOT_DIR)
+        files = [rec.get("dat")] + [ln.get("dat") for ln in rec.get("lines") or []]
+        files += [(rec.get("camera") or {}).get("dat")]
+        written += [str(troot / Path(*f.split("/"))) for f in dict.fromkeys(files) if f]
+    after = [size(r) for r in rels]
+    payload = {
+        "ok": True,
+        "eventId": rec.get("event", event_id),
+        "luaStub": _lua_section(res.get("lua"), stem),
+        "warnings": [ln.strip().lstrip("⚠").strip() for ln in (res.get("log") or "").splitlines() if "⚠" in ln],
+        "sizes": {"eventDatBefore": before[0] if before else None, "eventDatAfter": after[0] if after else None,
+                  "dialogDatBefore": before[1] if len(before) > 1 else None,
+                  "dialogDatAfter": after[1] if len(after) > 1 else None},
+        "eventDat": rels[0] if rels else None,
+        "dialogDat": rels[1] if len(rels) > 1 else None,
+        "written": written,
+        "dats": dats,
+    }
+    if cam:
+        payload["cameraSceneFileId"] = cam
+    # "Hide cast NPC names" in the live DB too (the action carries it as proposed SQL).
+    try:
+        _publish_cast_namevis(cutscene, zone_id, params, payload, prev=prev)
+    except Exception as exc:  # noqa: BLE001
+        payload["warnings"].append(f"cast namevis update failed: {exc}")
     return payload
 
 
-# npc_list.namevis = the HIGH byte of packet 0x000E Flags3 (XiPackets): bit 0x20
-# (packet bit 29) = "health bar hidden and the name above their head not rendered".
-# ☠ NOT 0x08 (packet bit 27) — that's "untargetable + name hidden under specific
-# conditions" and verified in-game to NOT hide cutscene cast names. Retail zone-243
-# rows agree: Survival_Guide / Proto-Waypoint (no floating name) carry 0x20.
-_NAMEVIS_HIDE_BIT = 0x20
+def _lua_section(path, name: str) -> str:
+    """The start-event script a zone_events build wrote for event ``name`` (from the
+    project's proposed Lua file), or ''."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines() if path else []
+    except OSError:
+        return ""
+    out, inside = [], False
+    for ln in lines:
+        if ln.startswith(f"-- {name}: event "):
+            inside = True
+            continue
+        if inside and (ln.startswith("-- <<< ") or (ln.startswith("-- ") and ": event " in ln and " on " in ln)):
+            break
+        if inside:
+            out.append(ln)
+    return "\n".join(out).strip()
 
 
-def _publish_cast_namevis(cutscene: dict, zone_id: int, params: dict, payload: dict) -> None:
+def _publish_cast_namevis(cutscene: dict, zone_id: int, params: dict, payload: dict,
+                          prev: dict | None = None) -> None:
     """Apply the ``flags.hideNpcNames`` presentation option at publish time.
 
-    True  → ``namevis |= 0x08`` on every non-player, non-owner cast NPC (live DB +
+    True  → ``namevis |= 0x20`` on every non-player, non-owner cast NPC (live DB +
     the custom-NPC registry so packaged SQL matches).
     False → clear the bit, but ONLY when the previously saved def for this event had
     the flag on — so we never strip an intentional retail hidden-name value.
@@ -1870,9 +1527,10 @@ def _publish_cast_namevis(cutscene: dict, zone_id: int, params: dict, payload: d
 
     if not want:
         # Only undo our own work: check the previous saved def for this event.
-        prev = _load_cutscene_def({"zoneId": zone_id,
-                                   "eventId": cutscene.get("eventId"),
-                                   "actorId": None}).get("cutscene") or {}
+        if prev is None:
+            prev = _load_cutscene_def({"zoneId": zone_id,
+                                       "eventId": cutscene.get("eventId"),
+                                       "actorId": None}).get("cutscene") or {}
         if not (prev.get("flags") or {}).get("hideNpcNames"):
             return
 
@@ -1986,6 +1644,16 @@ def _delete_event(params: dict) -> dict:
         event_id = int(params.get("eventId"))
     except (TypeError, ValueError):
         return {"ok": False, "error": "invalid actorId/eventId"}
+
+    # One the editor published is an event of the zone's zone_events action: it comes out of
+    # the action, and the rebuild (or, for the last one, the undo) puts the tables back.
+    from xi.zone import xi_bridge_dats as BD
+    done = BD.delete_event(zone_id, actor_id, event_id, pivot=params.get("publishPivot", True) is not False)
+    if done is not None:
+        if not done.get("ok"):
+            return {"ok": False, "error": done.get("error") or "delete failed", "dats": done}
+        return {"ok": True, "actorId": actor_id, "eventId": event_id, "dats": done,
+                "written": done.get("targets") or []}
 
     ev_hits = scan_file_ids([zone_event_file_id(zone_id)])
     if not ev_hits:
@@ -5298,6 +4966,7 @@ def _custom_npc_live_insert(record: dict, params: dict):
 def _custom_npc_name_dat(zone_id: int):
     """``(read_path, write_path)`` for a zone's client NPC name DAT (``ROM/27/…``), or
     ``(None, None)`` when the FTABLE has no entry for it."""
+    from xi.ftable.xi_core import scan_file_ids
     from xi.zone.xi_inject import zone_npc_file_id
     from xi.xi_config import FFXI_DIR, read_path_for, output_path_for
     hits = scan_file_ids([zone_npc_file_id(int(zone_id))])
@@ -5359,6 +5028,16 @@ def _custom_npc_sync_name_table(zone_id: int, sid: int, name: str, remove: bool 
         return wrote
     except Exception:  # noqa: BLE001
         return False
+
+
+def _custom_npc_put_action(rec: dict) -> dict:
+    """Put a registry NPC into its zone's zone_npcs action (name + proposed row) and build it;
+    the build result, ``{ok: False, error}`` when it could not."""
+    from xi.zone import xi_bridge_dats as BD
+    try:
+        return BD.put_npc(rec)
+    except Exception as exc:  # noqa: BLE001 — the registry and DB row are already saved
+        return {"ok": False, "error": str(exc)}
 
 
 def _custom_npc_list(params: dict) -> dict:
@@ -5464,11 +5143,11 @@ def _custom_npc_create(params: dict) -> dict:
     sql_path = _custom_npc_write_sql()
     db_ok, db_detail = _custom_npc_live_insert(rec, params)
     # Give the NPC a client-side name (the game reads names from ROM/27/… by serverID;
-    # without an entry it shows the "NPC" fallback).
-    name_written = _custom_npc_sync_name_table(zone_id, npcid, name)
+    # without an entry it shows the "NPC" fallback): an entry of the zone's zone_npcs action.
+    names = _custom_npc_put_action(rec)
     return {"ok": True, "npc": rec, "sql": str(sql_path) if sql_path else None,
             "dbWritten": db_ok, "dbDetail": db_detail, "datRel": dat_rel, "fileId": file_id,
-            "nameTableWritten": name_written}
+            "nameTableWritten": bool(names.get("ok")), "dats": names}
 
 
 def _custom_npc_update(params: dict) -> dict:
@@ -5476,8 +5155,8 @@ def _custom_npc_update(params: dict) -> dict:
 
     ``{npcid, status?, name?}`` → update the registry record, regenerate SQL, and
     best-effort REPLACE the live ``npc_list`` row. Status changes to CUTSCENE_ONLY
-    also force pos (0,0,0) like retail Lion/Iroha. Name changes re-sync the client
-    name DAT."""
+    also force pos (0,0,0) like retail Lion/Iroha. The zone's zone_npcs action gets the
+    new name and row and is rebuilt (the client name DAT follows)."""
     from xi.entity import xi_custom_npc as cn
     try:
         npcid = int(params.get("npcid"))
@@ -5487,12 +5166,8 @@ def _custom_npc_update(params: dict) -> dict:
     rec = next((n for n in reg.get("npcs", []) if int(n.get("npcid", -1)) == npcid), None)
     if not rec:
         return {"ok": False, "error": f"custom NPC 0x{npcid:08X} not in registry"}
-    name_changed = False
     if "name" in params and str(params.get("name") or "").strip():
-        new_name = str(params.get("name")).strip()
-        if new_name != rec.get("name"):
-            rec["name"] = new_name
-            name_changed = True
+        rec["name"] = str(params.get("name")).strip()
     if "status" in params:
         rec["status"] = cn.normalize_status(
             params.get("status"), rec.get("status", cn.NPC_STATUS_CUTSCENE_ONLY))
@@ -5503,12 +5178,11 @@ def _custom_npc_update(params: dict) -> dict:
     _touch_active_project()
     sql_path = _custom_npc_write_sql()
     db_ok, db_detail = _custom_npc_live_insert(rec, params)
-    name_written = False
-    if name_changed or params.get("resyncName"):
-        name_written = _custom_npc_sync_name_table(
-            cn.zone_of(npcid), npcid, rec.get("name") or "")
+    # The zone_npcs action carries the name and the row (status too), so every change rebuilds it.
+    names = _custom_npc_put_action(rec)
     return {"ok": True, "npc": rec, "sql": str(sql_path) if sql_path else None,
-            "dbWritten": db_ok, "dbDetail": db_detail, "nameTableWritten": name_written}
+            "dbWritten": db_ok, "dbDetail": db_detail, "nameTableWritten": bool(names.get("ok")),
+            "dats": names}
 
 
 def _custom_npc_delete(params: dict) -> dict:
@@ -5523,8 +5197,17 @@ def _custom_npc_delete(params: dict) -> dict:
     removed = cn.remove(reg, npcid)
     cn.save_registry(_custom_npcs_path(), reg)
     _custom_npc_write_sql()
+    dats = None
     if rec:
-        _custom_npc_sync_name_table(cn.zone_of(npcid), npcid, "", remove=True)
+        # Out of the zone's zone_npcs action (the rebuild takes its name back out); one
+        # named in place before the actions existed is taken out in place.
+        from xi.zone import xi_bridge_dats as BD
+        try:
+            dats = BD.drop_npc(npcid)
+        except Exception as exc:  # noqa: BLE001
+            dats = {"ok": False, "error": str(exc)}
+        if dats is None:
+            _custom_npc_sync_name_table(cn.zone_of(npcid), npcid, "", remove=True)
     db_ok = False
     try:
         conn = _db_connect(params)
@@ -5536,7 +5219,7 @@ def _custom_npc_delete(params: dict) -> dict:
             conn.close()
     except Exception:  # noqa: BLE001
         db_ok = False
-    return {"ok": True, "removed": removed, "dbDeleted": db_ok}
+    return {"ok": True, "removed": removed, "dbDeleted": db_ok, "dats": dats}
 
 
 def _zone_templates(params: dict) -> dict:
@@ -5844,6 +5527,7 @@ def _zone_delete(params: dict) -> dict:
     Accepts ``{ zoneId: <int> }``."""
     import struct as _struct
     from xi.ftable.xi_core import load_tables
+    from xi.xi_config import FFXI_DIR
     from xi.zone.xi_inject import (
         zone_model_file_id, zone_event_file_id, zone_dialog_file_id, zone_npc_file_id,
         unregister_zone_file,

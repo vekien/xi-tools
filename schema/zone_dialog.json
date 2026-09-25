@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/zone_dialog.json",
+  "title": "xi dats zone_dialog action",
+  "description": "A zone's dialog lines — what its NPCs, menus and cutscenes print — edited or added by line id in the zone's English and Japanese dialog tables (file ids 6420 + zone / 6120 + zone below zone 256, the zone model's + 1700 / + 1400 above). An edit changes a line's displayed text and keeps its variants; a new line goes past the end of both tables so event scripts see it in either client. Each line's bytes before and after are recorded per build target: a rebuild converges and undo is exact. Line ids are the install's: a retail update that inserts lines moves them.",
+  "allOf": [
+    {
+      "$ref": "common.json#/$defs/baseAction"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "type",
+    "zone",
+    "lines"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "common.json#/$defs/actionId"
+    },
+    "type": {
+      "type": "string",
+      "const": "zone_dialog"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "description": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/actionId"
+      },
+      "uniqueItems": true
+    },
+    "zone": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535,
+      "description": "The zone id (xi zone json)."
+    },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/line"
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Recorded by dats build: per build target, every line written, with its bytes before and after.",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "roots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "zone": {
+                  "type": "integer"
+                },
+                "lang": {
+                  "type": "string",
+                  "enum": [
+                    "en",
+                    "jp"
+                  ]
+                },
+                "dat": {
+                  "$ref": "common.json#/$defs/romPath"
+                },
+                "id": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to": {
+                  "type": "string"
+                },
+                "from_hex": {
+                  "type": "string"
+                },
+                "to_hex": {
+                  "type": "string"
+                },
+                "created": {
+                  "type": "boolean"
+                },
+                "grew": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "description": "A new line: the table's line count before and after."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {
+      "$ref": "common.json#/$defs/outputTree"
+    }
+  },
+  "$defs": {
+    "line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The line's index in the zone's dialog table (xi event dialogue search)."
+        },
+        "en": {
+          "$ref": "#/$defs/text"
+        },
+        "jp": {
+          "$ref": "#/$defs/text"
+        },
+        "new": {
+          "type": "boolean",
+          "description": "Add the line past the end of the tables (the lines in between stay empty). It needs en (text, hex or entry_hex); the Japanese table takes the English text unless jp gives its own."
+        },
+        "note": {
+          "type": "string",
+          "description": "Why — kept with the action."
+        }
+      }
+    },
+    "text": {
+      "description": "The line as authored for xi event dialogue edit: \\n a new line in the box, \\v the prompt that waits for a key, {player} {npc} {auto:N} {N} {item:N} {keyitem:N} … and {raw:hex} for control bytes. Or {\"replace\": {old: new}} to change part of the line (control codes the text form can't show are kept), or {\"hex\": \"…\"} for the displayed part's exact bytes (what follows its 00 is kept), or {\"entry_hex\": \"…\"} for the whole entry exactly, its closing 00 and anything after it included. A new line takes text, hex or entry_hex.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "replace"
+          ],
+          "properties": {
+            "replace": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "hex"
+          ],
+          "properties": {
+            "hex": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F ]*$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entry_hex"
+          ],
+          "properties": {
+            "entry_hex": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F ]*$"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "id": "zone_dialog.lower_jeuno",
+      "type": "zone_dialog",
+      "zone": 245,
+      "lines": [
+        {
+          "id": 6746,
+          "en": {
+            "replace": {
+              "Right away.": "Yes, take me there."
+            }
+          },
+          "note": "friendlier travel prompt"
+        },
+        {
+          "id": 11344,
+          "new": true,
+          "en": "Welcome to Lower Jeuno, {player}!\\v"
+        }
+      ]
+    }
+  ]
+}

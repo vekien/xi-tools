@@ -64,8 +64,9 @@ Wrote: …\ROM\25\39.DAT
   for a keypress.
 - **Undo:** `xi event dialogue reset <DAT>` puts the DAT back to pristine — it
   restores `<dat>` from its `<dat>.base` backup. `--dry-run` shows what it would do. Add `--full`
-  to also reset the zone's **event** DAT, fully undoing a `dialogue new` (which writes
-  both the dialog string table *and* the event DAT); without it only the strings reset.
+  to also reset the zone's **event** DAT; without it only the strings reset. That throws away
+  every edit since the `.base` copy; a `dialogue new` or `cutscene compile` alone is taken out
+  by `xi dats undo <project>` (see [../events/zone_events.md](../events/zone_events.md)).
 - Reads the current mirror when one exists (so layered edits accumulate),
   otherwise the pristine DAT. `--dry-run` has no side effects.
 - Replaces existing entries by index. Re-applying an edited export JSON wholesale

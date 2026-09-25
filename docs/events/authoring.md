@@ -5,8 +5,10 @@ first realized slice of the [authoring prototype](prototype.md). Give it a JSON 
 lines and an NPC; it returns an **event id** you trigger from the server.
 
 > **Status: shipped.** `xi event dialogue new` + `xi event dialogue actors`. Builds
-> a brand-new event from scratch (no template), byte-exact. Camera / menus / branching
-> are still future (see [Limits & what's next](#limits--whats-next)).
+> a brand-new event from scratch (no template), byte-exact. Since 2026-09-25 it is shorthand
+> for a dialogue event of the zone's [`zone_events`](zone_events.md) action: `xi dats prepare`
+> + `xi dats build`, recorded in `projects/<zone name>.json`, rebuilt the same and undone by
+> `xi dats undo`. Camera / menus / branching are in the cutscene compiler (below).
 
 ---
 
@@ -20,13 +22,13 @@ xi event dialogue new 245 --json lines.json --actor 0x010F5022 # author the even
 ```
 
 ```
-Actor: 0x010F5022 (Kurou-Morou)
-Lines: 3 → message id(s) 11344–11346  (separate boxes)
-Event id: 10095
-  dialog DAT ROM/25/54.DAT: 1238544 → 1238648 bytes
-  event  DAT ROM/21/54.DAT: 632940 → 632968 bytes
-Wrote: …/FINAL FANTASY XI/ROM/25/54.DAT
-Wrote: …/FINAL FANTASY XI/ROM/21/54.DAT
+Placed DATs:
+  zone_events.lower_jeuno (zone_events): zone 245, 1 event -> ROM/21/54.DAT, ROM/25/54.DAT, ROM/23/54.DAT
+     - lines: event 10095 on Kurou-Morou (0x010F5022) — 1 block (0 new), 3 lines
+         line 11344 (new): 'Welcome, traveler.'
+         line 11345 (new): 'We have the finest wares in Jeuno.'
+         line 11346 (new): 'Come back any time!'
+     server scripts (proposed): projects\lower_jeuno.lua
 
 ─ server trigger (paste into the NPC's Lua) ─────
 function onTrigger(player, npc)
@@ -110,8 +112,11 @@ xi event dialogue actors 245
 | `--json <file>` | A JSON **array of strings** (or `{"lines": [...]}`). The dialogue lines. |
 | `--actor <id>` | **Required.** The owning NPC's server entity id (`0x…` hex or decimal). The event is appended to that NPC's actor block (the block is created if the NPC has none). |
 | `--paged` | Show all lines in **one** box that pages with ▼, instead of one box per line. |
-| `--event-id N` | Force a specific event id (default: the next free id on the actor). |
+| `--event-id N` | Force a specific event id (default: the next free id on the actor, kept on rebuilds). |
+| `--project P` | The dats project to record it in (default: the zone's name, `projects/lower_jeuno.json`). |
+| `--name N` | What the event is recorded by (default: the JSON file's name). Running again with the same name replaces it. |
 | `--dry-run` | Print what would change without writing. |
+| `--pivot` | Build into `FFXI_PIVOT_DIR` instead of the base install. |
 
 Lines accept the same escapes as [`dialog edit`](../dialog/edit.md): `\n` newline, `\v`
 prompt ▼, `\\` literal, and tokens `{player}`, `{npc}`, `{auto:N}` (auto-advance after N
@@ -138,9 +143,10 @@ synthesize the event                       (xi_author.add_dialogue_event)
 rebuild both DATs                          (xi_event.build_event_dat / xi_dialog.build_container)
    │   only the edited actor block is re-serialized; every other actor is byte-identical
    ▼
-write the DATs back in place (+ .base backup)   — pristine bytes preserved in .base
+write the DATs back in place (+ .base backup), the English lines mirrored into the Japanese table
    ▼
-print the event id + a server-side Lua startCutscene stub
+record every block and line changed on the zone_events action; the Lua startCutscene stub
+goes to projects/<project>.lua
 ```
 
 Code: [`src/xi/event/xi_author.py`](../../src/xi/event/xi_author.py) (the authoring logic),
@@ -184,10 +190,9 @@ editor's Events panel now show the high-index lines too.
 
 ## Caveats — read before you ship
 
-- **It is NOT idempotent.** Each run *appends* another event and more dialogue (it reads the
-  current DAT state and adds to it). Run it twice and you get two events + duplicate lines.
-  To redo cleanly, run `xi event dialogue reset` (restores the dialog DAT from its `.base`
-  backup; `--full` also resets the zone event DAT).
+- **Runs converge.** A second run with the same name replaces the event: the build first puts
+  back what the last one changed, then keeps its event id and line ids. To take it out, run
+  `xi dats undo <project>`.
 - **A client edit does nothing alone.** The event only fires when the **server** calls
   `player:startCutscene(<id>)` on that NPC — paste the printed Lua stub and **reload the
   server**. (`startCutscene`, not `startEvent` — it locks the player into CUTSCENE mode; see
@@ -195,8 +200,8 @@ editor's Events panel now show the high-index lines too.
   The `--actor` id and the NPC the server triggers must be the same entity.
 - **The client must read the edited DAT** — edits are written in place under `FFXI_DIR`
   (the pristine bytes live in the `<dat>.base` backup).
-- **One language table.** It edits the dialog DAT xi resolves for the zone (typically the
-  NA / English table). A JP client reads a different table.
+- **Both language tables.** The lines go into the English table and, at the same ids, into
+  the Japanese one (`6120 + zone`), so a JP client prints them too (in English).
 - **Per-actor limits** (both raised cleanly as errors): `references[]` index ≤ `0x7FFF`, and the
   event's entry offset into the scene ≤ `0xFFFF` (a u16). Normal NPCs are nowhere near either.
 

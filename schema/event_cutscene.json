@@ -9,6 +9,24 @@
   "properties": {
     "schema": {"type": "string", "const": "xi.cutscene.v1"},
     "description": {"type": "string"},
+    "zone": {"type": "integer", "minimum": 0, "description": "The zone the event belongs to (xi event decompile writes it). A zone_events action refuses a cutscene for another zone."},
+    "actorId": {"type": "integer", "minimum": 0, "description": "The owner's entity id, saved by the zone editor with its cutscene definitions."},
+    "npcName": {"type": "string", "description": "The owner's name (xi event decompile)."},
+    "npcLook": {"type": "object", "additionalProperties": true, "description": "The owner's look as the zone editor resolved it ({type: standard|equipped, model, race}): picks the gesture bank."},
+    "cameraDat": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The zone editor's Camera DAT fields: where the camera scene DAT goes (ROM10, 490, 55.dat → ROM10/490/55.DAT). A zone_events event's camera wins.",
+      "properties": {
+        "rom": {"type": ["string", "integer"]},
+        "path": {"type": ["string", "integer"]},
+        "file": {"type": ["string", "integer"]}
+      }
+    },
+    "cameraSceneFileId": {"type": "integer", "description": "The camera scene file id a publish took, sent back so a republish keeps the file. Used only in the safe band (56941–57240)."},
+    "spec": {"type": "object", "additionalProperties": true, "description": "xi event decompile: notes on the parameters, segments and tokens."},
+    "template": {"type": ["object", "null"], "additionalProperties": true, "description": "xi event decompile: the retail event the steps were read from."},
+    "assets": {"type": "object", "additionalProperties": true, "description": "xi event decompile: the retail ids the event uses (entities, items, motions, effects, scenes)."},
     "eventId": {
       "oneOf": [
         {"type": "integer", "minimum": 0, "maximum": 65533},

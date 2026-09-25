@@ -2558,6 +2558,11 @@ def _compile_dialog(cutscene: dict, dialog_dat: bytes,
     def place(blob: bytes, slot) -> int:
         key = bytes(blob)
         if slot is not None and 0 <= slot < len(blobs):
+            # The line's text is replaced; what follows its NUL (retail's variant bytes, e.g.
+            # Maat 93's trailing 07) is kept, so a recompiled retail line is byte-identical.
+            old = bytes(blobs[slot])
+            nul = old.find(0)
+            blob = bytes(blob) + (old[nul + 1:] if nul >= 0 else b"")
             blobs[slot] = blob
             existing.setdefault(key, slot)
             return slot
@@ -2951,7 +2956,8 @@ def compile_cutscene(cutscene: dict, event_dat: bytes, dialog_dat: bytes,
                      camera_scene_ref: Optional[int] = None,
                      cast_motions: Optional[dict] = None,
                      bank_tags: Optional[frozenset] = None,
-                     ffxi_dir: Optional[Path] = None) -> CompileResult:
+                     ffxi_dir: Optional[Path] = None,
+                     dialog_slots: Optional[list] = None) -> CompileResult:
     """Compile a ``xi.cutscene.v1`` dict → byte-exact updated DATs.
 
     Parameters
@@ -2977,6 +2983,10 @@ def compile_cutscene(cutscene: dict, event_dat: bytes, dialog_dat: bytes,
         The REAL routine inventory of the shared gesture bank DAT (bridge's
         ``_gesture_bank_tags`` parses file 32104+bank). When supplied it replaces
         the hardcoded ``_GESTURE_TAGS`` fallback for the 0x5B-vs-0x2C dispatch.
+    dialog_slots : list, optional
+        Message ids to write the dialogue into, in line order, before any are appended —
+        the lines a previous build of this event took (``xi dats`` blanks them when it
+        takes the event out). Used when the event isn't replacing one of its own.
 
     Returns
     -------
@@ -3030,7 +3040,7 @@ def compile_cutscene(cutscene: dict, event_dat: bytes, dialog_dat: bytes,
         ctx.anim_bank = RACE_GESTURE_BANKS.get(int(look.get("race") or 0), ctx.anim_bank)
         if bank_tags is None:
             try:
-                from xi.zone.xi_bridge import _gesture_bank_tags
+                from xi.event.xi_cutscene_publish import gesture_bank_tags as _gesture_bank_tags
                 real = _gesture_bank_tags(ctx.anim_bank)
                 if real:
                     ctx.bank_tags = frozenset(real)
@@ -3098,7 +3108,8 @@ def compile_cutscene(cutscene: dict, event_dat: bytes, dialog_dat: bytes,
     # ▼ prompt on every line by default — retail plain NPC dialogs carry it too
     # (Ru'Lude 12547..12550 all end 7F31); flags.prompt = false opts out.
     dialog_dat_out, dialog_ids = _compile_dialog(
-        cutscene, dialog_dat, reuse_block, prompt=flags.get("prompt", True) is not False)
+        cutscene, dialog_dat, reuse_block or list(dialog_slots or []),
+        prompt=flags.get("prompt", True) is not False)
     ctx.dialog_ids = dialog_ids
     ctx.dialog_out = dialog_dat_out
     ctx.ffxi_dir = Path(ffxi_dir) if ffxi_dir else None

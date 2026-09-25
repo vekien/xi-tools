@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 
 from xi.event import xi_event as core
-from xi.xi_config import FFXI_DIR, read_path_for, editable_dat, output_path_for
+from xi.xi_config import FFXI_DIR, read_path_for
 
 
 # ---------------------------------------------------------------------------
@@ -327,108 +327,55 @@ def import_cmd(json_file, dry_run):
 # ---------------------------------------------------------------------------
 
 @cutscene_group.command("compile")
-@click.argument("cutscene_json", type=click.Path(exists=True, dir_okay=False))
-@click.option("--event-dat", "event_override", type=click.Path(exists=True, dir_okay=False),
-              help="Event DAT to append to. Default: resolved from cutscene 'zone' or 'actor'.")
-@click.option("--dialog-dat", "dialog_override", type=click.Path(exists=True, dir_okay=False),
-              help="Dialog DAT to grow. Default: matches the event DAT's zone.")
-@click.option("--dry-run", is_flag=True, help="Compile in-memory; print event id + Lua stub, don't write.")
-def compile_cmd(cutscene_json, event_override, dialog_override, dry_run):
-    """Compile a xi.cutscene.v1 JSON into event/dialog DATs.
+@click.argument("cutscene_json", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--zone", "zone_id", type=int, default=None,
+              help="The zone the event goes in (default: the cutscene's zone field).")
+@click.option("--project", default=None,
+              help="dats project to record the event in (projects/<project>.json). Default: the zone's name.")
+@click.option("--name", "event_name", default=None,
+              help="What the event is recorded by (default: the file's name); a cutscene of the same name is replaced.")
+@click.option("--camera", default=None,
+              help="A cutscene with a camera: where its scene DAT goes (like ROM10/490/55.DAT). "
+                   "Default: its cameraDat.")
+@click.option("--force", is_flag=True, help="Repoint a camera file id that is registered elsewhere.")
+@click.option("--dry-run", is_flag=True, help="Show the plan: event id, lines, blocks, Lua; write no DATs.")
+@click.option("--pivot", is_flag=True, help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
+def compile_cmd(cutscene_json: Path, zone_id, project, event_name, camera, force, dry_run, pivot):
+    """Compile a xi.cutscene.v1 JSON into its zone, through `xi dats`.
 
     \b
-    Reads a cutscene definition (see schema/event_cutscene.json), grows the zone's
-    dialog table with the cutscene's lines, synthesizes the event bytecode, splices
-    a new event onto the owning actor. Writes the rebuilt DATs in place under
-    FFXI_DIR + a .base backup (same convention as `event dialogue new`).
-
-    \b
-    Camera / fade steps are supported (scene-DAT writer is shipped). Dialog-only
-    cutscenes work too.
+    Shorthand for
+      xi dats prepare CUTSCENE --project NAME [--zone N] [--camera ROM10/…]
+      xi dats build NAME --only zone_events.<zone> [--pivot]
+    The cutscene becomes an event of the zone's `zone_events` action in
+    projects/<NAME>.json (docs/events/zone_events.md): the zone's event and dialog
+    tables change in place, the event keeps its id on rebuilds, a camera gets its own
+    scene DAT, the start-event Lua lands in projects/<NAME>.lua, and
+    `xi dats undo NAME` takes it all back out. A decompiled event (its eventId pinned)
+    replaces the retail one; undo puts that back too.
 
     \b
     Example:
-      xi event cutscene compile my_cutscene.json --event-dat ROM/21/52.DAT
+      xi event decompile 243 Maat --event 93 -o maat_93.json
+      xi event cutscene compile maat_93.json --dry-run
     """
-    import json
-    from xi.event import xi_compile
-
-    with open(cutscene_json, "r", encoding="utf-8") as f:
-        cutscene = json.load(f)
-
-    if not event_override:
-        # A decompiled JSON carries the zone it came from; resolve both DATs from it.
-        zone = cutscene.get("zone")
-        if zone is None:
-            raise click.ClickException("--event-dat required (the JSON has no 'zone' field to resolve it from).")
-        from xi import xi_config
-        from xi.event import xi_explain as X
-        zf = X.zone_files(Path(xi_config.FFXI_DIR), [int(zone)])[0]
-        event_override = str(zf.event)
-        dialog_override = dialog_override or str(zf.dialog)
-    elif not Path(event_override).is_file():
-        event_override = str(_resolve_event_dat(event_override)[0])       # ROM-relative -> absolute
-    if not dialog_override:
-        # Derive dialog DAT path from event DAT by swapping the ROM subdir (21→25).
-        ep = Path(event_override).as_posix()
-        if "/21/" in ep.upper():
-            dialog_override = ep[:ep.upper().index("/21/")] + "/25/" + ep[ep.upper().index("/21/") + 4:]
-        else:
-            raise click.ClickException("--dialog-dat required (couldn't auto-derive)")
-    elif not Path(dialog_override).is_file():
-        dialog_override = str(_resolve_event_dat(dialog_override)[0])
-
-    event_bytes = Path(event_override).read_bytes()
-    dialog_bytes = Path(dialog_override).read_bytes()
-
+    from xi.dats.xi_dats import _read_manifest, _resolve_manifest_path, _zone_slug, build_cmd, prepare_cmd
     try:
-        from xi import xi_config
-        res = xi_compile.compile_cutscene(cutscene, event_bytes, dialog_bytes,
-                                          ffxi_dir=Path(xi_config.FFXI_DIR) if xi_config.FFXI_DIR else None)
-    except (xi_compile.CutsceneCompileError, NotImplementedError) as e:
-        raise click.ClickException(str(e))
-
-    click.echo(f"event_id = {res.event_id}")
-    click.echo(f"event_dat: {len(event_bytes)} -> {len(res.event_dat)} bytes")
-    # pre-flight lint of the compiled event (sizes, jumps, selectors, message ids, menu markers)
-    from xi.event import xi_lint, xi_compile as _xc
-    owner = None
-    for c in (cutscene.get("cast") or {}).get("cast") or []:
-        if c.get("id") == cutscene.get("actor"):
-            owner = _xc._resolve_entity(c["entity"])
-    if owner is not None:
-        for eid, lr in xi_lint.lint_dat(res.event_dat, res.dialog_dat, owner, res.event_id).items():
-            for w in lr.warnings:
-                click.echo(f"lint warning: {w}", err=True)
-            if not lr.ok:
-                for e in lr.errors:
-                    click.echo(f"lint error: {e}", err=True)
-                raise click.ClickException("lint failed; nothing written")
-        click.echo("lint: OK")
-    click.echo(f"dialog_dat: {len(dialog_bytes)} -> {len(res.dialog_dat)} bytes")
-    for w in res.warnings:
-        click.echo(f"WARNING: {w}", err=True)
+        data = json.loads(cutscene_json.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise click.ClickException(f"{cutscene_json}: {e}")
+    zone = zone_id if zone_id is not None else (data.get("zone") if isinstance(data, dict) else None)
+    if not isinstance(zone, int):
+        raise click.ClickException(f"{cutscene_json} has no zone field; pass --zone")
+    project = project or _zone_slug(zone)
+    ctx = click.get_current_context()
+    ctx.invoke(prepare_cmd, source=cutscene_json, project=project, zone_id=zone, camera=camera,
+               event_name=event_name)
+    manifest = _read_manifest(_resolve_manifest_path(None, project))
+    action_id = next(a["id"] for a in manifest.get("actions", [])
+                     if a.get("type") == "zone_events" and a.get("zone") == zone)
     click.echo()
-    click.echo(res.lua_stub)
-
-    if dry_run:
-        click.echo("[dry-run] not writing DATs")
-        return
-
-    # Write to mirror + .base backup (matches `dialogue new` convention).
-    from xi.xi_config import output_path_for
-    event_out = output_path_for(event_override)
-    dialog_out = output_path_for(dialog_override)
-    Path(event_out).parent.mkdir(parents=True, exist_ok=True)
-    Path(dialog_out).parent.mkdir(parents=True, exist_ok=True)
-    for src, out, blob in [(event_override, event_out, res.event_dat),
-                            (dialog_override, dialog_out, res.dialog_dat)]:
-        base = Path(str(out) + ".base")
-        if not base.exists():
-            base.write_bytes(Path(src).read_bytes())
-        Path(out).write_bytes(blob)
-    click.echo(f"wrote {event_out}")
-    click.echo(f"wrote {dialog_out}")
+    ctx.invoke(build_cmd, project=project, only=(action_id,), force=force, dry_run=dry_run, pivot=pivot)
 
 
 # ---------------------------------------------------------------------------
@@ -790,81 +737,61 @@ def dialogue_actors_cmd(dat, limit):
 
 @dialogue_group.command("new")
 @click.argument("dat")
-@click.option("--json", "json_file", required=True, type=click.Path(exists=True, dir_okay=False),
+@click.option("--json", "json_file", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help='JSON file: an array of dialogue lines, e.g. ["line 1","line 2"].')
 @click.option("--actor", "actor_id", required=True, type=lambda x: int(x, 0),
               help="Owning NPC's server entity id (hex 0x… or decimal). See `dialogue actors`.")
 @click.option("--paged", is_flag=True,
               help="Show all lines in ONE box that pages (▼) instead of one box per line.")
 @click.option("--event-id", type=int, default=None,
-              help="Force a specific event id (default: next free id on the actor).")
+              help="Force a specific event id (default: next free id on the actor, kept on rebuilds).")
+@click.option("--project", default=None,
+              help="dats project to record the event in (projects/<project>.json). Default: the zone's name.")
+@click.option("--name", "event_name", default=None,
+              help="What the event is recorded by (default: the JSON file's name); one of the same name is replaced.")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without writing.")
-def dialogue_new_cmd(dat, json_file, actor_id, paged, event_id, dry_run):
-    """Inject dialogue lines + a new event that prints them, returning the event id.
+@click.option("--pivot", is_flag=True, help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
+def dialogue_new_cmd(dat, json_file: Path, actor_id, paged, event_id, project, event_name, dry_run, pivot):
+    """Inject dialogue lines + a new event that prints them, through `xi dats`.
 
     \b
     Lines support the same escapes as `dialog edit` (\\n newline, \\v prompt ▼,
-    {player} {npc} {auto:N}). The lines are appended to the zone's dialog table and a new
-    event ` print · wait · … · end ` is spliced onto --actor. Trigger it server-side with
-    `player:startCutscene(<id>)` (a Lua stub is printed — use startCutscene so the
-    player locks into CUTSCENE mode; startEvent alone does not).
+    {player} {npc} {auto:N}). The lines go into the zone's dialog tables and a new event
+    ` print · wait · … · end ` onto --actor, as a dialogue event of the zone's
+    `zone_events` action in projects/<NAME>.json (docs/events/zone_events.md). The
+    server trigger (`player:startCutscene(<id>)`) lands in projects/<NAME>.lua;
+    `xi dats undo NAME` takes the event back out. Shorthand for `xi dats prepare`
+    (with --merge) + `xi dats build NAME --only zone_events.<zone>`.
 
     \b
       xi event dialogue new 245 --json lines.json --actor 0x010F5022
       xi event dialogue new 245 --json lines.json --actor 0x010F5022 --paged
     """
-    from xi.event import xi_author
-
-    # 1) Load the lines.
-    raw = json.loads(Path(json_file).read_text(encoding="utf-8"))
+    import tempfile
+    from xi.dats.xi_dats import _read_manifest, _resolve_manifest_path, _zone_slug, build_cmd, prepare_cmd
+    raw = json.loads(json_file.read_text(encoding="utf-8"))
     if isinstance(raw, dict):
         raw = raw.get("lines") or raw.get("dialogue") or raw.get("text")
     if not isinstance(raw, list) or not raw or not all(isinstance(s, str) for s in raw):
         raise click.ClickException(
             "--json must be a JSON array of strings (or {\"lines\": [...]}).")
-
-    # 2) Resolve both DATs + the zone.
-    event_src, dialog_src, zone_id, zone_name = _resolve_zone_dialog_event(dat)
-    event_rel = _rom_rel_str(event_src)
-    dialog_rel = _rom_rel_str(dialog_src)
-
-    # 3) Append the lines to the dialog table (layering on any prior edits via the mirror).
-    dialog_data = read_path_for(dialog_src).read_bytes()
-    from xi.dialog import xi_dialog
-    if not xi_dialog.looks_like_event_message(dialog_data):
-        raise click.ClickException(f"{dialog_rel} is not an event-message dialog DAT.")
-    new_dialog, msg_ids = xi_author.append_dialog_lines(dialog_data, raw, paged=paged)
-
-    # 4) Splice the event onto the actor.
-    event_data = read_path_for(event_src).read_bytes()
-    actors = core.parse_raw_actors(event_data)
-    names = _npc_names_for_zone(zone_id)
-    actor_name = names.get(actor_id)
-    try:
-        new_event_id, created = xi_author.add_dialogue_event(actors, actor_id, msg_ids, event_id)
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    new_event = core.build_event_dat(actors)
-
-    # 5) Report.
-    if zone_name:
-        click.echo(f"Zone: {zone_name} ({zone_id})")
-    click.echo(f"Actor: 0x{actor_id:08X}{(' (' + actor_name + ')') if actor_name else ''}"
-               f"{'  [new actor block created]' if created else ''}")
-    click.echo(f"Lines: {len(raw)} → message id(s) {msg_ids[0]}"
-               f"{'–' + str(msg_ids[-1]) if len(msg_ids) > 1 else ''}"
-               f"  ({'paged ▼' if paged else 'separate boxes'})")
-    click.echo(f"Event id: {new_event_id}")
-    click.echo(f"  dialog DAT {dialog_rel}: {len(dialog_data)} → {len(new_dialog)} bytes")
-    click.echo(f"  event  DAT {event_rel}: {len(event_data)} → {len(new_event)} bytes")
-
-    if dry_run:
-        click.echo("(dry run — nothing written)")
-    else:
-        editable_dat(dialog_src, fresh=False).write_bytes(new_dialog)
-        editable_dat(event_src, fresh=False).write_bytes(new_event)
-        click.echo(f"Wrote: {output_path_for(dialog_src)}")
-        click.echo(f"Wrote: {output_path_for(event_src)}")
-
-    click.echo("\n─ server trigger (paste into the NPC's Lua) " + "─" * 26)
-    click.echo(xi_author.lua_stub(actor_id, new_event_id, actor_name))
+    if dat.strip().isdigit():
+        zone_id = int(dat)
+    else:                                        # a zone name, or the zone's event DAT
+        _event_src, _dialog_src, zone_id, _zone_name = _resolve_zone_dialog_event(dat)
+    project = project or _zone_slug(zone_id)
+    manifest = _read_manifest(_resolve_manifest_path(None, project))
+    action_id = next((a["id"] for a in manifest.get("actions", [])
+                      if a.get("type") == "zone_events" and a.get("zone") == zone_id), None) \
+        or f"zone_events.{_zone_slug(zone_id)}"
+    ev = {"name": event_name or json_file.stem,
+          "dialogue": {"actor": f"0x{actor_id:08X}", "lines": raw, **({"paged": True} if paged else {})}}
+    if event_id is not None:
+        ev["eventId"] = event_id
+    ctx = click.get_current_context()
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / f"{json_file.stem}.events.json"
+        source.write_text(json.dumps({"zone": zone_id, "events": [ev]}), encoding="utf-8")
+        ctx.invoke(prepare_cmd, source=source, project=project, action_id=action_id, merge=True)
+    click.echo()
+    ctx.invoke(build_cmd, project=project, only=(action_id,), dry_run=dry_run, pivot=pivot)

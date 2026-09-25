@@ -305,7 +305,7 @@ xi utils dds2png in.dds out.png / xi utils png2dds in.png out.dds
 xi event dialogue actors 245                      # NPC ids in a zone
 xi event dialogue search ROM/25/39.DAT "words"    # find an entry index
 xi event dialogue edit ROM/25/39.DAT --index 4 --text "Hello {player}!\nLine two.\v"
-xi event dialogue new 245 --json lines.json --actor 0x010F5022   # prints the event id + server Lua
+xi event dialogue new 245 --json lines.json --actor 0x010F5022   # a zone_events action, built; Lua in projects/<zone>.lua
 xi event cutscene export|import|compile …
 ```
 
@@ -314,7 +314,7 @@ xi event cutscene export|import|compile …
 ```bash
 uv run xi event explain 243 0x010F30EA --event 10124          # annotated disassembly (stops at a sub's first return)
 uv run xi event decompile 252 0x010FC08F --event 9506 -o oseem_9506.json --check   # retail -> xi.cutscene.v1 JSON, then recompile and compare
-uv run xi event cutscene compile my_event.json                # JSON -> event/dialog DATs
+uv run xi event cutscene compile my_event.json                # JSON -> the zone's zone_events action, built (xi dats undo)
 ```
 
 The JSON (`docs/events/authoring.md`, sections from 2026-09-03 onward) is the DAT-independent

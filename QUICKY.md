@@ -147,6 +147,37 @@ xi dats prepare edits.json --project P [--merge]   # a list of edits (schema/dat
 xi dats build P [--dry-run] [--pivot]              # patches the records (EN + JP, legacy or retail DATs), writes P.sql (proposed, never run)
 xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
 xi dats undo P                                     # every record back to what it held; its SQL section removed
+# spellData / abilityData: {"table": "spellData", "id": 1, "set": {"mp": 5, "levels": {"RDM": 1}}}
+# exact bytes: "hex" (a whole record); a d_msg table by path: {"table": "ROM/181/72.DAT", "id": 5, "strings": {"sub0": "…"}}
+```
+
+## Zone dialog lines (docs/dialog/zone_dialog.md)
+
+```text
+xi dats prepare lines.json --project P [--merge]    # {"zone": 245, "lines": [...]} (schema/zone_dialog.json)
+xi dats prepare lines.json --project P --type zone_dialog --zone 245   # a bare list of lines
+xi dats build P [--dry-run] [--pivot]               # the zone's EN + JP dialog tables; "new" lines grow both
+xi dats new [--pivot]                               # wizard: "Zone dialog" — zone, line id, new text (old=>new)
+```
+
+## Zone NPCs (docs/zone/zone_npcs.md)
+
+```text
+xi dats prepare npcs.json --project P [--merge]     # {"zone": 245, "npcs": [...]} (schema/zone_npcs.json)
+xi dats build P [--dry-run] [--pivot]               # the zone's name table; npc_list rows -> P.sql (proposed, never run)
+xi dats new [--pivot]                               # wizard: "Zone NPCs" — rename by id, or new (name, model, status)
+```
+
+## Zone events (docs/events/zone_events.md)
+
+```text
+xi dats prepare cutscene.json --project P [--zone N] [--camera ROM10/490/55.DAT]   # one cutscene -> the zone's action
+xi dats prepare events.json --project P [--merge]   # {"zone": 243, "events": [...]} (schema/zone_events.json)
+xi dats build P [--dry-run] [--pivot]               # event + EN/JP dialog tables, camera scene DAT; P.lua + P.sql (never run)
+xi dats new [--pivot]                               # wizard: "Zone events" — zone, then a cutscene file or a dialogue
+xi event cutscene compile cs.json [--dry-run]       # the same, prepared + built (project: the zone's name)
+xi event dialogue new 245 --json lines.json --actor 0x010F5022   # a dialogue event, prepared + built
+xi dats undo P                                      # every block and line back; camera DATs removed
 ```
 
 ## Entity
@@ -539,11 +570,11 @@ xi event npc add 243 "Name" --gap 10          # register a name for a new NPC id
 xi event cutscene
 xi event cutscene export
 xi event cutscene import
-xi event cutscene compile my_event.json       # JSON -> event/dialog DATs (finds the zone's DATs itself)
+xi event cutscene compile my_event.json       # JSON -> a zone_events action, built (docs/events/zone_events.md)
 
 xi event dialogue
 xi event dialogue actors
-xi event dialogue new
+xi event dialogue new                          # a dialogue event through a zone_events action
 xi event dialogue export
 xi event dialogue search
 xi event dialogue info

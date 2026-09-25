@@ -33,7 +33,7 @@ def test_package_entry_takes_includes_and_database_actions():
 
 
 def test_tables_match_the_registry_and_the_schema():
-    assert SCHEMA["$defs"]["edit"]["properties"]["table"]["enum"] == db.tables()
+    assert SCHEMA["$defs"]["edit"]["properties"]["table"]["anyOf"][0]["enum"] == db.tables()
     assert all(subs for subs in db.DMSG_SUBS.values()), "every d_msg table needs its sub-string names"
     assert db.ID_KEYED == {k for k in db.DMSG_SUBS if k[:2] in ("q_", "m_")} | {"keyitems"}
 

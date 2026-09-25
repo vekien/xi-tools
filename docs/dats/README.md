@@ -194,6 +194,33 @@ type the changes one per line — `level=50`, `jobs=WAR,PLD`, `description~HP+15
 earlier run wrote. Non-interactive: `xi dats prepare edits.json --project P [--merge]` with
 a list of edits. See [../database/README.md](../database/README.md).
 
+### Zone dialog (edit or add the lines a zone's NPCs say)
+
+Give the zone, then a line id (or `new` for one at the end), see its English and Japanese
+text, and type the new text — `old=>new` changes part of it. The lines go into
+`zone_dialog.<project>`. Non-interactive: `xi dats prepare lines.json --project P` with
+`{"zone": 245, "lines": [...]}`. See [../dialog/zone_dialog.md](../dialog/zone_dialog.md).
+
+Naming: `database` is the client's global tables; what belongs to one zone's DATs is
+`zone_*` (`zone_dialog`, `zone_npcs`, `zone_events`); `ui` is the visual interface only —
+textures and layout, never text.
+
+### Zone NPCs (rename or add a zone's NPCs)
+
+Give the zone, then an NPC id to rename or `new` to add one: its name, model id and status
+(6 = shown only by an event, the default; 0 = stands in the zone, with a position). A new NPC
+takes the next free id in the custom band (0x380+). The NPCs go into `zone_npcs.<project>`,
+their `npc_list` rows into `<project>.sql`. See [../zone/zone_npcs.md](../zone/zone_npcs.md).
+
+### Zone events (cutscenes and dialogue on a zone's NPCs)
+
+Give the zone, then a cutscene file (from the zone editor or `xi event decompile`) with its
+camera placement when it has a camera, or a dialogue: the NPC's entity id and its lines. The
+events go into `zone_events.<project>`, their start scripts into `<project>.lua`.
+Non-interactive: `xi dats prepare cutscene.json --project P [--zone N] [--camera ROM10/…]`,
+or `xi event cutscene compile` / `xi event dialogue new`, which prepare and build in one go.
+See [../events/zone_events.md](../events/zone_events.md).
+
 ## Building (`xi dats build`)
 
 A build writes DATs and patches their file_ids **directly into the base install
@@ -211,6 +238,12 @@ uv run xi dats build --project gyokko_mask --pivot    # into FFXI_PIVOT_DIR (no 
 uv run xi dats build --project gyokko_mask --dry-run  # preview only, writes nothing
 uv run xi dats changelog --project gyokko_mask        # table of recorded results
 ```
+
+The types that record what they changed (`database`, `zone_dialog`, `zone_npcs`,
+`zone_events`) are first put back, newest first, to what they held before the project's last
+build, then applied in order. Where two of them change one table (lines added to one zone,
+events on one NPC), each gets back what it changed, and a rebuild converges. A dry run holds
+each step's writes in memory, so later steps plan against earlier ones.
 
 ### Ability server options (`--apply-db`, `--menu-record`, `--lua-stub`)
 
@@ -503,7 +536,28 @@ Record edits:
   each changed field's value before and after per target, so a rebuild converges and
   `undo` puts the records back. An item edit may carry its server rows (`item_basic`,
   `item_equipment` with `MId` or a gear action's model, `item_mods`, …), written as proposed
-  SQL to `<project>.sql`, never run. No file ids, no table expansion.
+  SQL to `<project>.sql`, never run. No file ids, no table expansion. A text row past the
+  end is added with `like` (the rows in between hold `.`). The spell and ability records of
+  `ROM/118/114.DAT` (`spellData`, `abilityData`: MP, cast, recast, job levels, TP, range …)
+  edit the same way, a spell's `spell_list` row going to the SQL; `hex` writes a whole record
+  exactly, and a d_msg table may be named by its ROM path.
+- `zone_dialog` ([`schema/zone_dialog.json`](../../schema/zone_dialog.json),
+  [../dialog/zone_dialog.md](../dialog/zone_dialog.md)): a zone's dialog lines, edited or
+  added by line id in its English and Japanese tables (`new` lines grow both). Records each
+  line's bytes before and after per target, so a rebuild converges and `undo` is exact.
+- `zone_npcs` ([`schema/zone_npcs.json`](../../schema/zone_npcs.json),
+  [../zone/zone_npcs.md](../zone/zone_npcs.md)): a zone's NPC names renamed or added (ids from
+  the custom band 0x380+, `auto` allocates past the name and event tables), with the new or
+  changed `npc_list` rows as proposed SQL in `<project>.sql`. Renames set `polutils_name`,
+  never `name` (it binds the NPC's Lua). Recorded per target; `undo` is exact.
+- `zone_events` ([`schema/zone_events.json`](../../schema/zone_events.json),
+  [../events/zone_events.md](../events/zone_events.md)): cutscenes (`xi.cutscene.v1`) and
+  dialogues compiled into a zone's event table, with their lines in its English and Japanese
+  dialog tables, lint-checked before anything is written. Records each changed block as the
+  splice that puts it back and each line's bytes, per target; an `auto` event keeps its id.
+  A camera gets its own scene DAT, placed and registered at a safe-band file id. The
+  cast-name SQL goes to `<project>.sql`, the start scripts to `<project>.lua`, never run.
+  `xi event cutscene compile` and `xi event dialogue new` are aliases of prepare + build.
 
 GLB-rebuild / package types:
 

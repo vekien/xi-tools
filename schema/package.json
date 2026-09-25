@@ -39,11 +39,13 @@
         {"$ref": "audio.json"},
         {"$ref": "tex.json"},
         {"$ref": "ui.json"},
-        {"$ref": "event.json"},
         {"$ref": "ability.json"},
         {"$ref": "spell.json"},
         {"$ref": "command.json"},
-        {"$ref": "database.json"}
+        {"$ref": "database.json"},
+        {"$ref": "zone_dialog.json"},
+        {"$ref": "zone_npcs.json"},
+        {"$ref": "zone_events.json"}
       ]
     }
   },
