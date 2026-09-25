@@ -6,6 +6,26 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
+## v1.14.0 — 2026-09-25
+
+[Compare v1.13.0...v1.14.0](https://github.com/vekien/xi-tools/compare/v1.13.0...v1.14.0)
+
+**Zone export for Unreal (`--unreal`)**
+
+- Trees, grass, signs and grates are split by triangle: the see-through parts (leaves, grass blades) keep the `_cutout` material and the solid parts (trunks, posts, bark-textured branch cards) move to the plain one. Turn wind on for a tree's `_cutout` instance and the trunk stays still; far fewer triangles are masked (West Ronfaure: 2,250 → 767).
+- Wind weights: every mesh gets a second UV channel, height (`x`) and reach from the centre (`y`) within the mesh, 0 on anything solid. Weight MasterMaterial's `SimpleGrassWind` by `TexCoord[1]` and grass roots stop sliding.
+- One PNG per texture: no more `_opaque.png` copies. Solid and cutout materials share the texture, and `ffxi_zone_setup.py` compresses the ones only solid materials use without alpha. Plain `--fbx` still writes the copies, for Blender.
+- Not yet checked in Unreal itself: the wind channel arriving through the FBX import, and the compression pass. Re-export zones to pick all of this up.
+
+**Abilities**
+
+- The job-ability animation band starts at 1024, above the warp and teleport effects at 596–656, matching cexislots v1.14 (#14). Nothing already published changes file id.
+- The animation bands always follow xi-tools' own numbers: `FX_*_BAND_*` lines in `.env` are ignored (a real environment variable still sets them). Asking for a job-ability number in the gap (500–1023) now says why and which ranges to pick from.
+
+**Docs**
+
+- [`unreal-engine/foliage.md`](unreal-engine/foliage.md): trunk vs leaf materials, wiring the wind, and why leaf normals face down (the game files are made that way). [`materials.md`](unreal-engine/materials.md), the kit README, troubleshooting and [`docs/zone/export.md`](docs/zone/export.md) follow; [`docs/ability/mixer.md`](docs/ability/mixer.md) for the bands.
+
 ## v1.13.0 — 2026-09-25
 
 [Compare v1.12.0...v1.13.0](https://github.com/vekien/xi-tools/compare/v1.12.0...v1.13.0)
