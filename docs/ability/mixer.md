@@ -528,7 +528,7 @@ generator fired: each texture a generator draws is in the output with its own pi
 > plugin can patch it so numbers at or above a threshold resolve into a reserved
 > region instead, and the publisher allocates there once the numbers any client loads
 > are used up. The bands are **on by default with cexislots' values** (weapon skills
-> 272–527, job abilities 500+, spells 1612+; `FX_*_BAND_*` in `xi_config.py`): set them
+> 272–527, job abilities 1024+, spells 1612+; `FX_*_BAND_*` in `xi_config.py`): set them
 > in `.env` only for a different plugin, and set a band's `FIRST` to `0` to switch it off
 > for a stock client. The plan prints a `⚠` line when the number it took needs the plugin.
 > Band numbers are built with `--pivot`: their file ids sit past the expanded tables, the

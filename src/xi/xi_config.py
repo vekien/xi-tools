@@ -332,6 +332,14 @@ CUSTOM_ROM_IDX = int(CUSTOM_ROM[3:])   # 'ROM10' -> 10
 # ids by number rather than by race keeps WS_SLOTS out of the arithmetic, so
 # raising it later moves nothing already published.
 #
+# A threshold has to clear every number the client is *sent* in that category,
+# not just the table's last entry. Job abilities are the trap: the abilities
+# table ends at 338, but category 6 is also how a server reaches the warp and
+# teleport effects, at 596..656 (`injectActionPacket(id, 6, 600, ...)`), and
+# those must keep the retail arithmetic. A band at 500 broke every scripted
+# teleport in the field; 1024 clears them and leaves 3,072 custom numbers.
+# Spells are fine at 1612: the core's own spell-category numbers stop at 847.
+#
 # Unset, each takes cexislots' value (cexidats src/cexislots/sites.h), so the
 # publisher assumes a client running that plugin. The numbers a stock client can
 # load are still handed out first; the band is only reached once they are used
@@ -346,7 +354,7 @@ def _band(name: str, default: int) -> int:
 
 FX_SPELL_BAND_FIRST = _band('FX_SPELL_BAND_FIRST', 1612)
 FX_SPELL_BAND_BASE  = _band('FX_SPELL_BAND_BASE', 423152)
-FX_JA_BAND_FIRST    = _band('FX_JA_BAND_FIRST', 500)
+FX_JA_BAND_FIRST    = _band('FX_JA_BAND_FIRST', 1024)
 FX_JA_BAND_BASE     = _band('FX_JA_BAND_BASE', 427248)
 FX_WS_BAND_FIRST    = _band('FX_WS_BAND_FIRST', 272)
 FX_WS_BAND_BASE     = _band('FX_WS_BAND_BASE', 431344)
