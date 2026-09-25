@@ -14,6 +14,11 @@
       "minLength": 1,
       "description": "Path relative to projects/resources unless otherwise noted. Use forward slashes."
     },
+    "includePath": {
+      "type": "string",
+      "pattern": "\\.json$",
+      "description": "An include: the path, relative to the file it appears in, of a xi.dats.include.v1 file (include.json) whose actions are spliced in at this spot. Use forward slashes."
+    },
     "romPath": {
       "type": "string",
       "pattern": "^ROM[0-9]*/[0-9]+/[0-9]+(?:\\.DAT)?$",

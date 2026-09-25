@@ -6,6 +6,32 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
+## v1.13.0 — 2026-09-25
+
+[Compare v1.12.0...v1.13.0](https://github.com/vekien/xi-tools/compare/v1.12.0...v1.13.0)
+
+**Zone export**
+
+- `--objects` and `--sub-areas` work together: the zone's objects go in the output folder and each sub-area's in a `<stem>_<id>/` folder beside them (Lower Jeuno: `41_454/` … `41_466/`), each with its own PNGs, so a mesh name a sub-area shares with the zone can't overwrite it.
+- `--objects` now writes `--collision` too; it used to skip it.
+- `--zero-coords` — every FBX imports at location 0,0,0 with no rotation, for placing pieces by hand or from the JSON: transforms are baked into the geometry and each file (zone, sub-area, object) is moved so the centre of its base is on the origin. Implies `--json`, which gains `fbx_zero_coords`: each file's offset and, per object, every placement's transform (4x4 plus location / rotation / scale). `--zero-cords` works too.
+- `--json` lists each sub-area with its own placements, in the zone's world space, and follows a schema, [`schema/zone_export.json`](schema/zone_export.json) (`xi.zone-export.v1`), with a validator in `xi.zone.xi_zone_json`.
+- The `--objects` docs said the files went in a `<stem>_objects/` folder; they go straight into the output folder, and now say so.
+
+**Mesh export and gear pose**
+
+- `--zero-coords` — the FBX's armature and mesh import at 0,0,0 with no rotation: the orientation fix is baked in instead of a rotated root. The skeleton root stays the origin, and an `--all-frames` clip plays as before.
+
+**dats**
+
+- New `database` action: edit or add records in the client's tables — items, key items, titles, quest and mission logs, spell and ability text — by table and id, with the viewer's field names. English and Japanese records, legacy or retail DATs; `like` copies another record into an empty slot; `undo` puts them back. An item edit can carry its server rows, written as proposed SQL to `<project>.sql` (never run). `dats new` has a "Database records" wizard, and `dats prepare edits.json --project P [--merge]` is the scripted way in. See [`docs/database/README.md`](docs/database/README.md).
+- Includes: an `actions` entry can be the path of an include file ([`schema/include.json`](schema/include.json)) whose actions are spliced in at that spot, so one project can keep its gear, record edits and events in separate files. A build writes each result back to the file its action came from.
+
+**Docs**
+
+- [`docs/zone/export.md`](docs/zone/export.md): Zero coords, per-object export with sub-areas; [`subareas.md`](docs/zone/subareas.md), [`mesh/export.md`](docs/mesh/export.md), [`gear/pose.md`](docs/gear/pose.md) and the [`unreal-engine/`](unreal-engine/README.md) kit mention the new options.
+- [`docs/gear/model_ids.md`](docs/gear/model_ids.md): gear model id → file id — the DLL group walk, the custom window formula, retail and patched ceilings.
+
 ## v1.12.0 — 2026-09-24
 
 [Compare v1.11.0...v1.12.0](https://github.com/vekien/xi-tools/compare/v1.11.0...v1.12.0)

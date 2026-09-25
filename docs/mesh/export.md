@@ -49,6 +49,9 @@ FBX is **not** produced by default.
 - `--alpha-scale N` — multiply texture alpha by `N` (clamped to 255) before writing
   the PNGs. **Default `2.0`** — see [Texture decode](#texture-decode). Pass `1.0` for
   the raw FFXI alpha, or higher to force more opacity.
+- `--zero-coords` — with `--fbx`, the FBX's armature and mesh import at location 0,0,0 with
+  no rotation: the orientation fix is baked into them instead of a rotated root. The
+  skeleton root stays the origin. `--zero-cords` works too.
 - `--output <dir>` — override the output directory
 
 The FBX conversion shells out to Blender (`BLENDER_PATH` in `config.py`).

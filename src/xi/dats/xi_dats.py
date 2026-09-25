@@ -11,6 +11,8 @@ from pathlib import Path
 
 import click
 
+from xi.dats.xi_include import INCLUDE_SCHEMA, LAYOUT_KEY, IncludeError, documents, flatten
+
 
 DEFAULT_MANIFEST = Path("projects/update.json")
 
@@ -151,6 +153,12 @@ def _read_manifest(path: Path) -> dict:
     roots.setdefault("resources", "projects/resources")
     roots.pop("changelog", None)  # results now live inline on each action (was a side file)
     manifest.setdefault("actions", [])
+    if any(isinstance(a, str) for a in manifest["actions"]):
+        # Includes: splice each file's actions in; _write_manifest puts them back.
+        try:
+            manifest["actions"], manifest[LAYOUT_KEY] = flatten(path, manifest["actions"])
+        except IncludeError as exc:
+            raise click.ClickException(str(exc)) from exc
     for action in manifest["actions"]:
         if isinstance(action, dict):
             action.pop("op", None)  # `op` is unused — dropped on read so it's shed on next write
@@ -158,8 +166,18 @@ def _read_manifest(path: Path) -> dict:
 
 
 def _write_manifest(path: Path, manifest: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    """Write the project file, and each include file it was read with whose content
+    changed (a build's `result` goes back beside the action that earned it; an untouched
+    include keeps its own formatting)."""
+    for file, doc in documents(path, manifest).items():
+        if file != path and file.exists():
+            try:
+                if json.loads(file.read_text(encoding="utf-8")) == doc:
+                    continue
+            except ValueError:
+                pass
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _root_path(manifest_path: Path, manifest: dict, key: str) -> Path:
@@ -518,11 +536,14 @@ def _detect_source_type(source: Path, explicit_type: str | None) -> tuple[str, d
     data = _load_json(source)
     if explicit_type:
         return explicit_type, data
-    if not isinstance(data, dict):
-        # A bare list is an edit list for a table (`xi ui strings export` and the like):
-        # it says nothing about which table, so the flags have to.
-        raise click.ClickException(f"{source} is a list, not an action: pass --type ui with "
-                                   "--target and --category.")
+    # Database edits: a bare list of them, or {"edits": [...]} (schema/database.json).
+    if isinstance(data, list):
+        if all(isinstance(e, dict) and "table" in e for e in data):
+            return "database", data
+        raise click.ClickException(f"Cannot infer action type for {source}. Pass --type "
+                                       f"(a table edit list: --type ui with --target and --category).")
+    if isinstance(data.get("edits"), list) and not data.get("type"):
+        return "database", data
     if source.name == "zone-changes.json" or "placements" in data or "vfx" in data or "zone" in data:
         return "zone", data
     if data.get("schema") == "xi.ui.v1":
@@ -1401,6 +1422,120 @@ def _wizard_record(kind: str, slug: str, prev: dict | None, manifest_path: Path,
     return action
 
 
+_DB_LABELS = {
+    "armor": "Armor", "weapons": "Weapons", "general": "General items", "usable": "Consumables",
+    "puppet": "Automaton", "maze": "Maze Mongers", "monst1": "Monstrosity instincts",
+    "items7": "Items 7 (retail, Sept 2026)", "roeObj": "RoE objectives", "items6": "Commands",
+    "gil": "Currency", "keyitems": "Key items", "titles": "Titles", "spells": "Spell names",
+    "spellHelp": "Spell help", "abilities": "Ability names", "abilityHelp": "Ability help",
+}
+_MASK_FIELDS = ("flags", "jobs", "races", "slots")
+
+
+def _wizard_change(edit: dict, table: str, raw: str) -> None:
+    """Apply one wizard line to ``edit``: ``field=value``, ``jp.field=value``,
+    ``field~old=>new`` (replace part of a text), ``mod.NAME=value`` (empty removes it)."""
+    from xi.database import xi_core as C
+    item = table in C.ITEM_LAYOUT
+    if "~" in raw.split("=", 1)[0]:
+        key, rest = raw.split("~", 1)
+        if "=>" not in rest:
+            raise ValueError("write a replace as field~old=>new")
+        old, new = rest.split("=>", 1)
+        lang, key = ("jp", key[3:]) if key.startswith("jp.") else ("en", key)
+        spec = edit.setdefault("strings", {}).setdefault(lang, {})
+        cur = spec.get(key.strip())
+        rep = cur["replace"] if isinstance(cur, dict) else {}
+        spec[key.strip()] = {"replace": {**rep, old.strip(): new.strip().replace("\\n", "\n")}}
+        return
+    if "=" not in raw:
+        raise ValueError("write field=value")
+    key, value = (s.strip() for s in raw.split("=", 1))
+    if key.startswith("mod."):
+        if not item:
+            raise ValueError("mods are for item tables")
+        mods = edit.setdefault("server", {}).setdefault("item_mods", {})
+        mods[key[4:].upper()] = int(value) if value else None
+        return
+    if key == "note":
+        edit["note"] = value
+        return
+    lang, name = ("jp", key[3:]) if key.startswith("jp.") else ("en", key)
+    if item and name in C.set_fields(table) and lang == "en":
+        if name in _MASK_FIELDS:
+            names = [v.strip().upper() for v in re.split(r"[,\s]+", value) if v.strip()]
+            edit.setdefault("set", {})[name] = "all" if names == ["ALL"] and name in ("jobs", "races") else names
+        elif name == "skill":
+            edit.setdefault("set", {})[name] = int(value) if value.isdigit() else value.upper()
+        else:
+            edit.setdefault("set", {})[name] = int(value)
+        return
+    if name in C.string_names(table, lang):
+        numeric = name in ("article", "category", "keyItem")
+        edit.setdefault("strings", {}).setdefault(lang, {})[name] = (
+            int(value) if numeric else value.replace("\\n", "\n"))
+        return
+    fields = (C.set_fields(table) if item else []) + C.string_names(table, "en")
+    raise ValueError(f"{table} has no {key!r} — it has {', '.join(fields)}")
+
+
+def _wizard_database(slug: str, prev: dict | None, pivot: bool) -> dict:
+    """`dats new` for record edits: pick a table and an id, see what the record holds,
+    then give the changes as field=value lines. Edits go into database.<slug>."""
+    from xi.database import xi_build as DB
+    from xi.database import xi_core as C
+    root = _target_root("pivot" if pivot else "dir")
+    action = dict(prev) if prev else {"id": f"database.{slug}", "type": "database", "edits": []}
+    edits = list(action.get("edits") or [])
+    tables = C.tables()
+    labels = [f"{_DB_LABELS.get(t, t)} ({t})" for t in tables]
+    while True:
+        table = tables[labels.index(_choose("Which table?", labels, default=labels[0]))]
+        rid = _ask("Record id? (the item id for items)", type=int)
+        at = next((i for i, e in enumerate(edits) if e.get("table") == table and e.get("id") == rid), None)
+        edit = dict(edits[at]) if at is not None else {"table": table, "id": rid}
+        try:
+            cur = DB.describe(root, table, rid)
+        except DB.DbError as e:
+            click.echo(click.style(f"  {e}", fg="yellow"))
+            continue
+        if cur["empty"] and DB.is_item_table(table):
+            click.echo(f"\n  {table} {rid} is an empty slot ({cur['dat']}).")
+            if "like" not in edit:
+                edit["like"] = _ask("Copy which record into it? (an id of the same table)", type=int)
+        else:
+            click.echo(f"\n  {table} {rid}: {cur['name']!r}  ({cur['dat']}, {cur.get('format', 'd_msg')})")
+            for k, v in cur["fields"].items():
+                click.echo(f"    {k:<14} {v}")
+            for k, v in cur["strings"].items():
+                click.echo(f"    {k:<14} {_short(v, 90)}")
+        click.echo("\n  Changes, one per line (blank when done):  level=50   jobs=WAR,PLD   flags=RARE,EX\n"
+                   "    description=New text\\nSecond line   description~HP+15=>HP+30   jp.name=…\n"
+                   "    mod.HP=30 (the proposed SQL; mod.HP= removes it)   note=why")
+        while True:
+            raw = click.prompt("  change", default="", show_default=False).strip()
+            if not raw:
+                break
+            try:
+                _wizard_change(edit, table, raw)
+            except ValueError as e:
+                click.echo(click.style(f"  {e}", fg="yellow"))
+        errs = C.validate_action({"id": action["id"], "type": "database", "edits": [edit]})
+        if errs:
+            for e in errs:
+                click.echo(click.style(f"  ⚠ {e}", fg="yellow"))
+            if not click.confirm("  Keep this record's edit anyway?", default=False):
+                continue
+        if at is not None:
+            edits[at] = edit
+        else:
+            edits.append(edit)
+        if not click.confirm("\n>> Edit another record?", default=False):
+            break
+    action["edits"] = edits
+    return action
+
+
 def _mix_files(folder: Path) -> list[Path]:
     """Mix files in ``folder`` and one level down: ``*.mix.json`` and the legacy
     ``*.recipe.json``, the ``.mix.json`` winning when both exist for one name."""
@@ -1565,6 +1700,74 @@ def _build_gear(action: dict, manifest_path: Path, manifest: dict, force: bool =
             "races": placed_races}
 
 
+# ── database: edits to the client's record tables (xi.database) ─────────────────
+
+def _action_file(action: dict, manifest_path: Path, manifest: dict) -> Path:
+    """The file an action is written in: its include file, else the project file."""
+    owner = ((manifest.get(LAYOUT_KEY) or {}).get("owners") or {}).get(action.get("id"))
+    return Path(owner) if owner else manifest_path
+
+
+def _build_database(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                    dry_run: bool = False) -> dict:
+    from xi.database import xi_build as DB
+    root = _active_build_root()
+    sql_path = DB.sql_path(action, _action_file(action, manifest_path, manifest), manifest_path)
+    try:
+        return DB.build(action, root=root, target=_root_target_name(root) or "dir", manifest=manifest,
+                        sql_path=sql_path, project=manifest.get("name") or manifest_path.stem,
+                        force=force, dry_run=dry_run)
+    except DB.DbError as e:
+        raise click.ClickException(f"{action.get('id')}: {e}")
+
+
+def _database_result(built: dict | None, previous: dict | None) -> dict:
+    """The inline ``result`` of a database action: per build target, every record it
+    wrote with each field's value before and after (what a rebuild and undo start from)."""
+    b = built or {}
+    roots = dict((previous or {}).get("roots") or {})
+    roots[b.get("target") or "dir"] = b.get("records") or []
+    return {"roots": roots, "sql": b.get("server")}
+
+
+def _database_action_from_source(source: Path, data, action_id: str | None, manifest: dict,
+                                 merge: bool) -> dict:
+    """A database action from a source file: a whole action, ``{"edits": [...]}`` or a bare
+    list of edits. With ``merge`` its edits go into the project's action of the same id,
+    replacing an edit of the same table and id."""
+    from xi.database.xi_core import validate_action
+    if isinstance(data, list):
+        body: dict = {"edits": data}
+    elif isinstance(data, dict) and isinstance(data.get("edits"), list):
+        body = {k: v for k, v in data.items() if k not in ("schema", "$schema", "result")}
+    else:
+        raise click.ClickException(f"{source}: a database source is a database action, "
+                                   '{"edits": [...]} or a list of edits.')
+    action_id = action_id or body.get("id") or f"database.{_slug(source.stem)}"
+    action = {"id": action_id, "type": "database",
+              **{k: v for k, v in body.items() if k not in ("id", "type")}}
+    existing = next((a for a in manifest.get("actions", []) if a.get("id") == action_id), None)
+    if merge and existing:
+        edits = list(existing.get("edits") or [])
+        at = {(e.get("table"), e.get("id")): i for i, e in enumerate(edits)}
+        for e in action["edits"]:
+            key = (e.get("table"), e.get("id"))
+            if key in at:
+                edits[at[key]] = e
+            else:
+                edits.append(e)
+        action = {**existing, **{k: v for k, v in action.items() if k != "edits"}, "edits": edits}
+    errs = validate_action(action)
+    if errs:
+        raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
+    return action
+
+
+def _short(value, width: int = 70) -> str:
+    s = repr(value)
+    return s if len(s) <= width else s[:width - 1] + "…"
+
+
 @click.group("dats")
 def group():
     """Build reproducible DAT package trees from manifest JSON."""
@@ -1575,8 +1778,10 @@ def group():
 @click.argument("manifest", type=click.Path(path_type=Path), default=DEFAULT_MANIFEST, required=False)
 @click.option("--output", "output", type=click.Path(path_type=Path), default=None)
 def json_cmd(manifest: Path, output: Path | None):
-    """Print a normalized dats manifest as JSON."""
-    _dump_json(_read_manifest(manifest), output)
+    """Print a normalized dats manifest as JSON (includes expanded in place)."""
+    data = _read_manifest(manifest)
+    data.pop(LAYOUT_KEY, None)
+    _dump_json(data, output)
 
 
 @group.command("prepare")
@@ -1602,11 +1807,14 @@ def json_cmd(manifest: Path, output: Path | None):
               help="Spell definitions: the menu slot to sort into (default auto = next after retail's).")
 @click.option("--category", type=click.Choice(["strings", "items", "dialog", "menu"]), default=None,
               help="Table edits (--type ui): which kind of table --target is.")
+@click.option("--merge", is_flag=True, default=False,
+              help="Database edits: add them to the project's action of the same id, replacing an edit "
+                   "of the same table and id (the rest stay).")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
                 record_id: int | None = None, menu_index: int | None = None,
-                animation_from: int | None = None, category: str | None = None):
+                animation_from: int | None = None, category: str | None = None, merge: bool = False):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -1616,6 +1824,11 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     DAT(s) in ROM10 and registers the file ids:
       xi dats prepare exports/ability/mixer/tiger_fury.mix.json --project tiger_fury --replace
       xi dats build tiger_fury --dry-run
+
+    \b
+    Database edits (schema/database.json) — a database action, {"edits": [...]} or a bare
+    list of edits — become a `database` action; --merge adds them to the one already there:
+      xi dats prepare edits.json --project gear_tweaks --merge
     """
     manifest = _resolve_manifest_path(manifest, project)
     manifest_data = _read_manifest(manifest)
@@ -1637,6 +1850,10 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         action = _ui_action_from_edits(source, data, resource_root, action_id=action_id,
                                        target=target, category=category)
         action_id = action["id"]
+    elif kind == "database":
+        action = _database_action_from_source(source, data, action_id, manifest_data, merge)
+        action_id = action["id"]
+        replace = replace or merge
     elif kind == "zone":
         dat_target = _rom_rel(target or data.get("zone", ""))
         if not dat_target:
@@ -1732,6 +1949,9 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         preserve = ("result",) + (() if explicit else ("target",))
     elif kind == "ui":
         preserve = ("result",) + (() if (target or category) else ("target",))
+    elif kind == "database":
+        # What each build changed (the values undo and the next build put back) survives.
+        preserve = ("result",)
     else:
         preserve = ("model",) + (() if target else ("target",))
     _add_or_replace_action(manifest_data, action, replace, preserve=preserve)
@@ -1769,6 +1989,15 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
         aid = action.get("id", "?")
         typ = action.get("type", "?")
         res = action.get("result") or {}
+        if typ == "database":
+            recorded = [(t, e) for t, recs in (res.get("roots") or {}).items() for e in recs]
+            for t, e in recorded:
+                tag = " new" if e.get("created") else ""
+                rows.append((aid, f"database ({t})", e.get("dat") or "-",
+                             f"{e.get('table')} {e.get('id')} {e.get('lang')}{tag}", "-"))
+            if not recorded:
+                rows += [(aid, typ, "-", f"{e.get('table')} {e.get('id')}", "-") for e in action.get("edits") or []]
+            continue
         if typ in RECORD_TYPES:
             rid = res.get("record_id", (action.get("target") or {}).get("id", "auto"))
             rows.append((aid, typ, res.get("dat") or "ROM/118/114.DAT", str(rid), "-"))
@@ -1818,6 +2047,11 @@ def _action_summary(action: dict) -> str:
     if model_id is not None:
         parts.append(f"model {model_id}")
     line = " - ".join(parts)
+    if action.get("type") == "database":
+        edits = action.get("edits") or []
+        names = [f"{e.get('table')} {e.get('id')}" for e in edits[:4]]
+        line += f" - {len(edits)} edit{'s' if len(edits) != 1 else ''}: {', '.join(names)}"
+        return line + (" …" if len(edits) > 4 else "")
     if action.get("type") in RECORD_TYPES:
         rid = (action.get("result") or {}).get("record_id", (action.get("target") or {}).get("id", "auto"))
         line += f" - id {rid}: {(action.get('resources') or {}).get('definition', '?')}"
@@ -2041,6 +2275,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_record(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "ui":
             return _build_ui(action, manifest, manifest_data, dry_run=dry_run)
+        if kind == "database":
+            return _build_database(action, manifest, manifest_data, force=force, dry_run=dry_run)
         raise click.ClickException(
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
@@ -2078,6 +2314,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                 res = _record_result(result)   # the id is decided against the live table too
             elif kind == "ui":
                 res = {k: v for k, v in result.items() if k not in ("id", "type", "registered")}
+            elif kind == "database":
+                res = _database_result(result, action.get("result"))
             else:
                 res = _plan_result(action)
             res["targets"] = [n for n in ("pivot", "dir", "hd") if n in built]
@@ -2236,6 +2474,11 @@ def _project_dat_rels(manifest_data: dict, target: str | None = None) -> tuple[l
             # The shared menu table plus the name/help tables the build edited.
             rels += [_rom_rel(res.get("dat") or "ROM/118/114.DAT")]
             rels += [_rom_rel(s) for s in res.get("strings") or []]
+        elif typ == "database":
+            # The item DATs / string tables whose records it changed, in each target.
+            for tname, recs in (res.get("roots") or {}).items():
+                if target is None or tname == target:
+                    rels += [_rom_rel(e["dat"]) for e in recs if e.get("dat")]
         elif res.get("dat"):
             rels.append(_rom_rel(res["dat"]))
         if typ == "mount":
@@ -2500,7 +2743,8 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
         click.echo("Aborted — nothing changed.")
         return
 
-    removed = cleared = 0
+    removed = cleared = restored = 0
+    db_left: list[str] = []         # database fields left as they are (changed since the build)
     menu_err: dict = {}             # id(action) -> {root name: label}: restores that failed (kept, retried)
 
     def undo_menu_in(action: dict, rname: str, root, warns: list) -> int:
@@ -2521,6 +2765,7 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
     for name in built:
         root = _target_root(name)
         menu_left = []
+        here = 0
         for action in live:
             if name not in _action_targets(action):
                 continue   # never built here: whatever this folder holds at those paths is not ours
@@ -2564,9 +2809,29 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
                             f"  ⚠ {res['dat']} in {name} was edited in place and is left as it is: "
                             f"restore it from its .base, or rebuild the project without {action.get('id')}",
                             fg="yellow"))
-        click.echo(f"  ✓ {name}: DATs deleted + table entries cleared")
+            if action.get("type") == "database":
+                # Each record back to what it held before the build (field by field; a field
+                # something else changed since is left, and said).
+                from xi.database import xi_build as DB
+                n, warns = DB.undo(action, root, name)
+                here += n
+                db_left.extend(warns)
+        restored += here
+        click.echo(f"  ✓ {name}: DATs deleted + table entries cleared"
+                   + (f", {here} record{'s' if here != 1 else ''} put back" if here else ""))
+        for w in db_left:
+            click.echo(click.style(f"  ⚠ database: {w}", fg="yellow"))
+        db_left.clear()
         for w in menu_left:
             click.echo(click.style(f"  ⚠ menu: {w}", fg="yellow"))
+
+    # A database action's proposed SQL goes with it.
+    for action in live:
+        sql = (action.get("result") or {}).get("sql") if action.get("type") == "database" else None
+        if sql:
+            from xi.database import xi_build as DB
+            if DB.remove_sql_section(Path(sql), action["id"]):
+                click.echo(f"  ✓ removed {action['id']}'s SQL from {sql}")
 
     # The menu records an earlier undo couldn't put back.
     for name in [n for n in ("pivot", "dir", "hd")
@@ -2716,9 +2981,10 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
                                    "one (what's already gone is skipped)", fg="yellow"))
 
     tail = "" if kept else f", removed {manifest_path.name}"
+    put_back = f", put back {restored} record{'s' if restored != 1 else ''}" if restored else ""
     click.echo(click.style(
         f"\n✓ Undone. Deleted {removed} DAT{'s' if removed != 1 else ''}, "
-        f"cleared {cleared} table entr{'ies' if cleared != 1 else 'y'}{tail}.", fg="green"))
+        f"cleared {cleared} table entr{'ies' if cleared != 1 else 'y'}{put_back}{tail}.", fg="green"))
     if left and not keep_json:
         what = " and ".join(left)
         verb = "is" if len(left) == 1 else "are"
@@ -2767,6 +3033,26 @@ def _print_placements(results: list[dict], title: str) -> None:
                     click.echo(f"       {line}")
         elif kind == "ui":
             click.echo(f"{head}: {r.get('registered')} -> {r.get('output')}")
+        elif kind == "database":
+            recs = r.get("records") or []
+            where = ", ".join(r.get("files") or []) or "no DAT changes"
+            click.echo(f"{head}: {len(recs)} record{'s' if len(recs) != 1 else ''} -> {where}")
+            for e in recs:
+                name = f" \"{e['name']}\"" if e.get("name") else ""
+                tag = "  (new, copied from its like)" if e.get("created") else ""
+                click.echo(f"     - {e['table']} {e['id']}{name} [{e['lang']}] {e['dat']} block {e['block']}{tag}")
+                for key, ch in (e.get("changed") or {}).items():
+                    if key == "icon":
+                        click.echo(f"         icon -> {ch['to']}")
+                    else:
+                        click.echo(f"         {key}: {_short(ch['from'])} -> {_short(ch['to'])}")
+            for w in r.get("warnings") or []:
+                click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
+            if r.get("server"):
+                click.echo(f"     server (proposed, not run): {r['server']}")
+            if r.get("sql"):
+                for line in r["sql"].splitlines():
+                    click.echo(f"       {line}")
         elif kind == "ability":
             files = r.get("placements", [])
             click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "
@@ -2851,7 +3137,14 @@ def _existing_project_names() -> list[str]:
     d = Path("projects")
     if not d.is_dir():
         return []
-    return sorted({p.stem for p in d.glob("*.json")})
+    return sorted({p.stem for p in d.glob("*.json") if not _is_include_file(p)})
+
+
+def _is_include_file(path: Path) -> bool:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("schema") == INCLUDE_SCHEMA
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def _prompt_project_name() -> str:
@@ -3947,17 +4240,19 @@ def new_cmd(project: str | None, pivot: bool = False):
         "Ability (recipe from the Ability Mixer / xi ability recipe)": "ability",
         "Spell menu record (a new spell id: name, help, MP, levels)": "spell",
         "Command menu record (a new job ability / weapon skill id)": "command",
+        "Database records (edit or add items, key items, titles, …)": "database",
     }[_choose("What type of content is being added?",
               ["Gear", "Mounts", "Entity (NPC / Monster / Object)",
                "NPC (costume: race + gear + weapons)",
                "Ability (recipe from the Ability Mixer / xi ability recipe)",
                "Spell menu record (a new spell id: name, help, MP, levels)",
-               "Command menu record (a new job ability / weapon skill id)"])]
+               "Command menu record (a new job ability / weapon skill id)",
+               "Database records (edit or add items, key items, titles, …)"])]
     # The baked NPC is placed at a custom entity model id, so it needs the entity tables.
     # Abilities take retail-range ids (job-ability / spell bands, weapon-skill dummies),
     # so the tables need no expansion.
     ready_key = "entity" if ctype == "npc" else ctype
-    if ctype not in ("ability", *RECORD_TYPES) and not ready.get(ready_key, True):
+    if ctype not in ("ability", "database", *RECORD_TYPES) and not ready.get(ready_key, True):
         hint = {"gear": "Run `xi ftable expand gear` (expands the FTABLE and patches "
                         "FFXiMain.dll)",
                 "entity": "Run `xi ftable expand entity`",
@@ -3991,12 +4286,14 @@ def new_cmd(project: str | None, pivot: bool = False):
             new_actions = [_wizard_ability(slug, prev, manifest_path, manifest)]
         elif ctype in RECORD_TYPES:
             new_actions = [_wizard_record(ctype, slug, prev, manifest_path, manifest)]
+        elif ctype == "database":
+            new_actions = [_wizard_database(slug, prev, pivot)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 
     by_id = {a.get("id"): a for a in manifest.get("actions", [])}
     for action in new_actions:
-        if action.get("type") not in ("ability", *RECORD_TYPES):
+        if action.get("type") not in ("ability", "database", *RECORD_TYPES):
             # Allocated deterministically from the definition; abilities and menu
             # records are decided by the build against the live tables instead.
             action["result"] = _plan_result(action)  # record the allocation inline (same as build)

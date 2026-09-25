@@ -1,0 +1,957 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/database.json",
+  "title": "xi dats database action",
+  "description": "Edits to the client's record tables — the tables the model viewer's Database shows (items by category, key items, titles, quests, spell and ability text, …) — each addressed by table and id, with an optional proposed SQL change for the item's server rows. Only the fields an edit names change. Works on legacy (0xC00) and retail (0x1400) item DATs alike: the build finds the record's DAT, English and Japanese, detects its format and patches the copy the client loads.",
+  "allOf": [
+    {
+      "$ref": "common.json#/$defs/baseAction"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "type",
+    "edits"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "common.json#/$defs/actionId"
+    },
+    "type": {
+      "type": "string",
+      "const": "database"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "description": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/actionId"
+      },
+      "uniqueItems": true
+    },
+    "edits": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/edit"
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The proposed SQL for the edits' server rows. It is written, never run.",
+      "properties": {
+        "emit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write the SQL file at all."
+        },
+        "mirror": {
+          "type": "boolean",
+          "default": true,
+          "description": "Carry the fields both sides hold into the SQL: flags and stack (item_basic), level, itemLevel (ilevel), superiorLevel (su_level), jobs, slots (slot) and shieldSize (item_equipment), damage (dmg), delay and skill (item_weapon). A column an edit's `server` block names wins over the mirrored value."
+        },
+        "sql": {
+          "type": "string",
+          "pattern": "\\.sql$",
+          "description": "Where the SQL goes, relative to the file holding this action. Default: the project's name with .sql, next to the project file (projects/abyssea.json -> projects/abyssea.sql)."
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Recorded by dats build: per build target (dir, pivot), every record it wrote with each changed field's value before and after — what a rebuild starts from and undo puts back.",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sql": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "table": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "lang": {
+                  "type": "string",
+                  "enum": [
+                    "en",
+                    "jp"
+                  ]
+                },
+                "dat": {
+                  "$ref": "common.json#/$defs/romPath"
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "legacy",
+                    "retail"
+                  ]
+                },
+                "block": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "name": {
+                  "type": "string"
+                },
+                "created": {
+                  "type": "boolean"
+                },
+                "before_block": {
+                  "type": "string",
+                  "description": "A created item record: the slot's bytes before (base64)."
+                },
+                "sha1": {
+                  "type": "string"
+                },
+                "changed": {
+                  "type": "object",
+                  "description": "field -> {from, to}"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {
+      "$ref": "common.json#/$defs/outputTree"
+    }
+  },
+  "$defs": {
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "table",
+        "id"
+      ],
+      "properties": {
+        "table": {
+          "type": "string",
+          "description": "The viewer's table key (ui/js/database.js, xi.mv.xi_database). Item tables: general, usable, puppet, armor, weapons, maze, monst1, items7, roeObj, items6, gil. d_msg tables: the quest (q_*) and mission (m_*) logs, keyitems, titles, jobs, spells, spellHelp, abilities, abilityHelp, bluHelp, status, mounts, mountHelp, monsterFamilies, slots, augments, merits, jobPoints, jobGifts, soulplates, trust, emoteHelp, chatHelp, mazeRunes, headings, servers.",
+          "enum": [
+            "general",
+            "usable",
+            "puppet",
+            "armor",
+            "weapons",
+            "maze",
+            "monst1",
+            "items7",
+            "roeObj",
+            "items6",
+            "gil",
+            "q_sandoria",
+            "q_bastok",
+            "q_windurst",
+            "q_jeuno",
+            "q_other",
+            "q_toau",
+            "q_wotg",
+            "q_abyssea",
+            "q_assault",
+            "q_campaign",
+            "q_adoulin",
+            "q_coalition",
+            "m_sandoria",
+            "m_bastok",
+            "m_windurst",
+            "m_zilart",
+            "m_cop",
+            "m_toau",
+            "m_wotg",
+            "m_acp",
+            "m_amk",
+            "m_asa",
+            "m_adoulin",
+            "m_rov",
+            "keyitems",
+            "titles",
+            "jobs",
+            "spells",
+            "spellHelp",
+            "abilities",
+            "abilityHelp",
+            "bluHelp",
+            "status",
+            "mounts",
+            "mountHelp",
+            "monsterFamilies",
+            "slots",
+            "augments",
+            "merits",
+            "jobPoints",
+            "jobGifts",
+            "soulplates",
+            "trust",
+            "emoteHelp",
+            "chatHelp",
+            "mazeRunes",
+            "headings",
+            "servers"
+          ]
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Item tables: the item id; the id decides which DAT of the table holds it (armor 10240-16383 -> ROM/118/109, 23040-28671 -> ROM/286/73). d_msg tables: the row index, except where each row carries its own id (keyitems, the q_* and m_* logs), where it is that id."
+        },
+        "like": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Create the record: copy record `like` of the same table into the empty slot `id`, then apply this edit. The proposed SQL copies the donor's server rows the same way."
+        },
+        "note": {
+          "type": "string",
+          "description": "Why — kept in the changelog."
+        },
+        "set": {
+          "$ref": "#/$defs/set"
+        },
+        "strings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "en": {
+              "$ref": "#/$defs/strings"
+            },
+            "jp": {
+              "$ref": "#/$defs/strings"
+            }
+          }
+        },
+        "icon": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "from"
+          ],
+          "description": "Item tables only: the 32x32 icon, copied from another item.",
+          "properties": {
+            "from": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Item id whose icon to copy."
+            }
+          }
+        },
+        "server": {
+          "description": "Item tables only: the item's server rows, or false to leave the server out of this edit (no mirroring either).",
+          "oneOf": [
+            {
+              "type": "boolean",
+              "const": false
+            },
+            {
+              "$ref": "#/$defs/serverRows"
+            }
+          ]
+        }
+      }
+    },
+    "set": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Record header fields, by the viewer's names. Which ones a table has depends on its layout: every item table has flags, stack, type, resourceId and targets; armor and weapons add level, slots, races, jobs, superiorLevel, maxCharges, castTime, useDelay, reuseDelay and itemLevel; armor adds shieldSize; weapons add damage, delay, dps, skill, jugSize and baseItemId; usable has castTime; puppet has puppetSlot and elementCharge; monst1 has level, races and instinctCost.",
+      "properties": {
+        "flags": {
+          "$ref": "#/$defs/flags"
+        },
+        "stack": {
+          "$ref": "#/$defs/u16"
+        },
+        "type": {
+          "$ref": "#/$defs/u16",
+          "description": "Item type (1 item, 4 weapon, 5 armor, 7 usable, 10 furnishing, …)."
+        },
+        "resourceId": {
+          "$ref": "#/$defs/u16"
+        },
+        "targets": {
+          "$ref": "#/$defs/u16"
+        },
+        "level": {
+          "$ref": "#/$defs/u16"
+        },
+        "slots": {
+          "$ref": "#/$defs/slots"
+        },
+        "races": {
+          "$ref": "#/$defs/races"
+        },
+        "jobs": {
+          "$ref": "#/$defs/jobs"
+        },
+        "superiorLevel": {
+          "$ref": "#/$defs/u16"
+        },
+        "shieldSize": {
+          "$ref": "#/$defs/u16"
+        },
+        "maxCharges": {
+          "$ref": "#/$defs/u16"
+        },
+        "castTime": {
+          "$ref": "#/$defs/u16"
+        },
+        "useDelay": {
+          "$ref": "#/$defs/u16"
+        },
+        "reuseDelay": {
+          "$ref": "#/$defs/u16"
+        },
+        "itemLevel": {
+          "$ref": "#/$defs/u16"
+        },
+        "damage": {
+          "$ref": "#/$defs/u16"
+        },
+        "delay": {
+          "$ref": "#/$defs/u16"
+        },
+        "dps": {
+          "$ref": "#/$defs/u16",
+          "description": "Damage x 6000 / delay; the build derives it when damage or delay changes and dps isn't given."
+        },
+        "skill": {
+          "$ref": "#/$defs/skill"
+        },
+        "jugSize": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "baseItemId": {
+          "$ref": "#/$defs/u16"
+        },
+        "puppetSlot": {
+          "$ref": "#/$defs/u16"
+        },
+        "elementCharge": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "instinctCost": {
+          "$ref": "#/$defs/u16"
+        }
+      }
+    },
+    "strings": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The record's sub-strings, by the viewer's names. Items: name, article, logName, logPlural, description in English; name and description in Japanese. d_msg tables name theirs per table (quests: name, description; key items: name, plural, description, category; spell help: name, help; …). A sub-string not named is kept byte for byte. Text is written as the client shows it with \\n for a line break; {Fire} {Ice} {Wind} {Earth} {Lightning} {Water} {Light} {Dark} are the element icons, {at:xxxxxxxx} an auto-translate phrase and {x:hh} a byte cp932 can't show (the changelog shows record text the same way).",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/text"
+        },
+        "article": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "description": "0 a, 1 an, 2 a pair of, 3 a suit of."
+        },
+        "logName": {
+          "$ref": "#/$defs/text"
+        },
+        "logPlural": {
+          "$ref": "#/$defs/text"
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "plural": {
+          "$ref": "#/$defs/text"
+        },
+        "help": {
+          "$ref": "#/$defs/text"
+        },
+        "adjective": {
+          "$ref": "#/$defs/text"
+        },
+        "text": {
+          "$ref": "#/$defs/text"
+        },
+        "format": {
+          "$ref": "#/$defs/text"
+        },
+        "category": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keyItem": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "text": {
+      "description": "The new text, or {\"replace\": {old: new}} to change part of the record's original text (the rest, element icons included, stays as it is).",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "replace"
+          ],
+          "properties": {
+            "replace": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "serverRows": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Columns of the item's rows in the server tables, by the server's own names. item_mods changes only the mods it names (null removes one); item_mods_pet and item_latents list the item's complete set and replace what the server has.",
+      "properties": {
+        "item_basic": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "subid": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "sortname": {
+              "type": "string"
+            },
+            "type": {
+              "type": "integer"
+            },
+            "stackSize": {
+              "type": "integer"
+            },
+            "flags": {
+              "$ref": "#/$defs/flags"
+            },
+            "aH": {
+              "type": "integer"
+            },
+            "BaseSell": {
+              "type": "integer"
+            }
+          }
+        },
+        "item_equipment": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "level": {
+              "type": "integer"
+            },
+            "ilevel": {
+              "type": "integer"
+            },
+            "jobs": {
+              "$ref": "#/$defs/jobs"
+            },
+            "MId": {
+              "description": "Gear model id, or the gear action whose recorded model id to use.",
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4095
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "gear"
+                  ],
+                  "properties": {
+                    "gear": {
+                      "$ref": "common.json#/$defs/actionId"
+                    }
+                  }
+                }
+              ]
+            },
+            "shieldSize": {
+              "type": "integer"
+            },
+            "scriptType": {
+              "type": "integer"
+            },
+            "slot": {
+              "$ref": "#/$defs/slots"
+            },
+            "rslot": {
+              "$ref": "#/$defs/slots"
+            },
+            "rslotlook": {
+              "type": "integer"
+            },
+            "su_level": {
+              "type": "integer"
+            }
+          }
+        },
+        "item_weapon": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "skill": {
+              "$ref": "#/$defs/skill"
+            },
+            "subskill": {
+              "type": "integer"
+            },
+            "ilvl_skill": {
+              "type": "integer"
+            },
+            "ilvl_parry": {
+              "type": "integer"
+            },
+            "ilvl_macc": {
+              "type": "integer"
+            },
+            "dmgType": {
+              "type": "integer"
+            },
+            "hit": {
+              "type": "integer"
+            },
+            "delay": {
+              "type": "integer"
+            },
+            "dmg": {
+              "type": "integer"
+            },
+            "unlock_points": {
+              "type": "integer"
+            }
+          }
+        },
+        "item_mods": {
+          "type": "object",
+          "description": "Mod name (xi.mod, the server's scripts/enum/mod.lua) -> value, or null to remove that mod. Mods not named stay as they are.",
+          "additionalProperties": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "item_mods_pet": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mod",
+              "value"
+            ],
+            "properties": {
+              "mod": {
+                "$ref": "#/$defs/modName"
+              },
+              "value": {
+                "type": "integer"
+              },
+              "petType": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "item_latents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mod",
+              "value",
+              "latentId"
+            ],
+            "properties": {
+              "mod": {
+                "$ref": "#/$defs/modName"
+              },
+              "value": {
+                "type": "integer"
+              },
+              "latentId": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "latentParam": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "item_usable": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "validTargets": {
+              "type": "integer"
+            },
+            "activation": {
+              "type": "integer"
+            },
+            "animation": {
+              "type": "integer"
+            },
+            "animationTime": {
+              "type": "integer"
+            },
+            "maxCharges": {
+              "type": "integer"
+            },
+            "useDelay": {
+              "type": "integer"
+            },
+            "reuseDelay": {
+              "type": "integer"
+            },
+            "aoe": {
+              "type": "integer"
+            }
+          }
+        },
+        "item_furnishing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "storage": {
+              "type": "integer"
+            },
+            "moghancement": {
+              "type": "integer"
+            },
+            "element": {
+              "type": "integer"
+            },
+            "aura": {
+              "type": "integer"
+            }
+          }
+        },
+        "item_info": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "CatsEyeXI's item_info (modules sql/custom): the icon to borrow and a description, for the website.",
+          "properties": {
+            "icon": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "desc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "u16": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "modName": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "jobName": {
+      "type": "string",
+      "enum": [
+        "WAR",
+        "MNK",
+        "WHM",
+        "BLM",
+        "RDM",
+        "THF",
+        "PLD",
+        "DRK",
+        "BST",
+        "BRD",
+        "RNG",
+        "SAM",
+        "NIN",
+        "DRG",
+        "SMN",
+        "BLU",
+        "COR",
+        "PUP",
+        "DNC",
+        "SCH",
+        "GEO",
+        "RUN"
+      ]
+    },
+    "jobs": {
+      "description": "Job names, or \"all\". The DAT stores WAR at bit 1, the server at bit 0; the build encodes each side.",
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "all"
+        },
+        {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/jobName"
+          }
+        }
+      ]
+    },
+    "races": {
+      "description": "Race names, or \"all\" (DAT bits 1-8).",
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "all"
+        },
+        {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "HUME_M",
+              "HUME_F",
+              "ELVAAN_M",
+              "ELVAAN_F",
+              "TARU_M",
+              "TARU_F",
+              "MITHRA",
+              "GALKA"
+            ]
+          }
+        }
+      ]
+    },
+    "slots": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Equipment slots (bit 0 MAIN … bit 15 BACK, the same bits in the DAT and item_equipment.slot).",
+      "items": {
+        "type": "string",
+        "enum": [
+          "MAIN",
+          "SUB",
+          "RANGED",
+          "AMMO",
+          "HEAD",
+          "BODY",
+          "HANDS",
+          "LEGS",
+          "FEET",
+          "NECK",
+          "WAIST",
+          "EAR1",
+          "EAR2",
+          "RING1",
+          "RING2",
+          "BACK"
+        ]
+      }
+    },
+    "flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Item flags: the server's ITEM_FLAG names (src/map/items/item.h), the same bits in the DAT and item_basic.flags.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "WALLHANGING",
+          "UNKNOWN_01",
+          "MYSTERY_BOX",
+          "MOG_GARDEN",
+          "MAIL2ACCOUNT",
+          "INSCRIBABLE",
+          "NOAUCTION",
+          "SCROLL",
+          "LINKSHELL",
+          "CANUSE",
+          "CANTRADENPC",
+          "CANEQUIP",
+          "NOSALE",
+          "NODELIVERY",
+          "EX",
+          "RARE"
+        ]
+      }
+    },
+    "skill": {
+      "description": "Weapon skill: a name, or its number for one without a name here.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "NONE",
+            "HAND_TO_HAND",
+            "DAGGER",
+            "SWORD",
+            "GREAT_SWORD",
+            "AXE",
+            "GREAT_AXE",
+            "SCYTHE",
+            "POLEARM",
+            "KATANA",
+            "GREAT_KATANA",
+            "CLUB",
+            "STAFF",
+            "ARCHERY",
+            "MARKSMANSHIP",
+            "THROWING",
+            "STRING_INSTRUMENT",
+            "WIND_INSTRUMENT",
+            "HANDBELL",
+            "FISHING"
+          ]
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "id": "database.gear_tweaks",
+      "type": "database",
+      "description": "Decennial Coat +1 at level 50, Scorpion Harness at HP+30, a new earring copied from Moonshade Earring and a key item reworded.",
+      "server": {
+        "emit": true,
+        "mirror": true
+      },
+      "edits": [
+        {
+          "table": "armor",
+          "id": 10253,
+          "note": "Level 50 coat",
+          "set": {
+            "level": 50
+          }
+        },
+        {
+          "table": "armor",
+          "id": 12579,
+          "note": "HP+15 -> HP+30",
+          "strings": {
+            "en": {
+              "description": {
+                "replace": {
+                  "HP+15": "HP+30"
+                }
+              }
+            }
+          },
+          "server": {
+            "item_mods": {
+              "HP": 30
+            }
+          }
+        },
+        {
+          "table": "armor",
+          "id": 10294,
+          "like": 11697,
+          "set": {
+            "level": 75,
+            "flags": [
+              "RARE",
+              "EX",
+              "CANEQUIP"
+            ],
+            "races": "all"
+          },
+          "strings": {
+            "en": {
+              "name": "Abyssal Earring",
+              "article": 1,
+              "logName": "abyssal earring",
+              "logPlural": "abyssal earrings",
+              "description": "Accuracy+5 Attack+5"
+            },
+            "jp": {
+              "name": "アビサルピアス",
+              "description": "命中+5 攻+5"
+            }
+          },
+          "icon": {
+            "from": 11697
+          },
+          "server": {
+            "item_mods": {
+              "ACC": 5,
+              "ATT": 5
+            }
+          }
+        },
+        {
+          "table": "keyitems",
+          "id": 1,
+          "strings": {
+            "en": {
+              "description": "A report on the morale of the Galka working the Zeruhn Mines."
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

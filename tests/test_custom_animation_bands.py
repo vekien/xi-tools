@@ -26,7 +26,7 @@ def no_bands(monkeypatch):
 def bands(monkeypatch, no_bands):
     monkeypatch.setattr(cfg, "FX_SPELL_BAND_FIRST", 1612)
     monkeypatch.setattr(cfg, "FX_SPELL_BAND_BASE", 423_152)
-    monkeypatch.setattr(cfg, "FX_JA_BAND_FIRST", 500)
+    monkeypatch.setattr(cfg, "FX_JA_BAND_FIRST", 1024)
     monkeypatch.setattr(cfg, "FX_JA_BAND_BASE", 427_248)
     monkeypatch.setattr(cfg, "FX_WS_BAND_FIRST", 272)
     monkeypatch.setattr(cfg, "FX_WS_BAND_BASE", 431_344)
@@ -44,13 +44,14 @@ def test_without_a_band_nothing_changes(no_bands):
 def test_below_the_threshold_keeps_the_retail_arithmetic(bands):
     assert ap.file_id_for("spell", 1611) == SPELL_RETAIL_BASE + 1611
     assert ap.file_id_for("ja", 499) == JA_RETAIL_BASE + 499
+    assert ap.file_id_for("ja", 600) == JA_RETAIL_BASE + 600      # a scripted teleport: retail, always
 
 
 def test_at_and_above_the_threshold_lands_in_the_band(bands):
     # the number is added whole; the threshold picks the arithmetic, it is not part of it
     assert ap.file_id_for("spell", 1612) == 423_152 + 1612
     assert ap.file_id_for("spell", 4095) == 423_152 + 4095
-    assert ap.file_id_for("ja", 500) == 427_248 + 500
+    assert ap.file_id_for("ja", 1024) == 427_248 + 1024
     assert ap.file_id_for("ja", 4095) == 427_248 + 4095
 
 
@@ -69,7 +70,7 @@ def test_the_band_is_where_the_client_looks(bands):
 def test_the_picker_reaches_into_the_band(bands, no_bands_needed=None):
     cands = ap._candidates("ja")
     assert cands.start == ap.JA_CUSTOM_FIRST
-    assert 500 in cands and 4095 in cands
+    assert 1024 in cands and 4095 in cands
 
 
 def test_the_picker_stops_at_the_end_of_the_number_space(bands):
@@ -77,6 +78,14 @@ def test_the_picker_stops_at_the_end_of_the_number_space(bands):
     # a number that cannot reach the client
     assert 4096 not in ap._candidates("ja")
     assert 4096 not in ap._candidates("spell")
+
+
+def test_the_picker_never_hands_out_the_gap_below_the_band(bands, monkeypatch, tmp_path):
+    # 500..1023 stay on retail arithmetic, where the client keeps its warp and
+    # teleport effects (category 6, animation 600). With the retail custom range
+    # full, the next free job-ability number is the band's first, not 500.
+    monkeypatch.setattr(ap, "_placement", lambda root, fid: "taken" if fid < 427_248 else None)
+    assert ap._pick_animation(tmp_path, "ja", None, False) == 1024
 
 
 def test_a_band_never_overlaps_the_retail_ids_it_replaces(bands):

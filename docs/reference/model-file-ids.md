@@ -129,7 +129,8 @@ Retail gear resolution uses the per-`(race, slot)` group tables embedded in
 `FFXiMain.dll` (ported into `src/xi/gear/xi_core.py`). xi injects **custom**
 gear by allocating a windowed custom file_id per `(race, slot)` *above* the
 entity region — so custom gear lives at file_id `128,240+`, never in the retail
-gear range. See [../ftable/expand.md](../ftable/expand.md).
+gear range. See [../ftable/expand.md](../ftable/expand.md), and
+[../gear/model_ids.md](../gear/model_ids.md) for the window formula and retail ceilings.
 
 ---
 

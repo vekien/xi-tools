@@ -1,0 +1,544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/zone_export.json",
+  "title": "xi zone export JSON",
+  "description": "What `xi zone export --json` writes as <stem>.zone.json beside the model (xi.zone.xi_export.export_zone_json): the zone DAT's meshes, textures and named 0x1C placements, its directory tree, weather and sound references, the companion event/dialog/NPC DATs, and each sub-area's DAT with that DAT's own placements. `--zero-coords` (which implies --json) adds fbx_zero_coords. music and weather.weights come from the server database (XI_DB_*) and are {} when it can't be reached. Not the `xi dats` zone action, which is zone.json. See docs/zone/export.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "dat", "zone_id", "zone_name", "mesh_count", "placement_count", "directories", "meshes",
+               "sky_meshes", "textures", "placements", "music", "weather", "sound_fx", "companion_dats", "sub_areas",
+               "collision"],
+  "properties": {
+    "schema": {"type": "string", "const": "xi.zone-export.v1"},
+    "dat": {"type": "string", "minLength": 1, "description": "The zone DAT as the export resolved it, usually the absolute path under FFXI_DIR. With --base the data was read from the pristine copy; this still names the DAT."},
+    "zone_id": {"type": ["integer", "null"], "minimum": 0, "description": "The zone's id from the zone list (`xi zone list`); null when the DAT is no listed zone's (a copy outside the install, a prototype)."},
+    "zone_name": {"type": ["string", "null"], "description": "The zone's name from the zone list; null with zone_id."},
+    "mesh_count": {"type": "integer", "minimum": 0, "description": "The length of meshes (sky meshes not counted)."},
+    "placement_count": {"type": "integer", "minimum": 0, "description": "The length of placements (the zone's own; a sub-area's are not counted)."},
+    "directories": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "description": "Every directory of the DAT's 0x01/0x00 tree, slash-joined from the root (t_ju, t_ju/weat/suny/indo), each once, in file order."
+    },
+    "meshes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/mesh"},
+      "description": "Every 0x2E mesh section with geometry that isn't sky, in file order. A name can repeat: the DAT holds a section per copy."
+    },
+    "sky_meshes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/mesh"},
+      "description": "The skybox and celestial meshes (sun, moon, stars, clouds, birds): the ones --no-sky leaves out."
+    },
+    "textures": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Every 0x20 texture section's name, each once, in file order: 16 characters as stored, padding kept, usually an 8-character namespace and the local name ('model   ju_w01c ')."
+    },
+    "placements": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/placement"},
+      "description": "Every named record of the zone's 0x1C ZoneDef, in record order."
+    },
+    "music": {"$ref": "#/$defs/music"},
+    "weather": {"$ref": "#/$defs/weather"},
+    "sound_fx": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/soundFx"},
+      "description": "Every 0x3D SeSep sound reference outside weat/ (footsteps, doors, fountains), in file order."
+    },
+    "companion_dats": {"$ref": "#/$defs/companions"},
+    "sub_areas": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/subArea"},
+      "description": "The zone's sub-areas (the shop interiors, Ru'Aun Gardens' islands), in id order. See docs/zone/subareas.md."
+    },
+    "collision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present"],
+      "properties": {
+        "present": {"type": "boolean", "description": "The DAT has a 0x1C ZoneDef section, which holds the player-collision mesh `--collision` writes."}
+      }
+    },
+    "fbx_zero_coords": {"$ref": "#/$defs/zeroCoords"}
+  },
+  "$defs": {
+    "vec3": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+    "datLink": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{8}$",
+      "description": "A 4-byte DatId link, its bytes in file order as 8 lowercase hex digits (5f367433 is the id `_6t3`); null when zero."
+    },
+    "romPathOrNull": {
+      "anyOf": [{"$ref": "common.json#/$defs/romPath"}, {"type": "null"}],
+      "description": "null when the file tables don't register the file id."
+    },
+    "spwFile": {"type": "string", "pattern": "^se[0-9]{6,}\\.spw$", "description": "The sound's file name: se + the 6-digit id + .spw."},
+    "spwPath": {"type": "string", "pattern": "^se/se[0-9]{3,}/se[0-9]{6,}\\.spw$", "description": "The sound's path under a sound root's win/."},
+    "mesh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "textures", "alpha_blend", "alpha_test", "double_sided"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "description": "The mesh id placements name it by."},
+        "textures": {"type": "array", "items": {"type": "string"}, "description": "The textures its primitives name, sorted, each once."},
+        "alpha_blend": {"type": "boolean", "description": "Some primitive is alpha-blended."},
+        "alpha_test": {"type": "boolean", "description": "Some primitive is alpha-tested."},
+        "double_sided": {"type": "boolean", "description": "Some primitive is double-sided."}
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One 0x64-byte ZoneObject record (xi.zone.xi_objects._read_record; the layout is in docs/zone/format.md). FFXI world space: Y is down, 1 unit = 1 yalm.",
+      "required": ["index", "name", "pos", "rot", "scale", "lod", "flags", "skip_decal", "effect_link", "culling_table_link",
+                   "environment_link", "file_id_link", "point_lights", "tags"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0, "description": "The record's position in the 0x1C array. Unnamed records are left out, so indices can skip."},
+        "name": {"type": "string", "minLength": 1, "maxLength": 16, "description": "The mesh id it places (+0x00)."},
+        "pos": {"$ref": "#/$defs/vec3", "description": "+0x10 position."},
+        "rot": {"$ref": "#/$defs/vec3", "description": "+0x1C rotation, radians, applied rotateZYX."},
+        "scale": {"$ref": "#/$defs/vec3", "description": "+0x28 scale."},
+        "lod": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["high", "mid", "low"],
+          "description": "Distances (+0x38, +0x3C, +0x40); see docs/zone/lod-draw-distance.md.",
+          "properties": {
+            "high": {"type": "number", "description": "The high-detail mesh draws under this distance."},
+            "mid": {"type": "number", "description": "The mid-detail mesh draws under this distance."},
+            "low": {"type": "number", "description": "Draw distance: nothing draws past it. 0 is no limit; exactly 1 marks collision-only geometry the client never draws."}
+          }
+        },
+        "flags": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"type": "integer", "minimum": 0, "maximum": 255},
+          "description": "The four flag bytes at +0x44."
+        },
+        "skip_decal": {"type": "boolean", "description": "flags[1] & 0x2: left out of the decal pass."},
+        "effect_link": {"$ref": "#/$defs/datLink", "description": "+0x34 particle/effect link."},
+        "culling_table_link": {"type": ["integer", "null"], "minimum": 1, "maximum": 4294967295, "description": "+0x48: the culling table's file offset; null when zero."},
+        "environment_link": {"$ref": "#/$defs/datLink", "description": "+0x4C environment link."},
+        "file_id_link": {"type": ["integer", "null"], "minimum": 1, "maximum": 4294967295, "description": "+0x50: the sub-area (sub_areas[].id) this record stands in for, drawn until the camera enters it; null for an ordinary placement."},
+        "point_lights": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {"type": "integer", "minimum": 0},
+          "description": "The point lights it takes, 0-based: the set ones of the four +0x54 slots."
+        },
+        "tags": {"type": "array", "items": {"type": "string"}, "description": "Empty here; `xi zone object list` fills it."}
+      }
+    },
+    "music": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The zone's BGM from the server's zone_settings (music_day, music_night, battlesolo, battlemulti): all four keys, or {} without a database, zone_id or row.",
+      "dependentRequired": {"day": ["night", "battle_solo", "battle_party"], "night": ["day"], "battle_solo": ["day"], "battle_party": ["day"]},
+      "properties": {
+        "day": {"$ref": "#/$defs/musicTrack"},
+        "night": {"$ref": "#/$defs/musicTrack"},
+        "battle_solo": {"$ref": "#/$defs/musicTrack"},
+        "battle_party": {"$ref": "#/$defs/musicTrack"}
+      }
+    },
+    "musicTrack": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["id", "title"],
+      "description": "null when the column is 0 (no track).",
+      "properties": {
+        "id": {"type": "integer", "minimum": 1, "description": "The music id."},
+        "title": {"type": ["string", "null"], "description": "The song's title (MusicInfo.xml); null when it has none."}
+      }
+    },
+    "weather": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["types", "ambient_sounds", "weights"],
+      "properties": {
+        "types": {"type": "array", "items": {"type": "string"}, "description": "The weather directories under weat/, 4-character DAT tags (suny, mist, fine, clod), in file order."},
+        "ambient_sounds": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ambientSound"},
+          "description": "Every 0x3D SeSep sound reference under weat/, in file order."
+        },
+        "weights": {"$ref": "#/$defs/weatherWeights"}
+      }
+    },
+    "ambientSound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["weather", "indoors", "time", "sound_id", "file", "spw_path", "title", "category"],
+      "properties": {
+        "weather": {"type": ["string", "null"], "description": "The weather directory it sits in (a weather.types tag); null directly under weat/."},
+        "indoors": {"type": "boolean", "description": "It sits in a directory below the weather's (indo): the indoor variant."},
+        "time": {"type": ["string", "null"], "description": "The section's name when it is all digits (a time slot as hhmm, 0000, 0600); null otherwise."},
+        "sound_id": {"type": "integer", "minimum": 0},
+        "file": {"$ref": "#/$defs/spwFile"},
+        "spw_path": {"$ref": "#/$defs/spwPath"},
+        "title": {"type": ["string", "null"], "description": "The effect's name where one is known; null otherwise."},
+        "category": {"type": ["string", "null"], "description": "Its sound folder's label; null when the folder has none."}
+      }
+    },
+    "weatherWeights": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How often the server rolls each weather, decoded from its zone_weather row: both keys, or {} without a database, zone_id or row.",
+      "dependentRequired": {"total_days": ["weights"], "weights": ["total_days"]},
+      "properties": {
+        "total_days": {"type": "integer", "minimum": 0, "description": "Vana'diel days in the cycle (2160)."},
+        "weights": {"type": "array", "items": {"$ref": "#/$defs/weatherWeight"}, "description": "One entry per weather id the cycle rolls, in id order."}
+      }
+    },
+    "weatherWeight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "tag", "in_dat", "normal_days", "common_days", "rare_days"],
+      "properties": {
+        "id": {"type": "integer", "minimum": 0, "maximum": 31, "description": "The server's weather id (0 none, 1 sunshine … 19 darkness)."},
+        "name": {"type": "string", "description": "Its name (Sunshine, Clouds); Unknown(<id>) past 19."},
+        "tag": {"type": ["string", "null"], "description": "Its 4-character DAT tag (suny, clod); null for id 0 and unknown ids."},
+        "in_dat": {"type": "boolean", "description": "tag is one of weather.types: the zone has that weather's audio."},
+        "normal_days": {"type": "integer", "minimum": 0, "description": "Days it is the normal roll (taken 50% of the time)."},
+        "common_days": {"type": "integer", "minimum": 0, "description": "Days it is the common roll (35%)."},
+        "rare_days": {"type": "integer", "minimum": 0, "description": "Days it is the rare roll (15%)."}
+      }
+    },
+    "soundFx": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dir", "section", "sound_id", "file", "spw_path", "title", "category"],
+      "properties": {
+        "dir": {"type": "string", "description": "The directory it sits in, as in directories; '' at the root."},
+        "section": {"type": "string", "description": "The 0x3D section's name."},
+        "sound_id": {"type": "integer", "minimum": 0},
+        "file": {"$ref": "#/$defs/spwFile"},
+        "spw_path": {"$ref": "#/$defs/spwPath"},
+        "title": {"type": ["string", "null"], "description": "The effect's name where one is known; null otherwise."},
+        "category": {"type": ["string", "null"], "description": "Its sound folder's label; null when the folder has none."}
+      }
+    },
+    "companions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The zone's event, dialog and NPC DATs, from the file ids zone_id gives: all three keys, or {} without zone_id.",
+      "dependentRequired": {"event": ["dialog", "npc"], "dialog": ["event"], "npc": ["event"]},
+      "properties": {
+        "event": {"$ref": "#/$defs/romPathOrNull"},
+        "dialog": {"$ref": "#/$defs/romPathOrNull"},
+        "npc": {"$ref": "#/$defs/romPathOrNull"}
+      }
+    },
+    "subArea": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "file_id", "dat"],
+      "properties": {
+        "id": {"type": "integer", "minimum": 0, "description": "The sub-area id (the 0x36 section's volumes). A zone placement whose file_id_link is this id is its stand-in."},
+        "file_id": {"type": "integer", "minimum": 0, "description": "The file id the client loads the sub-area's DAT by."},
+        "dat": {"$ref": "#/$defs/romPathOrNull"},
+        "placements": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/placement"},
+          "description": "The sub-area DAT's own named records, in the zone's world space, in record order: from the DAT --sub-areas exported, else the live one. Absent when dat is null or the DAT can't be read."
+        }
+      }
+    },
+    "zeroCoords": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame", "files"],
+      "description": "Written with --zero-coords (and --fbx): every FBX imports at 0,0,0 with no rotation, and this says where each goes back. See docs/zone/export.md, Zero coords.",
+      "properties": {
+        "frame": {"type": "string", "description": "The frame every number here is in: the FBX as Blender imports it (Z-up, right-handed, 1 unit = 1 FFXI unit), where FFXI (x, y, z) is (-x, -z, -y), or (x, -z, y) with --raw."},
+        "files": {"type": "array", "items": {"$ref": "#/$defs/zeroFile"}, "description": "One entry per FBX the export wrote."}
+      }
+    },
+    "zeroFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "kind", "offset"],
+      "description": "A zone file has no sub_area, mesh or instances; a sub_area file has sub_area; an object file has mesh and instances, and sub_area when it is one of that sub-area's objects.",
+      "properties": {
+        "file": {"type": "string", "pattern": "^.+\\.fbx$", "description": "The FBX, relative to the .zone.json's folder, forward slashes: 41.fbx, 41_454.fbx, lamp2.fbx, 41_454/lamp2.fbx."},
+        "kind": {"type": "string", "enum": ["zone", "sub_area", "object"]},
+        "sub_area": {"type": "integer", "minimum": 0, "description": "The sub-area id (sub_areas[].id)."},
+        "mesh": {"type": "string", "minLength": 1, "description": "An object file's mesh name."},
+        "offset": {"$ref": "#/$defs/vec3", "description": "How far the file was moved to put the centre of its base on the origin. A zone or sub_area file placed at its offset is back where the game has it."},
+        "instances": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/zeroInstance"},
+          "description": "An object file's placements: one per record that places its mesh, or one with no placement for a mesh the zone never places (drawn once at the origin)."
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "zone"}}},
+         "then": {"not": {"anyOf": [{"required": ["sub_area"]}, {"required": ["mesh"]}, {"required": ["instances"]}]}}},
+        {"if": {"properties": {"kind": {"const": "sub_area"}}},
+         "then": {"required": ["sub_area"], "not": {"anyOf": [{"required": ["mesh"]}, {"required": ["instances"]}]}}},
+        {"if": {"properties": {"kind": {"const": "object"}}},
+         "then": {"required": ["mesh", "instances"]}}
+      ]
+    },
+    "zeroInstance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix", "location", "rotation", "scale"],
+      "description": "The object's full transform, its file's offset included, given twice: as a matrix and as location / rotation / scale.",
+      "properties": {
+        "placement": {"type": "integer", "minimum": 0, "description": "The record's index in placements, or in its sub-area's placements. Absent for a mesh the zone never places."},
+        "matrix": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+          "description": "Row-major 4x4; the last row is [0, 0, 0, 1]."
+        },
+        "location": {"$ref": "#/$defs/vec3"},
+        "rotation": {"$ref": "#/$defs/vec3", "description": "XYZ Euler, degrees, Blender's order."},
+        "scale": {"$ref": "#/$defs/vec3", "description": "Negative X on a mirrored placement."},
+        "mirrored": {"type": "boolean", "const": true, "description": "Present on a mirrored placement (a negative determinant)."}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.zone-export.v1",
+      "dat": "D:\\cexi\\catseyexi-client\\Game\\FINAL FANTASY XI\\ROM\\1\\41.DAT",
+      "zone_id": 245,
+      "zone_name": "Lower Jeuno",
+      "mesh_count": 2,
+      "placement_count": 4,
+      "directories": [
+        "t_ju",
+        "t_ju/ev01",
+        "t_ju/fses",
+        "t_ju/weat",
+        "t_ju/weat/suny",
+        "t_ju/weat/suny/indo",
+        "t_ju/door",
+        "t_ju/door/_6t3"
+      ],
+      "meshes": [
+        {
+          "name": "sphere",
+          "textures": ["obj     tama"],
+          "alpha_blend": false,
+          "alpha_test": false,
+          "double_sided": false
+        },
+        {
+          "name": "lowsea",
+          "textures": ["sea     sea01"],
+          "alpha_blend": false,
+          "alpha_test": false,
+          "double_sided": false
+        }
+      ],
+      "sky_meshes": [
+        {"name": "sunsphere", "textures": [], "alpha_blend": false, "alpha_test": false, "double_sided": false},
+        {
+          "name": "suny_a01",
+          "textures": ["suny    suny_a01"],
+          "alpha_blend": true,
+          "alpha_test": false,
+          "double_sided": false
+        }
+      ],
+      "textures": ["suny    suny_a01", "obj     tama    ", "sea     sea01   ", "model   ju_w01c "],
+      "placements": [
+        {
+          "index": 0,
+          "name": "block03",
+          "pos": [-11.069757461547852, 1.9999999949504854e-06, -6.6994709968566895],
+          "rot": [3.141596555709839, 1.0471988916397095, 3.141596555709839],
+          "scale": [1.0, 1.0, 1.0],
+          "lod": {"high": 10.0, "mid": 100.0, "low": 1000.0},
+          "flags": [0, 0, 0, 1],
+          "skip_decal": false,
+          "effect_link": null,
+          "culling_table_link": 73736,
+          "environment_link": null,
+          "file_id_link": null,
+          "point_lights": [],
+          "tags": []
+        },
+        {
+          "index": 9,
+          "name": "step01",
+          "pos": [11.930249214172363, -9.999999974752427e-07, 33.13768768310547],
+          "rot": [3.141596555709839, 1.0471988916397095, 3.141596555709839],
+          "scale": [1.0, 1.0, 1.0],
+          "lod": {"high": 10.0, "mid": 100.0, "low": 1000.0},
+          "flags": [0, 0, 2, 1],
+          "skip_decal": false,
+          "effect_link": null,
+          "culling_table_link": null,
+          "environment_link": "65763031",
+          "file_id_link": null,
+          "point_lights": [0, 1, 2],
+          "tags": []
+        },
+        {
+          "index": 197,
+          "name": "door01",
+          "pos": [-68.07637786865234, -0.10000099986791611, -129.447509765625],
+          "rot": [3.141596555709839, 1.0471988916397095, 3.141596555709839],
+          "scale": [1.0, 1.0, 1.0],
+          "lod": {"high": 10.0, "mid": 100.0, "low": 100.0},
+          "flags": [0, 2, 1, 1],
+          "skip_decal": true,
+          "effect_link": "5f367433",
+          "culling_table_link": null,
+          "environment_link": null,
+          "file_id_link": null,
+          "point_lights": [],
+          "tags": []
+        },
+        {
+          "index": 379,
+          "name": "r_choko",
+          "pos": [-88.35577392578125, -0.09900200366973877, -199.3674774169922],
+          "rot": [3.141596555709839, 1.0471988916397095, 3.141596555709839],
+          "scale": [1.0, 1.0, 1.0],
+          "lod": {"high": 10.0, "mid": 100.0, "low": 80.0},
+          "flags": [0, 0, 1, 1],
+          "skip_decal": false,
+          "effect_link": null,
+          "culling_table_link": 76764,
+          "environment_link": "65763032",
+          "file_id_link": 454,
+          "point_lights": [],
+          "tags": []
+        }
+      ],
+      "music": {},
+      "weather": {
+        "types": ["suny", "mist", "fine", "clod"],
+        "ambient_sounds": [
+          {
+            "weather": "suny",
+            "indoors": false,
+            "time": "0000",
+            "sound_id": 1090,
+            "file": "se001090.spw",
+            "spw_path": "se/se001/se001090.spw",
+            "title": null,
+            "category": "Ambient Sounds - Wind"
+          },
+          {
+            "weather": "suny",
+            "indoors": true,
+            "time": "2109",
+            "sound_id": 2109,
+            "file": "se002109.spw",
+            "spw_path": "se/se002/se002109.spw",
+            "title": null,
+            "category": "Ambient Sounds - Environment"
+          },
+          {
+            "weather": "suny",
+            "indoors": true,
+            "time": "1091",
+            "sound_id": 1091,
+            "file": "se001091.spw",
+            "spw_path": "se/se001/se001091.spw",
+            "title": null,
+            "category": "Ambient Sounds - Wind"
+          }
+        ],
+        "weights": {}
+      },
+      "sound_fx": [
+        {
+          "dir": "t_ju/fses",
+          "section": "0111",
+          "sound_id": 100001,
+          "file": "se100001.spw",
+          "spw_path": "se/se100/se100001.spw",
+          "title": null,
+          "category": "Footstep Effects (Specific Race/Gear/?)"
+        },
+        {
+          "dir": "t_ju/fses",
+          "section": "07b1",
+          "sound_id": 128001,
+          "file": "se128001.spw",
+          "spw_path": "se/se128/se128001.spw",
+          "title": "Insect Buzz",
+          "category": "Movement Sounds"
+        }
+      ],
+      "companion_dats": {"event": "ROM/21/54.DAT", "dialog": "ROM/25/54.DAT", "npc": "ROM/27/54.DAT"},
+      "sub_areas": [
+        {
+          "id": 454,
+          "file_id": 554,
+          "dat": "ROM/2/86.DAT",
+          "placements": [
+            {
+              "index": 0,
+              "name": "ren_barrel02",
+              "pos": [-81.42223358154297, -0.10000000149011612, -191.2665252685547],
+              "rot": [3.141597032546997, 5.061460018157959, 3.141597032546997],
+              "scale": [1.0, 1.0, 1.0],
+              "lod": {"high": 10.0, "mid": 100.0, "low": 0.0},
+              "flags": [0, 0, 2, 1],
+              "skip_decal": false,
+              "effect_link": null,
+              "culling_table_link": null,
+              "environment_link": "65763130",
+              "file_id_link": null,
+              "point_lights": [0],
+              "tags": []
+            },
+            {
+              "index": 1,
+              "name": "ren_barrel02",
+              "pos": [-82.40062713623047, -0.10000000149011612, -196.2315216064453],
+              "rot": [0.0, 5.585060119628906, 0.0],
+              "scale": [1.0, 1.0, 1.0],
+              "lod": {"high": 10.0, "mid": 100.0, "low": 0.0},
+              "flags": [0, 0, 2, 1],
+              "skip_decal": false,
+              "effect_link": null,
+              "culling_table_link": null,
+              "environment_link": "65763130",
+              "file_id_link": null,
+              "point_lights": [0],
+              "tags": []
+            }
+          ]
+        },
+        {
+          "id": 455,
+          "file_id": 555,
+          "dat": "ROM/2/87.DAT",
+          "placements": [
+            {
+              "index": 0,
+              "name": "ju302wall01a_1",
+              "pos": [21.26235580444336, -0.10000000149011612, -9.200636863708496],
+              "rot": [3.141597032546997, 1.0471988916397095, 3.141597032546997],
+              "scale": [1.0, 1.0, 1.0],
+              "lod": {"high": 10.0, "mid": 100.0, "low": 1000.0},
+              "flags": [0, 0, 2, 1],
+              "skip_decal": false,
+              "effect_link": null,
+              "culling_table_link": null,
+              "environment_link": "65763130",
+              "file_id_link": null,
+              "point_lights": [0, 1],
+              "tags": []
+            }
+          ]
+        }
+      ],
+      "collision": {"present": true}
+    }
+  ]
+}

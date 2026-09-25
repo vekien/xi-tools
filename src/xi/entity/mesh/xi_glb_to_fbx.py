@@ -8,6 +8,9 @@ then re-exports geometry + materials as FBX with absolute texture paths.
 
 A 4th argument of ``1`` also bakes the GLB's skeletal animation into the FBX. Off by
 default because a mesh export carries no clips, and baking none still costs a pass.
+
+An 11th argument of ``1`` is ``--zero-coords`` (see ``_zero_coords``): it prints the
+offset it subtracted as ``XI_ZERO_OFFSET x y z``.
 """
 
 import math
@@ -18,7 +21,7 @@ import sys
 import bpy
 import bmesh
 from collections import defaultdict
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 
 def _weld_within_materials(dist: float) -> None:
@@ -424,6 +427,63 @@ def _alpha_split_export(fbx_out: str, angle_rad: float, offset: float, tol: floa
     _export_selection(alpha_objs + empties, _alpha_out_path(fbx_out), colors_type)
 
 
+def _zero_coords() -> Vector:
+    """``--zero-coords``: every object imports at location 0, rotation 0, scale 1.
+
+    Bakes each object's world transform into its data — the ``ffxi_root_correction``
+    orientation fix and, in a zone, every placement — and drops the empties that held
+    them. A skinned mesh is re-parented to its armature, both now identity. Then, unless
+    the file is rigged, the geometry moves so the centre of its base (bounds centre in
+    X/Y, lowest Z) sits on the origin; a rigged model keeps its skeleton root there,
+    which is already the origin, rather than sliding off it by its pose's bounds.
+
+    Returns the offset subtracted, in Blender's frame: placing the imported file at it
+    puts the geometry back where it was."""
+    objs = [o for o in bpy.data.objects if o.type in ("MESH", "ARMATURE")]
+    offset = Vector((0.0, 0.0, 0.0))
+    if not objs:
+        return offset
+    rigged = {o: o.parent for o in objs if o.parent is not None and o.parent.type == "ARMATURE"}
+    for o in objs:
+        if o.parent is not None:
+            mw = o.matrix_world.copy()
+            o.parent = None
+            o.matrix_world = mw
+        # A zone instances one mesh at many placements, and each placement needs the
+        # geometry baked at its own transform. (transform_apply's isolate_users does
+        # not do this from a background run; it aborts on the first shared mesh.)
+        if o.type == "MESH" and o.data.users > 1:
+            o.data = o.data.copy()
+    bpy.context.view_layer.update()
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    for o, arm in rigged.items():
+        o.parent = arm
+    for o in [o for o in bpy.data.objects if o.type == "EMPTY"]:
+        bpy.data.objects.remove(o, do_unlink=True)
+
+    meshes = [o.data for o in objs if o.type == "MESH" and o.data.vertices]
+    if any(o.type == "ARMATURE" for o in objs) or not meshes:
+        return offset
+    import numpy as np
+    lo = np.full(3, np.inf)
+    hi = np.full(3, -np.inf)
+    for me in meshes:
+        co = np.empty(len(me.vertices) * 3, dtype=np.float64)
+        me.vertices.foreach_get("co", co)
+        co = co.reshape(-1, 3)
+        lo = np.minimum(lo, co.min(axis=0))
+        hi = np.maximum(hi, co.max(axis=0))
+    offset = Vector(((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, lo[2]))
+    shift = Matrix.Translation(-offset)
+    for me in set(meshes):
+        me.transform(shift)
+    return offset
+
+
 def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1:]
     glb_in, fbx_out, tex_dir = argv[0], argv[1], argv[2]
@@ -438,6 +498,7 @@ def main() -> None:
     # 0.5. 'LINEAR' writes the values untouched — zone export --vertex-color raw
     # (--unreal) needs that so the engine material's *2 lands neutral at 1.0.
     colors_type = argv[9] if len(argv) > 9 and argv[9] in ("SRGB", "LINEAR") else "SRGB"
+    zero_coords = len(argv) > 10 and argv[10] == "1"
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
@@ -504,6 +565,11 @@ def main() -> None:
     if alpha_split:
         _alpha_split_export(fbx_out, smooth_angle, decal_offset, weld_tol, colors_type)
         return
+
+    if zero_coords:
+        offset = _zero_coords()
+        # Read back by convert_glb_to_fbx_zeroed, for the zone JSON.
+        print(f"XI_ZERO_OFFSET {offset.x!r} {offset.y!r} {offset.z!r}")
 
     bpy.ops.export_scene.fbx(
         filepath=fbx_out,

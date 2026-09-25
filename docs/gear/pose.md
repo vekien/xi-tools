@@ -105,6 +105,7 @@ Three ways to say who the character is — pick whichever you already have:
 | `--all-frames` | embed the whole clip as an animation instead of freezing one frame, so the export plays in a DCC. With `--fbx` the motion is baked into the FBX too |
 | `--pose-file F` | bake joint world transforms a viewer has already evaluated, instead of resolving `--anim`. See **Baked poses** below |
 | `--fbx` | also write a texture-embedded `.fbx` via Blender |
+| `--zero-coords` | with `--fbx`, the armature and mesh import at location 0,0,0 with no rotation (the orientation fix baked in, the skeleton root still the origin). An `--all-frames` clip plays as before |
 | `--keep-hidden` | **skip** occlusion culling — merge every piece, covered skin and all |
 | `-o DIR` / `--name` | output directory (default `exports/gear/pose/<name>/`) and file stem |
 | `--alpha-scale` `--mesh-merge-dp` `--weld/--no-weld` `--split-tex` | same meanings as `xi mesh export` |

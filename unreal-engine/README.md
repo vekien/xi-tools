@@ -68,6 +68,7 @@ uv run xi zone export ROM/0/124 --unreal --no-sky --no-vfx --output D:/exports/g
 | `--unreal` | The Unreal preset. It gives you `--fbx` plus the following. **Right-handed:** the layout comes out right way up and un-mirrored, and mirrored placements are baked into their own `~mir` meshes. **Opaque:** solid surfaces are `OPAQUE`, each paired with a 24-bit `_opaque.png` twin, so UE doesn't wire texture alpha into them and punch holes in floors. **Raw vertex colours:** the untouched DAT colours and vertex alpha, written to the FBX as linear, not sRGB. **Duplicate removal:** hidden duplicate opaque triangles are dropped. |
 | `--no-sky` | Leaves the skybox dome out. Use Unreal's own sky (UDS, SkyAtmosphere, …). |
 | `--no-vfx` | Leaves out effect meshes and meshes with no placement. The export can't position effect-placed meshes, so without this they pile up at the world origin. |
+| `--zero-coords` (optional) | For placing pieces yourself, with `--sub-areas` and/or `--objects`: every FBX comes in at 0,0,0 with no rotation, and `<stem>.zone.json` says where each goes back (per object, every placement's transform). The setup script still works: it reads the `.glb`, which isn't moved. See [zone export › Zero coords](../docs/zone/export.md#zero-coords---zero-coords). |
 
 What to leave **off**:
 

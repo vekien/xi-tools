@@ -25,6 +25,7 @@ from xi.entity.mesh.xi_export import (
     compute_min_max_vec3,
     convert_glb_to_fbx,
     convert_glb_to_fbx_alpha_split,
+    convert_glb_to_fbx_zeroed,
     pack_indices,
     pack_vec2,
     pack_vec3,
@@ -1301,11 +1302,94 @@ def _sub_area_textures(meshes: Dict[str, List[ZonePrimitive]], own: Dict[str, Te
     return merged
 
 
+# --zero-coords records where each FBX goes back in the frame the FBX imports in
+# (Blender: Z-up, right-handed, 1 unit = 1 FFXI unit). Both zone root corrections
+# come to (x, y, z) -> (-x, -y, z) in glTF, and the glTF importer turns glTF
+# (x, y, z) into Blender (x, -z, y), so FFXI (x, y, z) lands at (-x, -z, -y); a
+# --raw export has no correction, only the importer's axis swap.
+_FFXI_TO_FBX = ((-1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, -1.0, 0.0))
+_FFXI_TO_FBX_RAW = ((1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0))
+
+
+def _mat3_mul(a, b):
+    return tuple(tuple(sum(a[r][k] * b[k][c] for k in range(3)) for c in range(3)) for r in range(3))
+
+
+def _placement_to_fbx(plc: Optional[Placement], offset, raw: bool) -> dict:
+    """The transform that puts a --zero-coords object FBX (moved by -offset) at one
+    placement, in the FBX's frame: C·M·Cᵀ·translate(offset), C being FFXI -> FBX.
+    Given as a row-major 4x4 plus location / XYZ Euler rotation (degrees, Blender's
+    order) / scale. A mirrored placement (negative determinant) puts the sign on X.
+    ``plc`` None is a mesh the zone never places, drawn at the origin."""
+    c = _FFXI_TO_FBX_RAW if raw else _FFXI_TO_FBX
+    ct = tuple(zip(*c))
+    if plc is None:
+        m3, t = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)), (0.0, 0.0, 0.0)
+    else:
+        cm = trs_matrix(plc.position, plc.rotation, plc.scale)   # column-major
+        m3 = tuple(tuple(cm[col * 4 + row] for col in range(3)) for row in range(3))
+        t = tuple(cm[12:15])
+    lin = _mat3_mul(_mat3_mul(c, m3), ct)
+    ct_t = tuple(sum(c[r][k] * t[k] for k in range(3)) for r in range(3))
+    loc = tuple(ct_t[r] + sum(lin[r][k] * offset[k] for k in range(3)) for r in range(3))
+    cols = [tuple(lin[r][i] for r in range(3)) for i in range(3)]
+    scale = [math.sqrt(sum(v * v for v in col)) for col in cols]
+    det = (lin[0][0] * (lin[1][1] * lin[2][2] - lin[1][2] * lin[2][1])
+           - lin[0][1] * (lin[1][0] * lin[2][2] - lin[1][2] * lin[2][0])
+           + lin[0][2] * (lin[1][0] * lin[2][1] - lin[1][1] * lin[2][0]))
+    if det < 0:
+        scale[0] = -scale[0]
+    rm = [[lin[r][i] / scale[i] if scale[i] else 0.0 for i in range(3)] for r in range(3)]
+    # Blender's XYZ Euler: R = Rz(z) · Ry(y) · Rx(x).
+    sy = max(-1.0, min(1.0, -rm[2][0]))
+    ry = math.asin(sy)
+    if abs(math.cos(ry)) > 1e-6:
+        rx, rz = math.atan2(rm[2][1], rm[2][2]), math.atan2(rm[1][0], rm[0][0])
+    else:   # gimbal lock: fold Z into X
+        s = 1.0 if sy > 0 else -1.0
+        rx, rz = math.atan2(s * rm[0][1], s * rm[0][2]), 0.0
+    matrix = [[*lin[r], loc[r]] for r in range(3)] + [[0.0, 0.0, 0.0, 1.0]]
+    out = {"matrix": [[round(v, 6) for v in row] for row in matrix],
+           "location": [round(v, 6) for v in loc],
+           "rotation": [round(math.degrees(a), 4) for a in (rx, ry, rz)],
+           "scale": [round(v, 6) for v in scale]}
+    if plc is not None:
+        out = {"placement": plc.index, **out}
+    if det < 0:
+        out["mirrored"] = True
+    return out
+
+
+def _placement_records(data: bytearray, sections, table1: bytes) -> list:
+    """Every named 0x1C placement of a zone DAT (decrypted in place), as JSON records."""
+    from xi.zone.xi_objects import _read_record
+    out = []
+    for s in sections:
+        if s.type_code != SECTION_TYPE_ZONE_DEF:
+            continue
+        node_count = decrypt_zone_objects(data, s.data_start, s.start, s.size, table1)
+        for i in range(node_count):
+            rec = _read_record(data, s.data_start, i)
+            if rec['name']:
+                out.append(rec)
+        break
+    return out
+
+
 def export_zone_json(dat_path: Path, output_dir: Path,
-                     source: Optional[Path] = None) -> Path:
-    """Export zone metadata (placements, weather audio, companions, sub-areas) to JSON."""
+                     source: Optional[Path] = None,
+                     sub_area_sources: Optional[List[Tuple[int, Path]]] = None,
+                     zero_files: Optional[List[dict]] = None) -> Path:
+    """Export zone metadata (placements, weather audio, companions, sub-areas) to JSON.
+
+    Each sub-area carries its own DAT's placements, in the zone's world space like the
+    zone's (its stand-ins are the zone placements whose ``file_id_link`` is its id),
+    read from ``sub_area_sources`` when the export has them (--sub-areas), else from
+    the live sub-area DATs. ``zero_files`` (--zero-coords) is written as
+    ``fbx_zero_coords``: where each FBX goes back. The format is schema/zone_export.json
+    (xi.zone.xi_zone_json.validate_zone_json)."""
     import json as _json
-    from xi.zone.xi_objects import _read_record, OBJ_ARRAY, REC_SIZE
+    from xi.zone.xi_zone_json import ZONE_JSON_SCHEMA
 
     src = source or dat_path
     data = bytearray(src.read_bytes())
@@ -1339,16 +1423,7 @@ def export_zone_json(dat_path: Path, output_dir: Path,
             mesh_info.append(entry)
 
     # --- placements ---
-    placements = []
-    for s in sections:
-        if s.type_code != SECTION_TYPE_ZONE_DEF:
-            continue
-        node_count = decrypt_zone_objects(data, s.data_start, s.start, s.size, table1)
-        for i in range(node_count):
-            rec = _read_record(data, s.data_start, i)
-            if rec['name']:
-                placements.append(rec)
-        break
+    placements = _placement_records(data, sections, table1)
 
     # --- textures ---
     texture_names = []
@@ -1373,11 +1448,22 @@ def export_zone_json(dat_path: Path, output_dir: Path,
 
     # --- sub-areas ---
     sub_areas = _subarea_list(bytes(data))
+    sub_paths = dict(sub_area_sources if sub_area_sources is not None else sub_area_dats(src))
+    for sa in sub_areas:
+        path = sub_paths.get(sa['id'])
+        if path is None:
+            continue
+        try:
+            sub_data = bytearray(Path(path).read_bytes())
+            sa['placements'] = _placement_records(sub_data, parse_sections(sub_data), table1)
+        except Exception as e:   # a bad sub-area DAT costs its placements, not the JSON
+            print(f"Note: sub-area {sa['id']} ({path}): placements not read ({e})")
 
     # --- collision presence ---
     has_collision = any(s.type_code == SECTION_TYPE_ZONE_DEF for s in sections)
 
     payload = {
+        'schema': ZONE_JSON_SCHEMA,
         'dat': str(dat_path),
         'zone_id': zone_id,
         'zone_name': zone_name,
@@ -1395,6 +1481,12 @@ def export_zone_json(dat_path: Path, output_dir: Path,
         'sub_areas': sub_areas,
         'collision': {'present': has_collision},
     }
+    if zero_files is not None:
+        payload['fbx_zero_coords'] = {
+            'frame': 'The FBX as Blender imports it: Z-up, right-handed, 1 unit = 1 FFXI unit. '
+                     'FFXI (x, y, z) is (-x, -z, -y) here ((x, -z, y) with --raw).',
+            'files': zero_files,
+        }
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / (dat_path.stem + '.zone.json')
@@ -1418,12 +1510,15 @@ def export_objects(dat_path: Path, output_dir: Path,
                    skip_sky: bool = False, drop_names: Optional[set] = None,
                    opaque_nonblend: bool = False, weld: bool = True,
                    mesh_merge_dp: int = 4, merge_distance: float = 0.0,
-                   vertex_color: str = "baked", dedupe_opaque: bool = False) -> List[Path]:
+                   vertex_color: str = "baked", dedupe_opaque: bool = False,
+                   zero_offsets: Optional[Dict[str, Tuple[Path, Tuple[float, float, float]]]] = None,
+                   ) -> List[Path]:
     """Export each unique zone mesh as its own ``<meshname>.glb`` (+ ``.fbx`` if
     ``fbx``) into ``output_dir``. Each object is emitted in local space at the
     origin (its raw geometry), oriented by the same ``ffxi_root_correction`` node
     as a full zone export. ``skip_sky`` / ``drop_names`` (from --no-sky / --no-vfx)
-    prune which meshes are written.
+    prune which meshes are written. Given ``zero_offsets`` (--zero-coords), each FBX
+    is zeroed (see convert_glb_to_fbx_zeroed) and ``name -> (fbx, offset)`` recorded.
 
     When ``fbx`` is set we MUST write the loose .png textures into ``output_dir``:
     convert_glb_to_fbx rewires the FBX's materials to PNG files sitting next to the
@@ -1448,8 +1543,14 @@ def export_objects(dat_path: Path, output_dir: Path,
         paths.append(out[0])
         if fbx:
             print(f"  [{i}/{len(names)}] {name} -> fbx")
-            paths.append(convert_glb_to_fbx(out[0], merge_distance=merge_distance,
-                                            linear_colors=(vertex_color == "raw")))
+            if zero_offsets is not None:
+                fbx_path, offset = convert_glb_to_fbx_zeroed(
+                    out[0], merge_distance=merge_distance, linear_colors=(vertex_color == "raw"))
+                zero_offsets[name] = (fbx_path, offset)
+                paths.append(fbx_path)
+            else:
+                paths.append(convert_glb_to_fbx(out[0], merge_distance=merge_distance,
+                                                linear_colors=(vertex_color == "raw")))
     return paths
 
 
@@ -1463,11 +1564,15 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                 mesh_merge_dp: int = 4, vertex_color: str = "baked",
                 alpha_split_mesh: bool = False, decal_offset: float = 0.00001,
                 decal_smooth_angle: float = 45.0, dedupe_opaque: bool = False,
-                sub_area_sources: Optional[List[Tuple[int, Path]]] = None) -> List[Path]:
+                sub_area_sources: Optional[List[Tuple[int, Path]]] = None,
+                zero_coords: bool = False) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
     # `sub_area_sources` (--sub-areas, see sub_area_dats): each sub-area DAT is also
-    # written as <stem>_<id>, and its stand-ins leave the main file.
+    # written as <stem>_<id> (with --objects, a <stem>_<id>/ folder of its objects),
+    # and its stand-ins leave the main file.
+    # `zero_coords` (--zero-coords): every FBX imports at 0,0,0 with no rotation, and
+    # the JSON (implied) records where each goes back — see convert_glb_to_fbx_zeroed.
     src = source or dat_path
     meshes_by_name, placements, textures = parse_zone(src)
     if not meshes_by_name:
@@ -1475,9 +1580,14 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
     if alpha_split_mesh and objects:
         raise ValueError("--alpha-split-mesh builds one combined base/decal pair and "
                          "can't be combined with --objects (per-mesh export).")
-    if sub_area_sources and objects:
-        raise ValueError("--sub-areas writes one file per sub-area and can't be combined "
-                         "with --objects (per-mesh export).")
+    if alpha_split_mesh and zero_coords:
+        raise ValueError("--zero-coords can't be combined with --alpha-split-mesh, whose "
+                         "base/decal pair is written by its own Blender pass.")
+    if zero_coords and not fbx:
+        print("Note: --zero-coords zeroes the FBX and needs --fbx; the .glb is unchanged.")
+        zero_coords = False
+    as_json = as_json or zero_coords
+    zero_files: List[dict] = []   # the JSON's fbx_zero_coords: where each FBX goes back
     subs = []
     taken = dict(textures)   # every texture key this export writes (see _sub_area_textures)
     for sub_id, sub_src in sub_area_sources or []:
@@ -1514,20 +1624,30 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
         return kept, drop
 
     placements, drop_names = _placed(meshes_by_name, placements, exported)
-    if objects:
-        # Per-object mode: one <meshname>.glb/.fbx per mesh straight into output_dir
-        # (alongside any --collision/--json), no combined zone glb. They share one set
-        # of loose .png textures in the folder so the per-object FBX materials resolve.
-        paths = export_objects(dat_path, output_dir, meshes_by_name, textures, fbx=fbx,
-                               raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
-                               skip_sky=skip_sky, drop_names=drop_names,
-                               opaque_nonblend=opaque_nonblend, weld=weld,
-                               mesh_merge_dp=mesh_merge_dp, merge_distance=merge_distance,
-                               vertex_color=vertex_color, dedupe_opaque=dedupe_opaque)
-        if as_json:
-            paths.append(export_zone_json(dat_path, output_dir, source=source))
-        return paths
-    def _model(meshes, plcs, texs, drop, stem=None):
+
+    def _objects(meshes, plcs, texs, drop, out_dir, sub_id=None):
+        # Per-object mode: one <meshname>.glb/.fbx per mesh, no combined zone glb. The
+        # objects in a folder share one set of loose .png textures so the per-object
+        # FBX materials resolve.
+        offsets = {} if zero_coords else None
+        out = export_objects(dat_path, out_dir, meshes, texs, fbx=fbx,
+                             raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
+                             skip_sky=skip_sky, drop_names=drop,
+                             opaque_nonblend=opaque_nonblend, weld=weld,
+                             mesh_merge_dp=mesh_merge_dp, merge_distance=merge_distance,
+                             vertex_color=vertex_color, dedupe_opaque=dedupe_opaque,
+                             zero_offsets=offsets)
+        for name, (fbx_path, offset) in (offsets or {}).items():
+            # build_glb draws a mesh the zone never places at the origin, once.
+            at = [p for p in plcs if resolve_mesh_name(p.mesh_id, meshes) == name] or [None]
+            zero_files.append({"file": fbx_path.relative_to(output_dir).as_posix(),
+                               "kind": "object", "mesh": name,
+                               **({"sub_area": sub_id} if sub_id is not None else {}),
+                               "offset": list(offset),
+                               "instances": [_placement_to_fbx(p, offset, raw) for p in at]})
+        return out
+
+    def _model(meshes, plcs, texs, drop, stem=None, sub_id=None):
         out = build_glb(dat_path, output_dir, meshes, plcs, texs,
                         skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                         drop_names=drop, opaque_nonblend=opaque_nonblend,
@@ -1542,18 +1662,37 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
             out.extend(fbx_paths)
             out.append(_write_ue5_mat_script(fbx_paths[0], vertex_color=vertex_color))
         elif fbx:
-            fbx_path = convert_glb_to_fbx(out[0], merge_distance=merge_distance,
-                                          linear_colors=(vertex_color == "raw"))
+            if zero_coords:
+                fbx_path, offset = convert_glb_to_fbx_zeroed(
+                    out[0], merge_distance=merge_distance, linear_colors=(vertex_color == "raw"))
+                zero_files.append({"file": fbx_path.name,
+                                   **({"kind": "sub_area", "sub_area": sub_id} if sub_id is not None
+                                      else {"kind": "zone"}),
+                                   "offset": list(offset)})
+            else:
+                fbx_path = convert_glb_to_fbx(out[0], merge_distance=merge_distance,
+                                              linear_colors=(vertex_color == "raw"))
             out.append(fbx_path)
             out.append(_write_ue5_mat_script(fbx_path, vertex_color=vertex_color))
         return out
 
-    paths = _model(meshes_by_name, placements, textures, drop_names)
+    # With --objects the zone's objects go straight into output_dir and each sub-area's
+    # into a <stem>_<id>/ folder of its own, so a mesh name a sub-area shares with the
+    # zone can't overwrite the zone's object.
+    if objects:
+        paths = _objects(meshes_by_name, placements, textures, drop_names, output_dir)
+    else:
+        paths = _model(meshes_by_name, placements, textures, drop_names)
     for i, (sub_id, sub_meshes, sub_placements, sub_textures) in enumerate(subs, 1):
         stem = f"{dat_path.stem}_{sub_id}"
-        print(f"  [{i}/{len(subs)}] sub-area {sub_id} -> {stem}")
         sub_kept, sub_drop = _placed(sub_meshes, sub_placements)
-        paths.extend(_model(sub_meshes, sub_kept, sub_textures, sub_drop, stem))
+        if objects:
+            print(f"  [{i}/{len(subs)}] sub-area {sub_id} -> {stem}/ (per object)")
+            paths.extend(_objects(sub_meshes, sub_kept, sub_textures, sub_drop,
+                                  output_dir / stem, sub_id))
+        else:
+            print(f"  [{i}/{len(subs)}] sub-area {sub_id} -> {stem}")
+            paths.extend(_model(sub_meshes, sub_kept, sub_textures, sub_drop, stem, sub_id))
     if collision:
         # The player-collision mesh lives in the 0x1C ZoneDef section, separate
         # from the visible 0x2E geometry. Emit it as <stem>.collision.obj in the
@@ -1566,7 +1705,9 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
             paths.append(obj_path.with_suffix(".mtl"))
             paths.append(json_path)
     if as_json:
-        paths.append(export_zone_json(dat_path, output_dir, source=source))
+        paths.append(export_zone_json(dat_path, output_dir, source=source,
+                                      sub_area_sources=sub_area_sources,
+                                      zero_files=zero_files if zero_coords else None))
     return paths
 
 
@@ -1577,7 +1718,7 @@ def main() -> int:
     parser.add_argument("--fbx", action="store_true", help="Also export a texture-embedded .fbx (for editors that can't open .glb, e.g. C4D)")
     parser.add_argument("--no-sky", dest="skip_sky", action="store_true", help="Omit the skybox/celestial chunks (sun, moon, stars, clouds)")
     parser.add_argument("--no-vfx", dest="no_vfx", action="store_true", help="Omit unplaced (non-world) meshes: effect-placed VFX (water jets, light glows, lcut/lightstp) + dead/unreferenced geometry (cyst, sh-u)")
-    parser.add_argument("--objects", dest="objects", action="store_true", help="Export each mesh as its own <meshname>.glb/.fbx into <stem>_objects/ (local space, at origin) instead of one combined zone file")
+    parser.add_argument("--objects", dest="objects", action="store_true", help="Export each mesh as its own <meshname>.glb/.fbx into the output folder (local space, at origin) instead of one combined zone file; with --sub-areas, each sub-area's into <stem>_<id>/")
     parser.add_argument("--raw", action="store_true", help="Omit the orientation-correction node (raw FFXI coords; view-only, do not re-import)")
     parser.add_argument("--right-handed", action="store_true", help="Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into geometry (engines drop negative node-scale -> un-mirrored, collidable) and flip winding to CCW-front so single-sided engines light the terrain top instead of culling it black")
     parser.add_argument("--unreal", action="store_true", help="Unreal preset: --right-handed + --opaque + --fbx + raw vertex colours (do the *2 in the UE material). An explicit --vertex-color still wins.")
@@ -1595,7 +1736,11 @@ def main() -> int:
     parser.add_argument("--no-subareas", dest="sub_areas", action="store_false", default=True,
                         help="Omit the sub-area stand-ins (+0x50 link): the low-detail placeholder drawn for each sub-area until you enter it (closed shop rooms; Ru'Aun's island platforms)")
     parser.add_argument("--sub-areas", dest="split_sub_areas", action="store_true",
-                        help="Also export each sub-area from its own DAT as <stem>_<id> beside the zone (Lower Jeuno ROM/1/41 -> 41_454 ... 41_466), leaving its stand-ins out of the main file")
+                        help="Also export each sub-area from its own DAT as <stem>_<id> beside the zone (Lower Jeuno ROM/1/41 -> 41_454 ... 41_466), leaving its stand-ins out of the main file; with --objects, a <stem>_<id>/ folder of its objects")
+    parser.add_argument("--zero-coords", "--zero-cords", dest="zero_coords", action="store_true",
+                        help="Every FBX imports at location 0,0,0 with no rotation: transforms baked into the "
+                             "geometry, each file moved so its base centre is on the origin. Implies --json, "
+                             "which records where each file goes back. Needs --fbx")
     parser.add_argument("--alpha-scale", type=float, default=DEFAULT_ALPHA_SCALE,
                         help="Multiply texture alpha by this factor before export, clamped to 255 "
                              "(default 2.0 = opaque texels become fully opaque, matching the game; "
@@ -1646,7 +1791,7 @@ def main() -> int:
                             vertex_color=vertex_color,
                             alpha_split_mesh=args.alpha_split_mesh, decal_offset=args.decal_offset,
                             decal_smooth_angle=args.decal_smooth_angle, dedupe_opaque=args.unreal,
-                            sub_area_sources=subs):
+                            sub_area_sources=subs, zero_coords=args.zero_coords):
         print(f"Exported: {path}")
     return 0
 
@@ -1675,9 +1820,10 @@ import click as _click  # noqa: E402
                     "isn't sky: effect-placed VFX (water jets, light glows, lcut/lightstp) and "
                     "dead/unreferenced geometry (cyst, sh-u). Only placed world geometry remains.")
 @_click.option("--objects", "objects", is_flag=True,
-               help="Export each mesh as its own <meshname>.glb (+ .fbx with --fbx) into a "
-                    "<stem>_objects/ folder, each in local space at the origin — instead of one "
-                    "combined zone file. Honors --no-sky/--no-vfx for which meshes are written.")
+               help="Export each mesh as its own <meshname>.glb (+ .fbx with --fbx) straight into "
+                    "the output folder, each in local space at the origin — instead of one "
+                    "combined zone file. Honors --no-sky/--no-vfx for which meshes are written. "
+                    "With --sub-areas, each sub-area's objects go in a <stem>_<id>/ folder.")
 @_click.option("--raw", is_flag=True,
                help="Omit the orientation-correction node — raw FFXI coords (view-only; a raw export is not meant to be re-imported)")
 @_click.option("--right-handed", "right_handed", is_flag=True,
@@ -1731,8 +1877,15 @@ import click as _click  # noqa: E402
                     "zone, <id> being the sub-area id: Lower Jeuno ROM/1/41 gives 41.glb plus 41_454 "
                     "... 41_466. The main file leaves out the stand-ins those sub-areas replace, so the "
                     "zone and its sub-area files line up as the game shows them from inside each one. "
-                    "Geometry only (--collision/--json stay on the main zone); can't be combined with "
-                    "--objects.")
+                    "Geometry only (--collision/--json stay on the main zone). With --objects, each "
+                    "sub-area is a <stem>_<id>/ folder of its objects instead of one file.")
+@_click.option("--zero-coords", "--zero-cords", "zero_coords", is_flag=True, default=False,
+               help="Every FBX imports at location 0,0,0 with no rotation, for placing by hand or from "
+                    "the JSON: each object's transform (the orientation fix, every placement) is baked "
+                    "into its geometry, then the file is moved so the centre of its base is on the "
+                    "origin — the zone, each --sub-areas file and each --objects file on its own. "
+                    "Implies --json, whose fbx_zero_coords records where every file goes back (and, "
+                    "per object, each placement's transform). Needs --fbx; the .glb is unchanged.")
 @_click.option("--alpha-scale", type=float, default=DEFAULT_ALPHA_SCALE, show_default=True,
                help="Multiply texture alpha by this factor before export, clamped to 255. FFXI stores "
                     "alpha at half scale (0x80 = opaque), so the default 2.0 makes opaque texels fully "
@@ -1776,7 +1929,7 @@ import click as _click  # noqa: E402
 def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects: bool, raw: bool, right_handed: bool,
         unreal: bool, vertex_color, use_base: bool,
         collision: bool, as_json: bool, collision_proxies: bool, far_lod: bool, sub_areas: bool,
-        split_sub_areas: bool, alpha_scale: float,
+        split_sub_areas: bool, zero_coords: bool, alpha_scale: float,
         opaque_nonblend: bool, weld: bool, weld_seams: bool, mesh_merge_dp: int,
         alpha_split_mesh: bool, decal_offset: float, decal_smooth_angle: float):
     """Export a zone's static mesh + textures to a self-contained .glb.
@@ -1831,11 +1984,12 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
                             vertex_color=vertex_color,
                             alpha_split_mesh=alpha_split_mesh, decal_offset=decal_offset,
                             decal_smooth_angle=decal_smooth_angle, dedupe_opaque=unreal,
-                            sub_area_sources=subs)
+                            sub_area_sources=subs, zero_coords=zero_coords)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:
-        _click.echo(f"Exported {len([p for p in paths if p.suffix == '.glb'])} objects to {output_dir}")
+        where = f"{output_dir} (sub-areas in <stem>_<id> folders)" if subs else output_dir
+        _click.echo(f"Exported {len([p for p in paths if p.suffix == '.glb'])} objects to {where}")
     for path in paths:
         _click.echo(f"Exported: {path}")
     if unreal:
@@ -1845,6 +1999,9 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
         _click.echo("(exported from the pristine original)")
     if raw:
         _click.echo("(raw: no orientation correction — view-only, do not re-import this model)")
+    if zero_coords and fbx:
+        _click.echo("(zero-coords: every FBX sits at 0,0,0 with no rotation; the .zone.json's "
+                    "fbx_zero_coords says where each goes back)")
 
 
 # ---------------------------------------------------------------------------

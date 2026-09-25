@@ -23,22 +23,28 @@
     },
     "actions": {
       "type": "array",
-      "items": {
-        "oneOf": [
-          {"$ref": "zone.json"},
-          {"$ref": "mount.json"},
-          {"$ref": "gear.json"},
-          {"$ref": "mesh.json"},
-          {"$ref": "anim.json"},
-          {"$ref": "audio.json"},
-          {"$ref": "tex.json"},
-          {"$ref": "ui.json"},
-          {"$ref": "event.json"},
-          {"$ref": "ability.json"},
-          {"$ref": "spell.json"},
-          {"$ref": "command.json"}
-        ]
-      }
+      "items": {"$ref": "#/$defs/entry"}
+    }
+  },
+  "$defs": {
+    "entry": {
+      "description": "One action, or an include (a string path) whose file's actions are spliced in at this spot. Shared with include.json.",
+      "oneOf": [
+        {"$ref": "common.json#/$defs/includePath"},
+        {"$ref": "zone.json"},
+        {"$ref": "mount.json"},
+        {"$ref": "gear.json"},
+        {"$ref": "mesh.json"},
+        {"$ref": "anim.json"},
+        {"$ref": "audio.json"},
+        {"$ref": "tex.json"},
+        {"$ref": "ui.json"},
+        {"$ref": "event.json"},
+        {"$ref": "ability.json"},
+        {"$ref": "spell.json"},
+        {"$ref": "command.json"},
+        {"$ref": "database.json"}
+      ]
     }
   },
   "examples": [

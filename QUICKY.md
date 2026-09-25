@@ -140,6 +140,15 @@ xi ui spells search NAME [--abilities]       # id, MP, cast/recast, learnable jo
 # ids past 1023 (spells) / 2815 (commands) need a client plugin such as cexislots — the build warns
 ```
 
+## Database records (item, key item, title … edits — docs/database/README.md)
+
+```text
+xi dats prepare edits.json --project P [--merge]   # a list of edits (schema/database.json) -> action database.<name>
+xi dats build P [--dry-run] [--pivot]              # patches the records (EN + JP, legacy or retail DATs), writes P.sql (proposed, never run)
+xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
+xi dats undo P                                     # every record back to what it held; its SQL section removed
+```
+
 ## Entity
 
 ```text
@@ -212,6 +221,10 @@ xi zone export ROM/23/95 --with-collision-proxies --with-far-lod
 xi zone export ROM/1/41 --no-subareas
 # + each sub-area from its own DAT as <stem>_<id>: 41 + 41_454 ... 41_466 (Ru'Aun: 107 + 107_524 ... 107_539)
 xi zone export ROM/1/41 --sub-areas --fbx
+# one file per mesh, and each sub-area's meshes in a 41_<id>/ folder
+xi zone export ROM/1/41 --objects --sub-areas --fbx
+# every FBX at 0,0,0 with no rotation; 41.zone.json says where each goes back (also mesh export / gear pose)
+xi zone export ROM/1/41 --unreal --objects --sub-areas --zero-coords
 # for Unreal/Unity/Godot: un-mirrored, CCW winding, mirrored tiles baked, terrain welded across UV seams
 xi zone export ROM/0/127 --fbx --right-handed --weld-seams
 # Unreal preset (= --right-handed --opaque --fbx + raw linear vertex colours + hidden duplicate tris dropped)

@@ -185,6 +185,15 @@ uv run xi dats build testspell --pivot     # into FFXI_PIVOT_DIR's 114.DAT + nam
 
 Full detail: [../menu/records.md](../menu/records.md).
 
+### Database records (edit or add items, key items, titles, …)
+
+Pick a table (Armor, Weapons, Key items, …), give a record id, see what it holds now, then
+type the changes one per line — `level=50`, `jobs=WAR,PLD`, `description~HP+15=>HP+30`,
+`mod.HP=30` for the proposed SQL. An empty item slot asks which record to copy into it
+(`like`). The edits go into `database.<project>`, merged by table and id with what an
+earlier run wrote. Non-interactive: `xi dats prepare edits.json --project P [--merge]` with
+a list of edits. See [../database/README.md](../database/README.md).
+
 ### Table edits (`ui` action)
 
 A `ui` action carries a retail table's edits at the level of the table's own bytes: the
@@ -451,6 +460,47 @@ Minimal mesh action source for `xi dats prepare workspaces/crab/mesh.json`:
 For full action JSON, `prepare` preserves the action fields and copies referenced
 resource files that live next to the source JSON into `projects/resources/<type>/<id>/`.
 
+### Includes
+
+An `actions` entry can be a string: the path, relative to the file it appears in, of an
+include file ([`schema/include.json`](../../schema/include.json)) whose actions are spliced
+in at that spot. One feature can then keep one project file and split its actions across
+files — gear, record edits, events — without splitting the build:
+
+```json
+{
+  "schema": "xi.dats.v1",
+  "name": "abyssea",
+  "roots": {"standard": "projects/ffxi", "hd": "projects/ffxi-hd", "resources": "projects/resources"},
+  "actions": [
+    "abyssea/gear.json",
+    "abyssea/records.json",
+    {"id": "ability.tomahawk", "type": "ability", "kind": "auto", "…": "…"}
+  ]
+}
+```
+
+```json
+{
+  "schema": "xi.dats.include.v1",
+  "description": "Abyssea: the record edits",
+  "actions": [{"id": "db.abyssea", "type": "database", "edits": ["…"]}]
+}
+```
+
+- Every command reads the project flattened: one action list, in order, includes nested
+  as deep as they go. `xi dats json` prints it that way.
+- A write puts each action back in the file it came from: a build's `result` lands in the
+  include file beside its action, and the include strings stay where they were written.
+  An include file whose actions didn't change is left alone. An action added by `new` or
+  `prepare` goes in the project file.
+- Included actions need an `id` (it is how they are matched back), and an id may appear
+  once across the project and its includes. A missing file, a file without
+  `"schema": "xi.dats.include.v1"` and an include cycle are refused, naming the file.
+- Keep include files in a folder under `projects/` (`projects/abyssea/records.json`):
+  project lists and cross-project scans read only `projects/*.json`, and skip an include
+  file found there.
+
 ## Commands
 
 | Command | What it does |
@@ -503,6 +553,19 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   the end grows the table unless `options.grow` is false. Records `entries`, `grown_to`
   and `created` (the target held no copy before, so `undo` deletes it; an in-place edit
   is left). See [Table edits](#table-edits-ui-action).
+
+Record edits:
+
+- `database` ([`schema/database.json`](../../schema/database.json),
+  [../database/README.md](../database/README.md)): edits to the client's record tables —
+  the tables the model viewer's Database shows (items by category, key items, titles, quest
+  and mission logs, spell and ability text) — by table key and id, with the viewer's field
+  and sub-string names. Only the named fields change, in the English and Japanese records,
+  in legacy or retail DATs; `like` copies another record into an empty slot first. Records
+  each changed field's value before and after per target, so a rebuild converges and
+  `undo` puts the records back. An item edit may carry its server rows (`item_basic`,
+  `item_equipment` with `MId` or a gear action's model, `item_mods`, …), written as proposed
+  SQL to `<project>.sql`, never run. No file ids, no table expansion.
 
 GLB-rebuild / package types:
 

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/include.json",
+  "title": "xi dats include file",
+  "description": "A slice of a dats project: its actions are spliced into the project wherever an actions entry names this file (a string path, relative to the file naming it). Includes nest. Every action here needs an id; a build writes its result back into this file. Keep include files in a folder under projects/ (projects/abyssea/items.json), not beside the project files.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "actions"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "xi.dats.include.v1"
+    },
+    "description": {
+      "type": "string"
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "package.json#/$defs/entry"
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.dats.include.v1",
+      "description": "Abyssea: the record edits. Included from projects/abyssea.json as \"abyssea/records.json\".",
+      "actions": [
+        {
+          "id": "database.abyssea_keyitems",
+          "type": "database",
+          "edits": [
+            {
+              "table": "keyitems",
+              "id": 1,
+              "strings": {
+                "en": {
+                  "description": "A report on the morale of the Galka working the Zeruhn Mines."
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
