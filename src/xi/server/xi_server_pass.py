@@ -175,15 +175,11 @@ def other_ids(kind: str, manifest_path, manifest: dict | None, action_id: str | 
                 action_id, out)
     projects = Path("projects")
     if projects.is_dir():
+        from xi.dats.xi_include import project_actions
         for mf in sorted(projects.glob("*.json")):
             if me is not None and mf.resolve() == me:
                 continue
-            try:
-                data = json.loads(mf.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if isinstance(data, dict):
-                _ids_in(data.get("actions"), kind, mf.stem, None, out)
+            _ids_in(project_actions(mf), kind, mf.stem, None, out)
     return out
 
 

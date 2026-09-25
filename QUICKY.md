@@ -140,6 +140,15 @@ xi ui spells search NAME [--abilities]       # id, MP, cast/recast, learnable jo
 # ids past 1023 (spells) / 2815 (commands) need a client plugin such as cexislots — the build warns
 ```
 
+## Database records (item, key item, title … edits — docs/database/README.md)
+
+```text
+xi dats prepare edits.json --project P [--merge]   # a list of edits (schema/database.json) -> action database.<name>
+xi dats build P [--dry-run] [--pivot]              # patches the records (EN + JP, legacy or retail DATs), writes P.sql (proposed, never run)
+xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
+xi dats undo P                                     # every record back to what it held; its SQL section removed
+```
+
 ## Entity
 
 ```text

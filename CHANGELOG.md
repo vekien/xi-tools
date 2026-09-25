@@ -22,9 +22,15 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 - `--zero-coords` — the FBX's armature and mesh import at 0,0,0 with no rotation: the orientation fix is baked in instead of a rotated root. The skeleton root stays the origin, and an `--all-frames` clip plays as before.
 
+**dats**
+
+- New `database` action: edit or add records in the client's tables — items, key items, titles, quest and mission logs, spell and ability text — by table and id, with the viewer's field names. English and Japanese records, legacy or retail DATs; `like` copies another record into an empty slot; `undo` puts them back. An item edit can carry its server rows, written as proposed SQL to `<project>.sql` (never run). `dats new` has a "Database records" wizard, and `dats prepare edits.json --project P [--merge]` is the scripted way in. See [`docs/database/README.md`](docs/database/README.md).
+- Includes: an `actions` entry can be the path of an include file ([`schema/include.json`](schema/include.json)) whose actions are spliced in at that spot, so one project can keep its gear, record edits and events in separate files. A build writes each result back to the file its action came from.
+
 **Docs**
 
 - [`docs/zone/export.md`](docs/zone/export.md): Zero coords, per-object export with sub-areas; [`subareas.md`](docs/zone/subareas.md), [`mesh/export.md`](docs/mesh/export.md), [`gear/pose.md`](docs/gear/pose.md) and the [`unreal-engine/`](unreal-engine/README.md) kit mention the new options.
+- [`docs/gear/model_ids.md`](docs/gear/model_ids.md): gear model id → file id — the DLL group walk, the custom window formula, retail and patched ceilings.
 
 ## v1.12.0 — 2026-09-24
 

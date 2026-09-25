@@ -659,15 +659,11 @@ def _root_name(root: Path) -> str:
 def _ability_owners(root: Path) -> Dict[str, str]:
     """``{DAT path (upper): "project: action id"}`` for the abilities the dats projects
     here have built into ``root`` — what names the skill sitting on a taken number."""
-    import json
+    from xi.dats.xi_include import project_actions
     target = _root_name(root)
     out: Dict[str, str] = {}
     for mf in sorted(Path("projects").glob("*.json")):
-        try:
-            actions = json.loads(mf.read_text(encoding="utf-8")).get("actions") or []
-        except (OSError, ValueError, AttributeError):
-            continue
-        for a in actions:
+        for a in project_actions(mf):
             res = a.get("result") if isinstance(a, dict) and a.get("type") == "ability" else None
             if not res or res.get("undone") or target not in (res.get("targets") or [target]):
                 continue
