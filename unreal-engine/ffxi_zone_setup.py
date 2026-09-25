@@ -8,7 +8,10 @@ Set up a freshly imported FFXI zone's material instances:
                     they're painted on (a decal on a wall paints over anything hanging in front
                     of it, like the gate flags, so walls don't use the decal)
   *_cutout       -> "Enable - Alpha" = 1 on their MasterMaterial instance (foliage, fences, grates)
-  textures       -> mipmaps off (NO_MIPMAPS), to stop atlas bleeding drawing lines on tile edges
+  textures       -> mipmaps off (NO_MIPMAPS), to stop atlas bleeding drawing lines on tile edges;
+                    "Compress Without Alpha" on the ones only solid materials use (half the memory:
+                    an --unreal export shares one PNG between a texture's solid and cutout materials,
+                    so the file keeps its alpha channel)
 
 Ground vs wall is measured from the zone's .glb (xi zone export writes it next to the .fbx):
 an overlay whose triangles mostly face up and are painted onto the surface under them is ground.
@@ -71,8 +74,7 @@ def norm_name(name):
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-# --- which *_alpha overlays lie on the ground (measured from the .glb) ----------------------
-def ground_overlays(glb_path):
+def read_glb(glb_path):
     b = open(glb_path, "rb").read()
     off, gltf, binc = 12, None, None
     while off < len(b):
@@ -80,7 +82,30 @@ def ground_overlays(glb_path):
         chunk = b[off:off + clen]; off += clen
         if ctype == 0x4E4F534A: gltf = json.loads(chunk)
         elif ctype == 0x004E4942: binc = chunk
+    return gltf, binc
 
+
+# --- which textures only solid materials use (from the .glb) --------------------------------
+def texture_uses(gltf):
+    """(every texture in the .glb, the ones an *_alpha or *_cutout material reads the alpha of),
+    as norm_name keys. Taken from the .glb, not the selection, so a texture is never stripped of
+    its alpha just because its cutout instance wasn't selected."""
+    images = gltf.get("images", [])
+    textures = gltf.get("textures", [])
+    every, alpha = set(), set()
+    for m in gltf.get("materials", []):
+        t = m.get("pbrMetallicRoughness", {}).get("baseColorTexture", {}).get("index")
+        if t is None or t >= len(textures) or textures[t].get("source") is None:
+            continue
+        key = norm_name(images[textures[t]["source"]].get("name", ""))
+        every.add(key)
+        if m["name"].strip().endswith(("_alpha", "_cutout")):
+            alpha.add(key)
+    return every, alpha
+
+
+# --- which *_alpha overlays lie on the ground (measured from the .glb) ----------------------
+def ground_overlays(gltf, binc):
     def acc(i):
         a = gltf["accessors"][i]; bv = gltf["bufferViews"][a["bufferView"]]
         s = bv.get("byteOffset", 0) + a.get("byteOffset", 0)
@@ -161,7 +186,9 @@ if not glb:
 if not glb or not os.path.isfile(glb):
     raise RuntimeError("[FFXI overlay] can't find the zone's .glb - select the zone's static mesh too, "
                        "or set GLB_PATH at the top of the script to the .glb xi zone export wrote next to the .fbx")
-shares = ground_overlays(glb)
+glb_json, glb_bin = read_glb(glb)
+shares = ground_overlays(glb_json, glb_bin)
+glb_textures, alpha_textures = texture_uses(glb_json)
 print(f"[FFXI overlay] read {glb}: {len(shares)} overlay materials")
 
 # Every selected *_alpha must be in this .glb, or it's the wrong zone's .glb: stop before changing anything.
@@ -341,7 +368,7 @@ def enable_alpha(mi):
     return ok
 
 
-decals, walls, cutouts, unknown, retextured, srgb_fixed = [], [], [], [], [], []
+decals, walls, cutouts, unknown, retextured, srgb_fixed, no_alpha = [], [], [], [], [], [], []
 mips = (unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS if NO_MIPMAPS
         else unreal.TextureMipGenSettings.TMGS_FROM_TEXTURE_GROUP)
 for mi in candidates:
@@ -352,6 +379,17 @@ for mi in candidates:
         if mi.get_editor_property("mip_gen_settings") != mips:
             mi.set_editor_property("mip_gen_settings", mips)
             changed = True
+        # A texture only solid materials use doesn't need its alpha: compress it without
+        # (BC1, half of BC3). Textures the .glb doesn't know (an older export's _opaque
+        # twins, other assets) are left alone; so is anything a cutout or overlay reads.
+        key = norm_name(name)
+        if key in glb_textures:
+            want = key not in alpha_textures
+            if mi.get_editor_property("compression_no_alpha") != want:
+                mi.set_editor_property("compression_no_alpha", want)
+                changed = True
+            if want:
+                no_alpha.append(name)
         # Zone textures are colour: read them as sRGB. A texture left linear comes out washed
         # pale, and on the overlay textures that shows as pale tile-shaped patches.
         if not mi.get_editor_property("srgb"):
@@ -396,6 +434,7 @@ for n in walls:
     print("    " + n)
 print(f"[FFXI overlay] '{CUTOUT_PARAM}' = 1 on {len(cutouts)} *_cutout instances")
 print(f"[FFXI overlay] updated {len(retextured)} textures (mipmaps {'off' if NO_MIPMAPS else 'on'})")
+print(f"[FFXI overlay] {len(no_alpha)} textures only solid materials use: compressed without alpha")
 print(f"[FFXI overlay] sRGB was OFF on {len(srgb_fixed)} textures, now on:")
 for n in srgb_fixed:
     print("    " + n)

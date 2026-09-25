@@ -27,7 +27,7 @@ full graph.
 | Base Color | `Texture.rgb × Power(VertexColor.rgb × 2, 2.2) × Texture Strength` |
 | Opacity Mask | `Texture.a` when `Enable - Alpha` is 1, otherwise 1 |
 | Specular / Metallic / Roughness | their parameters, all 0 |
-| World Position Offset | Engine `SimpleGrassWind` when `Enable - Wind` is 1 |
+| World Position Offset | Engine `SimpleGrassWind` when `Enable - Wind` is 1 (see [Wind](#wind)) |
 | Emissive | the emissive texture × colour × strength when `Enable Emissive Texture` is 1 |
 
 | Parameter | Default | |
@@ -44,6 +44,39 @@ Two things in it are load-bearing for the rest of the kit. The base colour must 
 `Texture × Power(VertexColor × 2, 2.2)`, because the overlay materials copy that formula to
 match the ground under them. And the cutout switch must be named exactly `Enable - Alpha`,
 because the setup script sets it by name (`CUTOUT_PARAM`).
+
+### Wind
+
+`--unreal` splits every tree into two instances of MasterMaterial on the same texture: the
+see-through triangles (leaves, grass blades) on `<texture>_cutout`, and the solid ones (trunk,
+bark-textured branch cards) on `<texture>`. So `Enable - Wind` = 1 on the `_cutout` instance
+sways the leaves and the trunk stays still.
+
+It also writes wind weights to the mesh's second UV channel, **`TexCoord[1]`**: `x` is height
+within the mesh (0 at its base, 1 at its top) and `y` is reach (0 by the trunk, 1 at the widest
+point). Both are 0 on everything that isn't a see-through triangle. With a constant
+`Wind Weight` a grass clump slides at the roots; to pin them, feed `SimpleGrassWind`'s
+**WindWeight** with
+
+```
+Wind Weight × TexCoord[1].x                   height only: roots and the base of the canopy still
+Wind Weight × TexCoord[1].x × TexCoord[1].y   leaves near the trunk move less than branch tips
+```
+
+The why, with measurements, is in [foliage.md](foliage.md); the export side in
+[zone export › Foliage](../docs/zone/export.md#foliage-cutout-vs-solid-triangles-and-wind-weights).
+
+- **Turn wind on per instance.** Signs, fences and grates are cutouts too and carry weights,
+  so set `Enable - Wind` on the foliage instances (West Ronfaure: `model___ron_w01c_cutout`,
+  `model___ron_w03c_cutout`, `model___ron_k01c_cutout`), not on every `_cutout`. Grass can share
+  a tree's texture (`_ron_k03` uses `ron_w03c`), so it shares that instance's wind settings.
+- **Shadows.** A mesh whose material moves its vertices invalidates its Virtual Shadow Map
+  cache every frame, and with *Combine Meshes* on that's the whole zone. If that costs too much,
+  set the zone actor's *Shadow Cache Invalidation Behavior* to *Rigid*: shadows stop following
+  the sway, which is hard to see on small foliage.
+- **Lightmaps.** Channel 1 is where UE would put generated lightmap UVs. The kit imports with
+  *Generate Lightmap UVs* off, so nothing overwrites it; if Map Check complains about lightmap
+  UVs, that's UE reading the wind channel, and it doesn't matter under a dynamic sky.
 
 ### Rebuilding it by hand (UE versions that can't open the .uasset)
 

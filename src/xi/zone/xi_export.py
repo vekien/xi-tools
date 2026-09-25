@@ -556,6 +556,121 @@ def drop_hidden_duplicates(prims: List[ZonePrimitive], is_opaque) -> List[ZonePr
     return out
 
 
+# --- foliage: cutout vs solid triangles, and wind weights (--unreal) ---------------------------
+#
+# A '_' mesh is alpha-tested as a whole in the client, but only some of its triangles
+# ever show a see-through texel: a tree's leaf cards and grass blades do, its trunk and
+# bark-textured branch cards don't (measured on West Ronfaure: every one-sided trunk
+# part 0%, every big tree's leaf part 100%). The texture alone tells them apart, so
+# --unreal splits each '_' mesh by triangle: cutout triangles keep the MASK material,
+# solid ones move to the plain OPAQUE one (cheaper, and what the client shows anyway,
+# since the alpha test discards nothing there). The same test drives the wind weights.
+
+CUTOUT_ALPHA = 0.5   # glTF's MASK cutoff, above the client's (xim port) 0.375. FFXI's solid
+                     # texels are raw 0x60-0x7F (0.75-1.0 scaled), well clear of either
+
+
+def cutout_texels(image: TextureImage, alpha_scale: float = DEFAULT_ALPHA_SCALE):
+    """``bool[height, width]``: texels an alpha-tested material discards — scaled alpha
+    (as exported, see DEFAULT_ALPHA_SCALE) below CUTOUT_ALPHA.
+
+    Not grown by a texel for bilinear bleed: FFXI's atlas blocks meet on exact texel
+    boundaries and trunk UVs sit right on them (u = 128.00 beside a leaf block), so a
+    one-texel margin put 250 of `_ron_w01_m`'s 315 trunk triangles in with the leaves.
+    What bleeds across such an edge is a sub-texel sliver along it, not a cutout."""
+    import numpy as np
+    alpha = np.frombuffer(image.rgba, dtype=np.uint8)[3::4].reshape(image.height, image.width)
+    return np.minimum(255.0, alpha * alpha_scale) < CUTOUT_ALPHA * 255.0
+
+
+def triangle_cuts_out(texels, uv3) -> bool:
+    """True if the triangle samples a texel of ``texels`` (cutout_texels): any texel whose
+    centre lies inside it, or under one of its corners (nudged a hair toward the middle,
+    so a corner on a texel boundary reads the texel inside the triangle, and a triangle
+    smaller than a texel still samples something). UVs wrap (REPEAT sampler); row 0 is
+    v = 0, as the exported PNG stores it."""
+    import numpy as np
+    h, w = texels.shape
+    us = [uv[0] * w for uv in uv3]
+    vs = [uv[1] * h for uv in uv3]
+    if max(us) - min(us) >= w and max(vs) - min(vs) >= h:
+        return bool(texels.any())   # covers a whole period of the texture
+    gu, gv = sum(us) / 3.0, sum(vs) / 3.0
+    for u, v in zip(us, vs):
+        u, v = u + (gu - u) * 1e-3, v + (gv - v) * 1e-3
+        if texels[int(math.floor(v)) % h, int(math.floor(u)) % w]:
+            return True
+    xs = np.arange(math.floor(min(us)), math.ceil(max(us))) + 0.5
+    ys = np.arange(math.floor(min(vs)), math.ceil(max(vs))) + 0.5
+    if not len(xs) or not len(ys):
+        return False
+    px, py = np.meshgrid(xs, ys)
+    (x0, y0), (x1, y1), (x2, y2) = zip(us, vs)
+    d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+    if d == 0:
+        return False
+    a = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / d
+    b = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / d
+    inside = (a >= -1e-9) & (b >= -1e-9) & (a + b <= 1 + 1e-9)
+    if not inside.any():
+        return False
+    iy = np.floor(py[inside]).astype(int) % h
+    ix = np.floor(px[inside]).astype(int) % w
+    return bool(texels[iy, ix].any())
+
+
+def split_cutout(prim: ZonePrimitive, texels) -> Tuple[Optional[ZonePrimitive], Optional[ZonePrimitive]]:
+    """Split ``prim`` into (cutout triangles, solid triangles) by triangle_cuts_out;
+    either side is None when empty, and an unsplit side is ``prim`` itself."""
+    cut = [triangle_cuts_out(texels, prim.uvs[t:t + 3]) for t in range(0, len(prim.positions) - 2, 3)]
+    if all(cut):
+        return prim, None
+    if not any(cut):
+        return None, prim
+
+    def pick(want: bool) -> ZonePrimitive:
+        sel = [3 * t + i for t, c in enumerate(cut) if c == want for i in range(3)]
+        return ZonePrimitive(
+            texture_name=prim.texture_name,
+            positions=[prim.positions[i] for i in sel],
+            normals=[prim.normals[i] for i in sel],
+            uvs=[prim.uvs[i] for i in sel],
+            colors=[prim.colors[i] for i in sel] if prim.colors else [],
+            alpha_blend=prim.alpha_blend, alpha_test=prim.alpha_test,
+            double_sided=prim.double_sided)
+    return pick(True), pick(False)
+
+
+def wind_frame(prims: List[ZonePrimitive]) -> Tuple[float, float, float, float, float]:
+    """(base_y, height, centre_x, centre_z, radius) of a mesh in its own FFXI space, for
+    wind_weights: the base is its lowest point (largest Y, as Y points down), the
+    centre the middle of its X/Z bounds, the radius the furthest vertex from the
+    vertical line through that centre."""
+    pts = [p for prim in prims for p in prim.positions]
+    if not pts:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    ys = [p[1] for p in pts]
+    cx = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2.0
+    cz = (min(p[2] for p in pts) + max(p[2] for p in pts)) / 2.0
+    radius = max(math.hypot(p[0] - cx, p[2] - cz) for p in pts)
+    return max(ys), max(ys) - min(ys), cx, cz, radius
+
+
+def wind_weights(positions, frame) -> List[Tuple[float, float]]:
+    """Per vertex: (height, reach), both 0..1 within the mesh (see wind_frame). Height is
+    0 at the mesh's base and 1 at its top: grass roots stay put and the top of a tree
+    moves most. Reach is 0 on the vertical line through the mesh's centre and 1 at its
+    widest point: leaves at the end of a branch move more than those by the trunk. A
+    mesh with no height (or width) gets 0 there, so a flat cutout doesn't sway."""
+    base, height, cx, cz, radius = frame
+    out = []
+    for x, y, z in positions:
+        h = min(1.0, max(0.0, (base - y) / height)) if height > 1e-6 else 0.0
+        r = min(1.0, math.hypot(x - cx, z - cz) / radius) if radius > 1e-6 else 0.0
+        out.append((h, r))
+    return out
+
+
 def resolve_texture(name: Optional[str], textures: Dict[str, TextureImage]) -> Optional[str]:
     if not name:
         return None
@@ -585,6 +700,8 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
               mesh_merge_dp: int = 4,
               vertex_color: str = "baked",
               dedupe_opaque: bool = False,
+              foliage: bool = False,
+              opaque_twins: bool = True,
               out_stem: Optional[str] = None) -> List[Path]:
     # out_stem overrides the .glb filename stem (default: dat_path.stem) — used by
     # --objects to write one <meshname>.glb per object instead of one zone file.
@@ -598,6 +715,16 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
     # of MASK. FFXI ignores texture alpha on non-blend submeshes (they're solid), but
     # some opaque textures store alpha ~0 (e.g. "box"); under MASK that clips the whole
     # prop to invisible. Icons use this so every object actually shows up.
+    #
+    # foliage=True (--unreal, needs opaque_nonblend) splits every '_' mesh by triangle
+    # into cutout (MASK, "<tex>_cutout") and solid (OPAQUE, "<tex>") by the texture's
+    # alpha (split_cutout), and writes TEXCOORD_1 on every primitive: wind weights
+    # (height, reach) on cutout triangles, (0, 0) everywhere else (wind_weights).
+    #
+    # opaque_twins=False points OPAQUE materials at the same PNG as everything else
+    # instead of writing a 24-bit <tex>_opaque.png twin (--unreal: the Unreal kit's
+    # MasterMaterial ignores texture alpha unless "Enable - Alpha" is set, so the twin
+    # only doubled the textures). The FBX step must be told the same (convert_glb_to_fbx).
     builder = BufferBuilder()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -621,7 +748,7 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
             png_path = output_dir / f"{sanitize_filename(tex_key)}.png"
             png_path.write_bytes(png_bytes)
             texture_paths.append(png_path)
-            if opaque_nonblend:
+            if opaque_nonblend and opaque_twins:
                 # The FBX step points OPAQUE materials at a 24-bit <tex>_opaque.png so
                 # Blender's importer doesn't wire the (junk) alpha back in. Write it here,
                 # byte for byte: when Blender made it with save_render, the scene's view
@@ -670,6 +797,34 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
             return "MASK"
         return "OPAQUE"
 
+    # foliage only means something under the --opaque mapping, where MASK is exactly
+    # the '_' (alpha-tested) meshes; the legacy mapping makes every surface MASK.
+    foliage = foliage and opaque_nonblend
+    texel_masks: Dict[str, object] = {}
+    foliage_parts_by_name: Dict[str, List[Tuple[ZonePrimitive, str]]] = {}
+
+    def foliage_parts(name: str, prims: List[ZonePrimitive]) -> List[Tuple[ZonePrimitive, str]]:
+        # (prim, mode) pairs with each MASK prim split into its cutout (MASK) and solid
+        # (OPAQUE) triangles. Cached per mesh: the ~mir variant reuses the split.
+        if name in foliage_parts_by_name:
+            return foliage_parts_by_name[name]
+        parts: List[Tuple[ZonePrimitive, str]] = []
+        for prim in prims:
+            mode = mode_for(name, prim)
+            tex_key = resolve_texture(prim.texture_name, textures)
+            if mode != "MASK" or tex_key is None:
+                parts.append((prim, mode))
+                continue
+            if tex_key not in texel_masks:
+                texel_masks[tex_key] = cutout_texels(textures[tex_key], alpha_scale)
+            cut, solid = split_cutout(prim, texel_masks[tex_key])
+            if cut is not None:
+                parts.append((cut, "MASK"))
+            if solid is not None:
+                parts.append((solid, "OPAQUE"))
+        foliage_parts_by_name[name] = parts
+        return parts
+
     # --- one glTF mesh per unique zone mesh (local geometry), built on demand ---
     meshes: List[dict] = []
     mesh_index_by_name: Dict[Tuple[str, bool], int] = {}
@@ -687,15 +842,25 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
         if dedupe_opaque:
             # --unreal: an engine can't break a depth tie the way the client does.
             prims_in = drop_hidden_duplicates(prims_in, lambda p: mode_for(name, p) == "OPAQUE")
-        for prim in prims_in:
-            key = (resolve_texture(prim.texture_name, textures), mode_for(name, prim))
+        parts = (foliage_parts(name, prims_in) if foliage
+                 else [(prim, mode_for(name, prim)) for prim in prims_in])
+        for prim, mode in parts:
+            key = (resolve_texture(prim.texture_name, textures), mode)
             by_tex.setdefault(key, []).append(prim)
+        frame = wind_frame(prims_in) if foliage else None
         mesh_prims: List[dict] = []
         for (tex_key, mode), group in by_tex.items():
             positions: List[Tuple[float, float, float]] = []
             normals: List[Tuple[float, float, float]] = []
             uvs: List[Tuple[float, float]] = []
             colors: List[Tuple[float, float, float, float]] = []
+            # TEXCOORD_1 (foliage only): wind weights on cutout triangles, 0 elsewhere. A
+            # weight is a function of position within the mesh, so vertices the weld
+            # below merges (same position) always agree on it.
+            winds: List[Tuple[float, float]] = []
+            group_winds = ([wind_weights(prim.positions, frame) if mode == "MASK"
+                            else [(0.0, 0.0)] * len(prim.positions) for prim in group]
+                           if foliage else None)
             tri_indices: Optional[List[int]] = None
             if weld:
                 # Weld coincident triangle corners into a shared, indexed vertex
@@ -716,7 +881,7 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
                 # split UVs. See export_zone / xi_glb_to_fbx.
                 tri_indices = []
                 key_to_idx: Dict[tuple, int] = {}
-                for prim in group:
+                for pi, prim in enumerate(group):
                     pcolors = prim.colors or None
                     for i in range(len(prim.positions)):
                         pos = prim.positions[i]
@@ -733,13 +898,17 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
                             uvs.append(prim.uvs[i])
                             if color is not None:
                                 colors.append(color)
+                            if group_winds is not None:
+                                winds.append(group_winds[pi][i])
                         tri_indices.append(idx)
             else:
-                for prim in group:
+                for pi, prim in enumerate(group):
                     positions.extend(prim.positions)
                     normals.extend(prim.normals)
                     uvs.extend(prim.uvs)
                     colors.extend(prim.colors)
+                    if group_winds is not None:
+                        winds.extend(group_winds[pi])
             if mirrored:
                 positions = [(-x, y, z) for (x, y, z) in positions]
                 normals = [(-x, y, z) for (x, y, z) in normals]
@@ -749,6 +918,9 @@ def build_glb(dat_path: Path, output_dir: Path, meshes_by_name: Dict[str, List[Z
                 "NORMAL": builder.add_accessor(pack_vec3(normals), 5126, "VEC3", len(normals), target=34962),
                 "TEXCOORD_0": builder.add_accessor(pack_vec2(uvs), 5126, "VEC2", len(uvs), target=34962),
             }
+            if foliage:
+                # Every primitive gets it, so UE's Combine Meshes sees one UV layout.
+                attrs["TEXCOORD_1"] = builder.add_accessor(pack_vec2(winds), 5126, "VEC2", len(winds), target=34962)
             # COLOR_0 carries the baked vertex lighting. The engine draws
             # final = texture * vertexColour * 2, so where that modulate2x lives
             # depends on who shades the mesh:
@@ -1512,6 +1684,7 @@ def export_objects(dat_path: Path, output_dir: Path,
                    mesh_merge_dp: int = 4, merge_distance: float = 0.0,
                    vertex_color: str = "baked", dedupe_opaque: bool = False,
                    zero_offsets: Optional[Dict[str, Tuple[Path, Tuple[float, float, float]]]] = None,
+                   foliage: bool = False, opaque_twins: bool = True,
                    ) -> List[Path]:
     """Export each unique zone mesh as its own ``<meshname>.glb`` (+ ``.fbx`` if
     ``fbx``) into ``output_dir``. Each object is emitted in local space at the
@@ -1539,18 +1712,20 @@ def export_objects(dat_path: Path, output_dir: Path,
                         write_loose_textures=fbx, out_stem=sanitize_filename(name),
                         opaque_nonblend=opaque_nonblend, weld=weld,
                         mesh_merge_dp=mesh_merge_dp, vertex_color=vertex_color,
-                        dedupe_opaque=dedupe_opaque)
+                        dedupe_opaque=dedupe_opaque, foliage=foliage, opaque_twins=opaque_twins)
         paths.append(out[0])
         if fbx:
             print(f"  [{i}/{len(names)}] {name} -> fbx")
             if zero_offsets is not None:
                 fbx_path, offset = convert_glb_to_fbx_zeroed(
-                    out[0], merge_distance=merge_distance, linear_colors=(vertex_color == "raw"))
+                    out[0], merge_distance=merge_distance, linear_colors=(vertex_color == "raw"),
+                    opaque_twins=opaque_twins)
                 zero_offsets[name] = (fbx_path, offset)
                 paths.append(fbx_path)
             else:
                 paths.append(convert_glb_to_fbx(out[0], merge_distance=merge_distance,
-                                                linear_colors=(vertex_color == "raw")))
+                                                linear_colors=(vertex_color == "raw"),
+                                                opaque_twins=opaque_twins))
     return paths
 
 
@@ -1565,7 +1740,8 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                 alpha_split_mesh: bool = False, decal_offset: float = 0.00001,
                 decal_smooth_angle: float = 45.0, dedupe_opaque: bool = False,
                 sub_area_sources: Optional[List[Tuple[int, Path]]] = None,
-                zero_coords: bool = False) -> List[Path]:
+                zero_coords: bool = False, foliage: bool = False,
+                opaque_twins: bool = True) -> List[Path]:
     # `source` lets us read the geometry from a different file (e.g. the pristine
     # original) while still naming the output after the original DAT.
     # `sub_area_sources` (--sub-areas, see sub_area_dats): each sub-area DAT is also
@@ -1573,6 +1749,7 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
     # and its stand-ins leave the main file.
     # `zero_coords` (--zero-coords): every FBX imports at 0,0,0 with no rotation, and
     # the JSON (implied) records where each goes back — see convert_glb_to_fbx_zeroed.
+    # `foliage` / `opaque_twins` (--unreal): see build_glb.
     src = source or dat_path
     meshes_by_name, placements, textures = parse_zone(src)
     if not meshes_by_name:
@@ -1636,7 +1813,7 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                              opaque_nonblend=opaque_nonblend, weld=weld,
                              mesh_merge_dp=mesh_merge_dp, merge_distance=merge_distance,
                              vertex_color=vertex_color, dedupe_opaque=dedupe_opaque,
-                             zero_offsets=offsets)
+                             zero_offsets=offsets, foliage=foliage, opaque_twins=opaque_twins)
         for name, (fbx_path, offset) in (offsets or {}).items():
             # build_glb draws a mesh the zone never places at the origin, once.
             at = [p for p in plcs if resolve_mesh_name(p.mesh_id, meshes) == name] or [None]
@@ -1652,26 +1829,30 @@ def export_zone(dat_path: Path, output_dir: Path, fbx: bool = True, skip_sky: bo
                         skip_sky=skip_sky, raw=raw, right_handed=right_handed, alpha_scale=alpha_scale,
                         drop_names=drop, opaque_nonblend=opaque_nonblend,
                         weld=weld, mesh_merge_dp=mesh_merge_dp, vertex_color=vertex_color,
-                        dedupe_opaque=dedupe_opaque, out_stem=stem)
+                        dedupe_opaque=dedupe_opaque, foliage=foliage, opaque_twins=opaque_twins,
+                        out_stem=stem)
         if alpha_split_mesh:
             # "(Test) Alpha Split Mesh": two FBX files (opaque base + separated decals)
             # for a clean Unreal import — solves the coplanar decal z-fighting.
             fbx_paths = convert_glb_to_fbx_alpha_split(
                 out[0], decal_offset=decal_offset, smooth_angle=decal_smooth_angle,
-                weld_dp=mesh_merge_dp, linear_colors=(vertex_color == "raw"))
+                weld_dp=mesh_merge_dp, linear_colors=(vertex_color == "raw"),
+                opaque_twins=opaque_twins)
             out.extend(fbx_paths)
             out.append(_write_ue5_mat_script(fbx_paths[0], vertex_color=vertex_color))
         elif fbx:
             if zero_coords:
                 fbx_path, offset = convert_glb_to_fbx_zeroed(
-                    out[0], merge_distance=merge_distance, linear_colors=(vertex_color == "raw"))
+                    out[0], merge_distance=merge_distance, linear_colors=(vertex_color == "raw"),
+                    opaque_twins=opaque_twins)
                 zero_files.append({"file": fbx_path.name,
                                    **({"kind": "sub_area", "sub_area": sub_id} if sub_id is not None
                                       else {"kind": "zone"}),
                                    "offset": list(offset)})
             else:
                 fbx_path = convert_glb_to_fbx(out[0], merge_distance=merge_distance,
-                                              linear_colors=(vertex_color == "raw"))
+                                              linear_colors=(vertex_color == "raw"),
+                                              opaque_twins=opaque_twins)
             out.append(fbx_path)
             out.append(_write_ue5_mat_script(fbx_path, vertex_color=vertex_color))
         return out
@@ -1721,7 +1902,7 @@ def main() -> int:
     parser.add_argument("--objects", dest="objects", action="store_true", help="Export each mesh as its own <meshname>.glb/.fbx into the output folder (local space, at origin) instead of one combined zone file; with --sub-areas, each sub-area's into <stem>_<id>/")
     parser.add_argument("--raw", action="store_true", help="Omit the orientation-correction node (raw FFXI coords; view-only, do not re-import)")
     parser.add_argument("--right-handed", action="store_true", help="Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into geometry (engines drop negative node-scale -> un-mirrored, collidable) and flip winding to CCW-front so single-sided engines light the terrain top instead of culling it black")
-    parser.add_argument("--unreal", action="store_true", help="Unreal preset: --right-handed + --opaque + --fbx + raw vertex colours (do the *2 in the UE material). An explicit --vertex-color still wins.")
+    parser.add_argument("--unreal", action="store_true", help="Unreal preset: --right-handed + --opaque + --fbx + raw vertex colours (do the *2 in the UE material), foliage split into cutout/solid materials with wind weights in UV channel 1, one PNG per texture. An explicit --vertex-color still wins.")
     parser.add_argument("--opaque", dest="opaque_nonblend", action="store_true", help="Write non-blend materials as OPAQUE instead of MASK (fixes junk-alpha floors/walls clipping to holes)")
     parser.add_argument("--vertex-color", dest="vertex_color", choices=["raw", "baked"], default=None,
                         help="COLOR_0 baked lighting: 'baked' (default) folds FFXI's modulate2x in and clamps it for shaderless DCC viewers; 'raw' leaves the *2 to the engine material (--unreal implies it)")
@@ -1791,7 +1972,8 @@ def main() -> int:
                             vertex_color=vertex_color,
                             alpha_split_mesh=args.alpha_split_mesh, decal_offset=args.decal_offset,
                             decal_smooth_angle=args.decal_smooth_angle, dedupe_opaque=args.unreal,
-                            sub_area_sources=subs, zero_coords=args.zero_coords):
+                            sub_area_sources=subs, zero_coords=args.zero_coords,
+                            foliage=args.unreal, opaque_twins=not args.unreal):
         print(f"Exported: {path}")
     return 0
 
@@ -1838,8 +2020,10 @@ import click as _click  # noqa: E402
                     "(--vertex-color raw). Gives a UE-facing FBX with correct winding/orientation, no "
                     "clipped floors, and FFXI's modulate2x left to the zone material (do "
                     "BaseColor = Tex * VertexColor * 2 there) so above-neutral tiles don't clamp to "
-                    "flat white. The generated *.ue5_mat.py notes the material contract. An explicit "
-                    "--vertex-color still wins.")
+                    "flat white. It also splits '_' meshes into cutout and solid materials by texture "
+                    "alpha (a tree's trunk off its leaves), writes wind weights (height, reach) to UV "
+                    "channel 1, and shares one PNG per texture (no _opaque twins). The generated "
+                    "*.ue5_mat.py notes the material contract. An explicit --vertex-color still wins.")
 @_click.option("--vertex-color", "vertex_color", type=_click.Choice(["raw", "baked"]), default=None,
                help="How COLOR_0 carries FFXI's baked vertex lighting. 'baked' (default) folds the "
                     "modulate2x in and clamps it, so a shaderless glTF/DCC viewer shows in-game "
@@ -1984,7 +2168,8 @@ def cmd(dat_path: str, output, fbx: bool, skip_sky: bool, no_vfx: bool, objects:
                             vertex_color=vertex_color,
                             alpha_split_mesh=alpha_split_mesh, decal_offset=decal_offset,
                             decal_smooth_angle=decal_smooth_angle, dedupe_opaque=unreal,
-                            sub_area_sources=subs, zero_coords=zero_coords)
+                            sub_area_sources=subs, zero_coords=zero_coords,
+                            foliage=unreal, opaque_twins=not unreal)
     except ValueError as e:
         raise _click.ClickException(str(e))
     if objects:

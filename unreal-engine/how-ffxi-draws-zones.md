@@ -147,11 +147,26 @@ Gustaberg that's one strip of `gus_14` over `kabe` at the gate and a patch on th
   average neighbouring tiles together, which draws faint lines along tile edges. The game and
   the viewer don't use mips here, and the setup script turns them off (`NO_MIPMAPS`). The cost
   is some shimmer on distant ground when the camera moves.
-- **Opaque twins.** For every opaque material the export writes `<texture>_opaque.png`, a 24-bit
-  copy with the alpha channel dropped. UE's FBX import wires a texture's alpha into the material
-  whenever the file has one, which would punch holes in solid floors. The twins are written
-  byte-for-byte by xi-tools. An earlier Blender path passed them through the view transform
-  and darkened them by up to 42/255.
+- **One PNG per texture.** Many FFXI textures carry junk in the alpha channel of their solid
+  areas. The material decides whether alpha counts: MasterMaterial ignores it unless
+  `Enable - Alpha` is on, which the setup script sets only on `_cutout` instances. So a solid
+  and a cutout material share one texture. Earlier exports wrote an alpha-free
+  `<texture>_opaque.png` copy for every solid material; that guarded against *Blender's* FBX
+  importer, which wires any alpha channel into the material, and isn't needed in UE.
+- **No alpha where nothing reads it.** A texture only solid materials use is compressed without
+  alpha (BC1, half the size of BC3). The setup script works that out from the `.glb`.
+
+## Foliage
+
+A tree is one mesh on one texture atlas (leaves, grass blades and bark packed together), alpha
+tested as a whole because its name starts with `_`. Only the triangles that sample the
+see-through background around the leaves are really cut out; the trunk and bark-textured branch
+cards sample solid bark. `--unreal` splits them by the texels each triangle covers: see-through
+ones on `<texture>_cutout`, solid ones on `<texture>`. That's cheaper, it's what the client
+shows, and it lets wind move the leaves without the trunk. The leaf cards themselves face the
+ground in the DAT (winding and stored normals both), and the client draws them two-sided, so
+keep them two-sided in UE. Wind weights ride in the second UV channel. The full story, with
+measurements, is in [foliage.md](foliage.md).
 
 ## Coordinates
 

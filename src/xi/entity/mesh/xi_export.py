@@ -823,7 +823,8 @@ def _inject_fbx_textures(fbx_path: Path, tex_dir: Path) -> None:
 
 
 def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
-                       merge_distance: float = 0.0, linear_colors: bool = False) -> Path:
+                       merge_distance: float = 0.0, linear_colors: bool = False,
+                       opaque_twins: bool = True) -> Path:
     """Convert a .glb to an FBX via headless Blender.
 
     The Blender script rewires packed GLB images to the loose PNG files that
@@ -842,19 +843,27 @@ def convert_glb_to_fbx(glb_path: Path, bake_anim: bool = False,
 
     ``linear_colors`` writes vertex colours to the FBX untouched instead of Blender's
     default sRGB encode (neutral 0.5 -> ~0.73) — ``zone export --vertex-color raw``.
+
+    ``opaque_twins=False`` points OPAQUE materials at the texture's own PNG instead of
+    a 24-bit ``<tex>_opaque.png`` twin — ``zone export --unreal``, whose materials
+    decide alpha themselves. Keep the twins for anything reopened in Blender: its FBX
+    importer wires a PNG's alpha into the material whenever the file has one.
     """
-    return _run_glb_to_fbx(glb_path, bake_anim, merge_distance, linear_colors, False)[0]
+    return _run_glb_to_fbx(glb_path, bake_anim, merge_distance, linear_colors, False,
+                           opaque_twins)[0]
 
 
 def convert_glb_to_fbx_zeroed(glb_path: Path, bake_anim: bool = False,
                               merge_distance: float = 0.0, linear_colors: bool = False,
+                              opaque_twins: bool = True,
                               ) -> Tuple[Path, Tuple[float, float, float]]:
     """:func:`convert_glb_to_fbx` for ``--zero-coords``: every object in the FBX sits at
     location 0, rotation 0, scale 1 with its transform baked into the data, and an
     unrigged file is moved so the centre of its base is on the origin (see
     ``xi_glb_to_fbx._zero_coords``). Returns the FBX and that offset in Blender's frame
     (Z-up, FFXI units): placing the imported FBX at the offset puts it back."""
-    fbx_path, stdout = _run_glb_to_fbx(glb_path, bake_anim, merge_distance, linear_colors, True)
+    fbx_path, stdout = _run_glb_to_fbx(glb_path, bake_anim, merge_distance, linear_colors, True,
+                                       opaque_twins)
     m = re.search(r"^XI_ZERO_OFFSET (\S+) (\S+) (\S+)\s*$", stdout, re.MULTILINE)
     if not m:
         raise ValueError(f"Blender did not report the --zero-coords offset for {fbx_path.name}")
@@ -862,7 +871,8 @@ def convert_glb_to_fbx_zeroed(glb_path: Path, bake_anim: bool = False,
 
 
 def _run_glb_to_fbx(glb_path: Path, bake_anim: bool, merge_distance: float,
-                    linear_colors: bool, zero_coords: bool) -> Tuple[Path, str]:
+                    linear_colors: bool, zero_coords: bool,
+                    opaque_twins: bool = True) -> Tuple[Path, str]:
     blender = Path(BLENDER_PATH)
     if not blender.is_file():
         raise ValueError(
@@ -875,7 +885,8 @@ def _run_glb_to_fbx(glb_path: Path, bake_anim: bool, merge_distance: float,
         [str(blender), "-b", "--python", str(_GLB_TO_FBX_SCRIPT),
          "--", str(glb_path), str(fbx_path), tex_dir, "1" if bake_anim else "0",
          repr(float(merge_distance)), "0", "45.0", "0.0", "4",  # argv 5-8: alpha split off
-         "LINEAR" if linear_colors else "SRGB", "1" if zero_coords else "0"],
+         "LINEAR" if linear_colors else "SRGB", "1" if zero_coords else "0",
+         "1" if opaque_twins else "0"],
         capture_output=True,
         text=True,
     )
@@ -887,7 +898,8 @@ def _run_glb_to_fbx(glb_path: Path, bake_anim: bool, merge_distance: float,
 
 def convert_glb_to_fbx_alpha_split(glb_path: Path, decal_offset: float = 0.00001,
                                    smooth_angle: float = 45.0,
-                                   weld_dp: int = 4, linear_colors: bool = False) -> List[Path]:
+                                   weld_dp: int = 4, linear_colors: bool = False,
+                                   opaque_twins: bool = True) -> List[Path]:
     """"(Test) Alpha Split Mesh" — convert a zone ``.glb`` to **two** FBX files via
     headless Blender: ``<stem>.fbx`` (opaque base) and ``<stem>_A.fbx`` (the
     alpha-blend decals, separated, pushed off the surface, normals transferred from
@@ -898,7 +910,8 @@ def convert_glb_to_fbx_alpha_split(glb_path: Path, decal_offset: float = 0.00001
     ``decal_offset`` is how far (in mesh/FFXI units) each decal is lifted along the
     base normal; ``smooth_angle`` is the auto-smooth angle in degrees; ``weld_dp``
     the decimal places for the weld tolerance (matches ``--mesh-merge-dp``).
-    ``linear_colors`` as for :func:`convert_glb_to_fbx`, applied to both files.
+    ``linear_colors`` and ``opaque_twins`` as for :func:`convert_glb_to_fbx`, applied
+    to both files.
     """
     blender = Path(BLENDER_PATH)
     if not blender.is_file():
@@ -913,7 +926,7 @@ def convert_glb_to_fbx_alpha_split(glb_path: Path, decal_offset: float = 0.00001
         [str(blender), "-b", "--python", str(_GLB_TO_FBX_SCRIPT),
          "--", str(glb_path), str(fbx_path), tex_dir, "0", "0.0",
          "1", repr(float(smooth_angle)), repr(float(decal_offset)), str(int(weld_dp)),
-         "LINEAR" if linear_colors else "SRGB"],
+         "LINEAR" if linear_colors else "SRGB", "0", "1" if opaque_twins else "0"],
         capture_output=True,
         text=True,
     )

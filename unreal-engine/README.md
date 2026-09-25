@@ -8,6 +8,7 @@ materials, and a setup script you run once per zone.
 |---|---|
 | [how-ffxi-draws-zones.md](how-ffxi-draws-zones.md) | How the FFXI client draws a zone, and what each part becomes in Unreal |
 | [materials.md](materials.md) | The four materials, their parameters, and how to rebuild MasterMaterial by hand |
+| [foliage.md](foliage.md) | Trees and grass: trunk vs leaf materials, wind weights, why leaf normals face down |
 | [troubleshooting.md](troubleshooting.md) | Symptom → cause → fix, what was tried and ruled out, and what's still open |
 | `Content/CORE/*.uasset` | The materials (UE 5.6): `MasterMaterial` plus the three `M_FFXIZone_*` overlay materials |
 | `ffxi_zone_setup.py` | The per-zone setup script (Tools › Execute Python Script) |
@@ -65,7 +66,7 @@ uv run xi zone export ROM/0/124 --unreal --no-sky --no-vfx --output D:/exports/g
 
 | Option | Why |
 |---|---|
-| `--unreal` | The Unreal preset. It gives you `--fbx` plus the following. **Right-handed:** the layout comes out right way up and un-mirrored, and mirrored placements are baked into their own `~mir` meshes. **Opaque:** solid surfaces are `OPAQUE`, each paired with a 24-bit `_opaque.png` twin, so UE doesn't wire texture alpha into them and punch holes in floors. **Raw vertex colours:** the untouched DAT colours and vertex alpha, written to the FBX as linear, not sRGB. **Duplicate removal:** hidden duplicate opaque triangles are dropped. |
+| `--unreal` | The Unreal preset. It gives you `--fbx` plus the following. **Right-handed:** the layout comes out right way up and un-mirrored, and mirrored placements are baked into their own `~mir` meshes. **Opaque:** solid surfaces are `OPAQUE`, so their instances leave `Enable - Alpha` off and junk texture alpha can't punch holes in floors. **Foliage:** the see-through triangles of trees, grass and grates get the `_cutout` material and the solid ones (trunks, posts) the plain one, and a second UV channel carries wind weights (see [materials.md › Wind](materials.md#wind)). **One PNG per texture:** solid and cutout materials share it, with no `_opaque` copies. **Raw vertex colours:** the untouched DAT colours and vertex alpha, written to the FBX as linear, not sRGB. **Duplicate removal:** hidden duplicate opaque triangles are dropped. |
 | `--no-sky` | Leaves the skybox dome out. Use Unreal's own sky (UDS, SkyAtmosphere, …). |
 | `--no-vfx` | Leaves out effect meshes and meshes with no placement. The export can't position effect-placed meshes, so without this they pile up at the world origin. |
 | `--zero-coords` (optional) | For placing pieces yourself, with `--sub-areas` and/or `--objects`: every FBX comes in at 0,0,0 with no rotation, and `<stem>.zone.json` says where each goes back (per object, every placement's transform). The setup script still works: it reads the `.glb`, which isn't moved. See [zone export › Zero coords](../docs/zone/export.md#zero-coords---zero-coords). |
@@ -85,7 +86,7 @@ What to leave **off**:
 |---|---|
 | `<stem>.fbx` | The import. One combined mesh. |
 | `<stem>.glb` | **Keep it next to the `.fbx`.** `ffxi_zone_setup.py` reads it to sort ground overlays from wall overlays. |
-| `model_*.png`, `model_*_opaque.png` | Textures. The `_opaque` twin is the alpha-free copy that solid materials use. |
+| `model_*.png` | Textures, one per FFXI texture. (Exports before the foliage split also wrote a `model_*_opaque.png` alpha-free copy for solid materials; those still work.) |
 | `<stem>.ue5_mat.py` | An older, minimal setup script (sRGB plus Enable - Alpha). `ffxi_zone_setup.py` replaces it, so don't run it. |
 
 ## 3. Import
@@ -127,7 +128,7 @@ What it does:
 | `*_alpha`, **ground** (mostly facing up, painted onto the surface under it) | Parent → `M_FFXIZone_Overlay`, a DBuffer mesh decal, lit exactly like the ground it sits on |
 | `*_alpha`, **everything else** (walls, banners, windows, free-standing pieces) | Parent → `M_FFXIZone_OverlayWall`, MasterMaterial's masked two-sided look plus a small depth pull |
 | `*_cutout` | `Enable - Alpha` = 1 on their MasterMaterial instance (foliage, fences, grates) |
-| Textures | Mipmaps off, sRGB on |
+| Textures | Mipmaps off, sRGB on. **Compress Without Alpha** on the ones only solid materials use (from the `.glb`, so a partial selection can't strip a leaf texture's alpha) |
 
 It finds the zone's `.glb` through the static mesh: UE remembers which `.fbx` the mesh came from,
 and the `.glb` sits beside it. So the script can live anywhere, and it's safe to run as often as
@@ -145,6 +146,7 @@ A good run ends with a summary in the **Output Log**:
     model___kabe_alpha (12% up, 100% painted on a surface)
     ...
 [FFXI overlay] 'Enable - Alpha' = 1 on N *_cutout instances
+[FFXI overlay] N textures only solid materials use: compressed without alpha
 ```
 
 **When you need to rerun it:** after a fresh import. When you only reimport the mesh, the
@@ -169,3 +171,4 @@ material editor.
 
 - [docs/zone/export.md](../docs/zone/export.md) — every `xi zone export` option.
 - [how-ffxi-draws-zones.md](how-ffxi-draws-zones.md) — why each of the above is needed.
+- [foliage.md](foliage.md) — making trees and grass sway.

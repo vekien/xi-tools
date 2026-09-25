@@ -45,7 +45,7 @@ Zones are a different format from entity models (no skeleton); see
 | `--base` | Export from the pristine original instead of your edited DAT — handy to regenerate a clean model after edits. |
 | `--raw` | Omit the orientation-correction node (raw FFXI coords). View-only — a raw export is not meant to be re-imported. |
 | `--right-handed` | Export for a game engine (Godot/Unreal/Unity): bake the handedness flip into geometry (engines drop the negative node scale, mirroring the zone and breaking collision) **and** flip winding to CCW-front so single-sided engines light the terrain instead of culling it black. See below. |
-| `--unreal` | Unreal preset: `--right-handed` + `--opaque` + `--fbx` + `--vertex-color raw`. One flag for a UE-facing FBX with correct winding/orientation, no clipped floors, and FFXI's `×2` left to the zone material. The generated `*.ue5_mat.py` states the material contract. An explicit `--vertex-color` still wins. See below. |
+| `--unreal` | Unreal preset: `--right-handed` + `--opaque` + `--fbx` + `--vertex-color raw`. One flag for a UE-facing FBX with correct winding/orientation, no clipped floors, and FFXI's `×2` left to the zone material. It also splits foliage into cutout and solid materials, writes wind weights to a second UV channel, and shares one PNG per texture (no `_opaque` twins). The generated `*.ue5_mat.py` states the material contract. An explicit `--vertex-color` still wins. See below. |
 | `--vertex-color raw\|baked` | Where FFXI's baked-lighting `×2` (modulate2x) lives in `COLOR_0`. **Default `baked`** folds it in and clamps it, so a shaderless glTF/DCC viewer shows in-game brightness. `raw` emits the untouched DAT colour (and real vertex alpha) and leaves the `×2` to the engine material — matches `entity mesh export`. `--unreal` implies `raw`. See below. |
 | `--json` | Also write `<stem>.zone.json`: every placement (full TRS, LOD, links), mesh list, textures, per-weather ambient sounds, companion event/dialog/NPC DAT paths, and each sub-area's DAT with its own placements (in the zone's world space). Format: [`schema/zone_export.json`](../../schema/zone_export.json) (`xi.zone-export.v1`). |
 | `--with-collision-proxies` | Include **collision-only placements** — draw distance exactly `1.0`, the sentinel the client treats as never-render (`hitwall_*`, `kabe-atariyou`, `hit_*`, `id_board*` / `id_box*`). Retail has 15,835 of them; Ru'Aun Gardens is 45% proxies. Off by default: they stack invisible geometry on the zone. |
@@ -162,6 +162,42 @@ into the mesh. The `.fbx` ships with a `*.ffxi_root_correction`-oriented layout 
 `<stem>.ue5_mat.py` (paste into UE5's Python console after import) that enables alpha on the
 `_alpha` blend-overlay materials and forces base-colour textures to sRGB; its header states the
 vertex-colour contract for the mode you exported.
+
+### Foliage: cutout vs solid triangles, and wind weights
+
+A mesh whose name starts with `_` is alpha-tested as a whole in the client, but only some of
+its triangles ever show a see-through texel. A tree is one mesh with one texture atlas: its leaf
+cards and grass blades sample the transparent background around the leaves, while its trunk
+and bark-textured branch cards sample solid bark. `--unreal` sorts each triangle by the texels
+it covers (any texel below the `0.5` cutoff after the `×2` alpha scale → cutout):
+
+- **Cutout triangles** keep the `MASK` material, `<texture>_cutout`.
+- **Solid triangles** move to the plain `OPAQUE` material, `<texture>`, shared with any other
+  solid surface using that texture. That's cheaper in an engine, and it's what the client
+  shows anyway: its alpha test discards nothing on them.
+
+On West Ronfaure (`ROM/0/120`) that puts all 315 trunk triangles of `_ron_w01_m` in the solid
+material and its 130 leaf triangles in the cutout one; the small trees' branch cards
+(`_ron_w06_m`: 77 of the 151 two-sided triangles) go solid too, which the two-sided `0x2000`
+flag alone would get wrong. Masked triangles in the zone drop from 2,250 to 767.
+
+Texels aren't grown by a margin for bilinear bleed: FFXI's atlas blocks meet on exact texel
+lines and trunk UVs sit right on them (`u = 128.00` beside the leaf block), so a margin pulls
+most of the trunk in with the leaves. What bleeds across such an edge is a sub-texel sliver.
+
+Every primitive also gets **`TEXCOORD_1`**, the wind weights, `(0, 0)` everywhere except cutout
+triangles:
+
+| Channel | Meaning |
+|---|---|
+| `x`, **height** | 0 at the mesh's lowest point, 1 at its top (FFXI's Y points down, so the base is the largest Y). Grass roots stay put, tips sway. |
+| `y`, **reach** | 0 on the vertical line through the middle of the mesh's X/Z bounds, 1 at its widest point. Leaves at the end of a branch move more than those by the trunk. |
+
+Both are 0..1 within each mesh, so a grass clump and a tree both run the full range; the
+material sets how far that is. A mesh with no height (a flat cutout) gets height 0. Every cutout
+carries weights, signs and grates included (Bastok Mines' `_kanban03`), so turn wind on per
+material instance, not on every cutout. The Unreal side is in
+[unreal-engine/foliage.md](../../unreal-engine/foliage.md).
 
 ### Washed-out / flat-white terrain patches — the vertex-colour bake
 
@@ -294,6 +330,12 @@ transform and tone-mapped every texel, so base ground came out up to 42/255 dark
 into the material whenever the PNG has an alpha channel, which would undo `--opaque` on the
 way back in; the alpha-free twin is the only thing it leaves alone. Blend and cutout
 materials keep using the original PNG.
+
+`--unreal` writes no twins: every material points at the texture's own PNG, so a texture used
+by both a solid and a cutout material is one file and one Unreal asset. The engine material
+decides alpha (the kit's MasterMaterial ignores it unless `Enable - Alpha` is on), and the
+setup script compresses textures that only solid materials use without alpha. Reopening that
+FBX in Blender brings the junk alpha back on solid materials, so use plain `--fbx` for Blender.
 
 ## Skybox vs placed geometry
 

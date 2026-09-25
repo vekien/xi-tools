@@ -11,6 +11,10 @@ default because a mesh export carries no clips, and baking none still costs a pa
 
 An 11th argument of ``1`` is ``--zero-coords`` (see ``_zero_coords``): it prints the
 offset it subtracted as ``XI_ZERO_OFFSET x y z``.
+
+A 12th argument of ``0`` keeps OPAQUE materials on the texture's own PNG instead of a
+24-bit ``_opaque.png`` twin (see ``_opaque_png``) — ``zone export --unreal``, whose
+engine materials decide alpha themselves.
 """
 
 import math
@@ -499,6 +503,7 @@ def main() -> None:
     # (--unreal) needs that so the engine material's *2 lands neutral at 1.0.
     colors_type = argv[9] if len(argv) > 9 and argv[9] in ("SRGB", "LINEAR") else "SRGB"
     zero_coords = len(argv) > 10 and argv[10] == "1"
+    opaque_twins = not (len(argv) > 11 and argv[11] == "0")
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
@@ -546,7 +551,7 @@ def main() -> None:
         alpha_wanted = bsdf_node.inputs["Alpha"].is_linked
         key = re.sub(r"\s+", "_", mat.name.strip())
         image = bpy.data.images.load(png_path, check_existing=True)
-        if not alpha_wanted and not key.endswith("_alpha"):
+        if opaque_twins and not alpha_wanted and not key.endswith("_alpha"):
             image = bpy.data.images.load(_opaque_png(image, png_path, bpy.context.scene),
                                          check_existing=True)
         tex_node.image = image
@@ -555,7 +560,8 @@ def main() -> None:
         # Wire the alpha channel so Blender's FBX exporter can trace it.
         # _alpha materials = FFXI softblend (0x8000): keep BLEND for smooth transparency.
         # MASK materials (foliage cutout): direct texture alpha, keep the threshold.
-        # OPAQUE materials got the 24-bit PNG above, so nothing to wire.
+        # OPAQUE materials leave Alpha unlinked (on the 24-bit twin, or on the shared
+        # PNG without twins), so the FBX carries no transparency for them.
         if key.endswith("_alpha"):
             links.new(tex_node.outputs["Alpha"], bsdf_node.inputs["Alpha"])
             mat.blend_method = "BLEND"
