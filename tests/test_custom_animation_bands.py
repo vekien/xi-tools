@@ -5,6 +5,9 @@ kind, and the ids that arithmetic reaches run out long before the 12-bit number
 space does. A client-side plugin can patch the arithmetic so numbers at or above a
 threshold resolve into a reserved region; these pin what the publisher does when
 such a band is configured, and that it does nothing different when one is not."""
+import os
+
+import click
 import pytest
 
 import xi.xi_config as cfg
@@ -86,6 +89,30 @@ def test_the_picker_never_hands_out_the_gap_below_the_band(bands, monkeypatch, t
     # full, the next free job-ability number is the band's first, not 500.
     monkeypatch.setattr(ap, "_placement", lambda root, fid: "taken" if fid < 427_248 else None)
     assert ap._pick_animation(tmp_path, "ja", None, False) == 1024
+
+
+def test_asking_for_a_number_in_the_gap_says_why(bands, monkeypatch, tmp_path):
+    # the old message blamed a registration ("already registered to None") and offered --force
+    monkeypatch.setattr(ap, "_placement", lambda root, fid: None)
+    for force in (False, True):
+        with pytest.raises(click.ClickException, match=r"gap below the custom band: 500–1023") as e:
+            ap._pick_animation(tmp_path, "ja", 600, force)
+        assert "file id 5012" in e.value.message and "teleport" in e.value.message
+    assert ap._pick_animation(tmp_path, "ja", 499, False) == 499
+    assert ap._pick_animation(tmp_path, "ja", 1024, False) == 1024
+
+
+def test_dotenv_never_sets_a_band(monkeypatch, tmp_path):
+    # a band must follow the plugin; a stale .env line kept the job-ability band at 500
+    env = tmp_path / ".env"
+    env.write_text("FX_JA_BAND_FIRST=500\nXI_DOTENV_PROBE=1\n", encoding="utf-8")
+    monkeypatch.setenv("XI_ENV_FILE", str(env))
+    for name in ("FX_JA_BAND_FIRST", "XI_DOTENV_PROBE"):
+        monkeypatch.setenv(name, "")            # recorded, so whatever the loader sets is undone
+        monkeypatch.delenv(name)
+    cfg._load_dotenv()
+    assert os.environ.get("XI_DOTENV_PROBE") == "1"      # the file was read
+    assert "FX_JA_BAND_FIRST" not in os.environ          # its band line was not
 
 
 def test_a_band_never_overlaps_the_retail_ids_it_replaces(bands):

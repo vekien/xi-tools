@@ -21,6 +21,15 @@ def _candidate_env_files():
     yield Path.cwd() / '.env'
 
 
+# Keys ``.env`` never sets. The custom animation bands must match the client plugin, and
+# a line left in the file outlives a plugin change: FX_JA_BAND_FIRST=500 kept the
+# publisher on the old threshold after cexislots moved it to 1024. See the bands below.
+_NOT_FROM_DOTENV = frozenset((
+    'FX_SPELL_BAND_FIRST', 'FX_SPELL_BAND_BASE', 'FX_JA_BAND_FIRST', 'FX_JA_BAND_BASE',
+    'FX_WS_BAND_FIRST', 'FX_WS_BAND_BASE', 'FX_WS_BAND_SLOTS',
+))
+
+
 def _load_dotenv() -> None:
     """Load ``KEY=value`` pairs from the first ``.env`` found into ``os.environ``.
 
@@ -30,6 +39,7 @@ def _load_dotenv() -> None:
     pattern used throughout this module. Real environment variables already set
     ALWAYS win — we never clobber them — so an exported var (or one the launcher set
     before importing xi) takes precedence over the file. The first existing file wins.
+    Keys in ``_NOT_FROM_DOTENV`` are skipped: only a real environment variable sets them.
     """
     for path in _candidate_env_files():
         try:
@@ -51,7 +61,7 @@ def _load_dotenv() -> None:
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
                 value = value[1:-1]
-            if key and value:
+            if key and value and key not in _NOT_FROM_DOTENV:
                 os.environ.setdefault(key, value)
         return  # first file wins
 
@@ -340,12 +350,14 @@ CUSTOM_ROM_IDX = int(CUSTOM_ROM[3:])   # 'ROM10' -> 10
 # teleport in the field; 1024 clears them and leaves 3,072 custom numbers.
 # Spells are fine at 1612: the core's own spell-category numbers stop at 847.
 #
-# Unset, each takes cexislots' value (cexidats src/cexislots/sites.h), so the
-# publisher assumes a client running that plugin. The numbers a stock client can
-# load are still handed out first; the band is only reached once they are used
-# up, and the build says when a number needs the plugin. Set a band's FIRST to 0
-# to switch it off for a stock client (the model viewer sends 0 when Settings ›
-# XI Tools › Custom animation bands is off); a different plugin sets its own.
+# Each takes cexislots' value (cexidats src/cexislots/sites.h), so the publisher
+# assumes a client running that plugin. The numbers a stock client can load are
+# still handed out first; the band is only reached once they are used up, and the
+# build says when a number needs the plugin. These are never read from .env
+# (_NOT_FROM_DOTENV): when the plugin moves a threshold, the value here moves with
+# it. Only a real environment variable changes one — the model viewer sends 0 to
+# switch the bands off for a stock client (Settings › XI Tools › Custom animation
+# bands), and a different plugin can export its own.
 def _band(name: str, default: int) -> int:
     try:
         return max(0, int(os.environ.get(name, default)))
