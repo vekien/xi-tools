@@ -471,6 +471,20 @@ def _write(root, rom_path: str, data: bytes) -> Path:
     return out
 
 
+def read_dat(root, rom_path: str) -> bytes:
+    """The bytes of ``rom_path`` as ``root`` sees it (its own copy, else the install's)."""
+    p = dat_path(root, rom_path)
+    if not p.exists():
+        raise MenuError(f'{rom_path} is neither in {root} nor in the install')
+    return p.read_bytes()
+
+
+def write_dat(root, rom_path: str, data: bytes) -> Path:
+    """Write ``rom_path`` into ``root`` under the redirect rules above (in place with a
+    ``.base`` backup in the install; a mirror in any other root). Returns the path."""
+    return _write(root, rom_path, data)
+
+
 def menu_path(root) -> Path:
     return dat_path(root, MENU_DAT)
 

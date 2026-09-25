@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xi.tools/schema/ui.json",
   "title": "xi dats UI action",
+  "description": "A client table with some entries changed: a d_msg string table (strings), an item table (items) or a zone's dialog table (dialog). The build reads the table as the target sees it, applies the edits in resources.json, and writes the result at the same ROM path — a retail file, so no file id is registered. Everything the edits do not name is carried over byte for byte. The texture / layout / spells categories are reserved and not built yet.",
   "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
   "type": "object",
   "additionalProperties": false,
@@ -16,9 +17,9 @@
       "additionalProperties": false,
       "required": ["dat"],
       "properties": {
-        "dat": {"$ref": "common.json#/$defs/romPath"},
-        "category": {"type": "string", "enum": ["texture", "layout", "strings", "items", "spells"]},
-        "entry": {"oneOf": [{"type": "string"}, {"type": "integer"}]}
+        "dat": {"$ref": "common.json#/$defs/romPath", "description": "The table's ROM path. One language's DAT per action: a JP table is a second action."},
+        "category": {"type": "string", "enum": ["texture", "layout", "strings", "items", "spells", "dialog"]},
+        "entry": {"oneOf": [{"type": "string"}, {"type": "integer"}], "description": "strings: the sub-string index the edits set when an edit gives no \"sub\" of its own (default: the block's first text sub-string)."}
       }
     },
     "resources": {
@@ -26,13 +27,52 @@
       "additionalProperties": false,
       "properties": {
         "image": {"$ref": "common.json#/$defs/relativePath"},
-        "json": {"$ref": "common.json#/$defs/relativePath"},
+        "json": {"$ref": "common.json#/$defs/relativePath", "description": "The edits: the JSON the matching export command writes (xi ui strings export, xi ui items <group> json, xi event dialogue export), or an object holding that list under \"edits\"."},
         "directory": {"$ref": "common.json#/$defs/relativePath"}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grow": {"type": "boolean", "default": true, "description": "An edit whose id is past the end of the table grows it (empty entries up to the id, then the entry). Off: such an edit fails the build."}
+      }
+    },
+    "result": {
+      "type": "object",
+      "description": "Recorded by dats build.",
+      "additionalProperties": true,
+      "properties": {
+        "dat": {"$ref": "common.json#/$defs/romPath"},
+        "category": {"type": "string"},
+        "entries": {"type": "integer", "minimum": 0, "description": "Edits written."},
+        "grown_to": {"type": ["integer", "null"], "description": "The table's entry count after growth, or null when it did not grow."},
+        "created": {"type": "boolean", "description": "True when the target held no copy of the table before this build, so undo deletes the one it wrote; false when the build edited a copy already there (the install's own file, or an earlier build's), which undo leaves."},
+        "targets": {"type": "array", "items": {"type": "string", "enum": ["dir", "pivot", "hd"]}}
       }
     },
     "outputs": {"$ref": "common.json#/$defs/outputTree"}
   },
   "examples": [
+    {
+      "id": "ui.spell_names_en",
+      "type": "ui",
+      "target": {"dat": "ROM/181/73.DAT", "category": "strings"},
+      "resources": {"json": "ui/spell_names_en.json"}
+    },
+    {
+      "id": "ui.items_general",
+      "type": "ui",
+      "target": {"dat": "ROM/118/106.DAT", "category": "items"},
+      "resources": {"json": "ui/items_general.json"},
+      "options": {"grow": true}
+    },
+    {
+      "id": "ui.rulude_dialog",
+      "type": "ui",
+      "target": {"dat": "ROM/25/52.DAT", "category": "dialog"},
+      "resources": {"json": "ui/rulude_dialog.json"}
+    },
     {
       "id": "ui.title_logo",
       "type": "ui",

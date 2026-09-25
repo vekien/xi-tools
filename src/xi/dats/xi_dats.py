@@ -518,8 +518,15 @@ def _detect_source_type(source: Path, explicit_type: str | None) -> tuple[str, d
     data = _load_json(source)
     if explicit_type:
         return explicit_type, data
+    if not isinstance(data, dict):
+        # A bare list is an edit list for a table (`xi ui strings export` and the like):
+        # it says nothing about which table, so the flags have to.
+        raise click.ClickException(f"{source} is a list, not an action: pass --type ui with "
+                                   "--target and --category.")
     if source.name == "zone-changes.json" or "placements" in data or "vfx" in data or "zone" in data:
         return "zone", data
+    if data.get("schema") == "xi.ui.v1":
+        return "ui", data
     # A spell / command definition (schema/spell_definition.json, command_definition.json).
     from xi.menu.xi_menu_table import DEFINITION_SCHEMAS
     if data.get("schema") in DEFINITION_SCHEMAS:
@@ -1297,6 +1304,51 @@ def _build_record(action: dict, manifest_path: Path, manifest: dict, force: bool
     }
 
 
+def _build_ui(action: dict, manifest_path: Path, manifest: dict, dry_run: bool = False) -> dict:
+    """A table edit (xi.dats.xi_tables): the edits applied to the table as the target
+    sees it, written back at the same ROM path. No file id: the table is a retail one."""
+    from xi.dats import xi_tables as T
+    resources = action.get("resources") or {}
+    if not resources.get("json"):
+        raise click.ClickException(f"{action.get('id')}: ui action needs resources.json (the edits).")
+    edits_path = _resolve_raw_source(resources["json"], manifest_path, manifest)
+    result = T.build(action, _active_build_root(), edits_path, dry_run=dry_run)
+    result.update({"id": action["id"], "type": "ui"})
+    return result
+
+
+def _ui_action_from_edits(source: Path, data, resource_root: Path, *, action_id: str | None,
+                          target: str | None, category: str | None) -> dict:
+    """The action for a table-edit source: a bare edit list (`xi ui strings export`,
+    `xi ui items <group> json`, `xi event dialogue export`) placed by --target and
+    --category, or a self-describing file (schema xi.ui.v1) that names its own table
+    and carries the edits inline or in a file beside it."""
+    described = data if isinstance(data, dict) else {}
+    tgt = dict(described.get("target") or {})
+    dat = _rom_rel(target or tgt.get("dat") or "")
+    cat = category or tgt.get("category")
+    if not dat or not cat:
+        raise click.ClickException(
+            "A table edit needs the table and its kind: --target ROM/181/73.DAT --category strings "
+            "(items, dialog), or a source that carries target.dat and target.category.")
+    action_id = action_id or described.get("id") or _action_id_for(source, "ui", None)
+    dest_dir = resource_root / "ui" / action_id.removeprefix("ui.")
+    ref = (described.get("resources") or {}).get("json")
+    if ref:                                     # the edits live in a file beside the source
+        rel = _copy_resource_reference(ref, source, dest_dir, resource_root)
+    else:                                       # the source itself is (or carries) the edits
+        rel = _relative_to_resources(_copy_file(source, dest_dir / source.name), resource_root)
+    action = {"id": action_id, "type": "ui",
+              "target": {"dat": dat, "category": cat},
+              "resources": {"json": rel}}
+    if isinstance(tgt.get("entry"), int):
+        action["target"]["entry"] = tgt["entry"]
+    options = dict(described.get("options") or {})
+    if options:
+        action["options"] = options
+    return action
+
+
 def _wizard_record(kind: str, slug: str, prev: dict | None, manifest_path: Path, manifest: dict) -> dict:
     from xi.menu.xi_menu_table import KINDS, client_warning, load_definition, MenuError
     p = prev or {}
@@ -1548,11 +1600,13 @@ def json_cmd(manifest: Path, output: Path | None):
               help="Spell / command definitions: the record id to take (default auto = highest free above the retail band).")
 @click.option("--menu-index", type=int, default=None,
               help="Spell definitions: the menu slot to sort into (default auto = next after retail's).")
+@click.option("--category", type=click.Choice(["strings", "items", "dialog"]), default=None,
+              help="Table edits (--type ui): which kind of table --target is.")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
                 record_id: int | None = None, menu_index: int | None = None,
-                animation_from: int | None = None):
+                animation_from: int | None = None, category: str | None = None):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -1578,6 +1632,10 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     elif kind in RECORD_TYPES:
         action = _record_action_from_definition(source, resource_root, kind, action_id=action_id,
                                                 record_id=record_id, menu_index=menu_index)
+        action_id = action["id"]
+    elif kind == "ui":
+        action = _ui_action_from_edits(source, data, resource_root, action_id=action_id,
+                                       target=target, category=category)
         action_id = action["id"]
     elif kind == "zone":
         dat_target = _rom_rel(target or data.get("zone", ""))
@@ -1672,6 +1730,8 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         # Same rule: the recorded id survives a re-prepare; the target too unless set here.
         explicit = record_id is not None or menu_index is not None
         preserve = ("result",) + (() if explicit else ("target",))
+    elif kind == "ui":
+        preserve = ("result",) + (() if (target or category) else ("target",))
     else:
         preserve = ("model",) + (() if target else ("target",))
     _add_or_replace_action(manifest_data, action, replace, preserve=preserve)
@@ -1761,6 +1821,10 @@ def _action_summary(action: dict) -> str:
     if action.get("type") in RECORD_TYPES:
         rid = (action.get("result") or {}).get("record_id", (action.get("target") or {}).get("id", "auto"))
         line += f" - id {rid}: {(action.get('resources') or {}).get('definition', '?')}"
+        return line
+    if action.get("type") == "ui":
+        t = action.get("target") or {}
+        line += f" - {t.get('category', '?')} {t.get('dat', '?')}: {(action.get('resources') or {}).get('json', '?')}"
         return line
     if action.get("type") == "ability":
         anim = (action.get("target") or {}).get("animation", "auto")
@@ -1975,6 +2039,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_ability(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind in RECORD_TYPES:
             return _build_record(action, manifest, manifest_data, force=force, dry_run=dry_run)
+        if kind == "ui":
+            return _build_ui(action, manifest, manifest_data, dry_run=dry_run)
         raise click.ClickException(
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
@@ -2010,6 +2076,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                 res = _ability_result(result, action.get("result"))
             elif kind in RECORD_TYPES:
                 res = _record_result(result)   # the id is decided against the live table too
+            elif kind == "ui":
+                res = {k: v for k, v in result.items() if k not in ("id", "type", "registered")}
             else:
                 res = _plan_result(action)
             res["targets"] = [n for n in ("pivot", "dir", "hd") if n in built]
@@ -2392,6 +2460,8 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
     live_ids = {id(a) for a in live}
     built = _project_built_targets(manifest_data)
     n_placements = sum(len(_action_placements(a)) for a in live)
+    n_placements += sum(1 for a in live
+                        if a.get("type") == "ui" and (a.get("result") or {}).get("created"))
     proj_name = manifest_data.get("name") or manifest_path.stem
     abilities = [a for a in actions if a.get("type") == "ability" and isinstance(a.get("result"), dict)]
     db_acts = [(a, a["result"]["db"]) for a in abilities if SP.db_needs_undo(a["result"].get("db"))]
@@ -2478,6 +2548,22 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
                 # The Client Menu Record: put back the placeholder, only while the row still
                 # holds the bytes the build wrote (a retail update may have taken it since).
                 cleared += undo_menu_in(action, name, root, menu_left)
+            if action.get("type") == "ui":
+                # A table edit: the build wrote a whole DAT. One this build created in the
+                # target goes; one it edited in place (the install's own file, or a copy an
+                # earlier build put here) holds other edits too, so it is left and said.
+                res = action.get("result") or {}
+                if res.get("dat"):
+                    p = root / Path(*_rom_rel(res["dat"]).split("/"))
+                    if res.get("created"):
+                        if p.exists():
+                            p.unlink()
+                            removed += 1
+                    elif p.exists():
+                        click.echo(click.style(
+                            f"  ⚠ {res['dat']} in {name} was edited in place and is left as it is: "
+                            f"restore it from its .base, or rebuild the project without {action.get('id')}",
+                            fg="yellow"))
         click.echo(f"  ✓ {name}: DATs deleted + table entries cleared")
         for w in menu_left:
             click.echo(click.style(f"  ⚠ menu: {w}", fg="yellow"))
@@ -2679,6 +2765,8 @@ def _print_placements(results: list[dict], title: str) -> None:
             if r.get("sql"):
                 for line in r["sql"].splitlines():
                     click.echo(f"       {line}")
+        elif kind == "ui":
+            click.echo(f"{head}: {r.get('registered')} -> {r.get('output')}")
         elif kind == "ability":
             files = r.get("placements", [])
             click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "

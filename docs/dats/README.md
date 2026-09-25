@@ -185,6 +185,50 @@ uv run xi dats build testspell --pivot     # into FFXI_PIVOT_DIR's 114.DAT + nam
 
 Full detail: [../menu/records.md](../menu/records.md).
 
+### Table edits (`ui` action)
+
+Most of what a server changes in the client is not a new file but a few entries of a
+retail table: a spell's name, an item's description, the line an NPC says. A `ui` action
+holds those edits and nothing else; the build reads the table as the target sees it,
+applies them, and writes the whole table back at its own ROM path. Untouched entries are
+carried over byte for byte, so a build is reproducible from the edits plus the install and
+a repository need only hold the edits.
+
+Three kinds of table, each edited with the JSON its export command writes:
+
+| `target.category` | The table | Edits (`resources.json`) |
+|---|---|---|
+| `strings` | any d_msg table — `xi ui strings list` names the common ones | `[{"id": 12, "text": "…"}]` from `xi ui strings export`; an entry's `"sub"` (else `target.entry`) picks the sub-string, default the block's first text |
+| `items` | an item table `xi ui items info` knows | `[{"id": 30720, "name": "…", "level": 5, "jobs_list": ["WAR"]}]` from `xi ui items <group> json`; `id` is the item id, only the fields given are written, and an id past the end is built the way `xi ui items <group> inject` builds one |
+| `dialog` | a zone's dialog table (what `xi event dialogue` edits) | `[{"id": 3, "text": "…"}]` from `xi event dialogue export`, with `edit`'s escapes (`\n`, `\v`, `{player}`); `"raw_hex"` instead of `text` writes those exact bytes |
+
+One language's DAT per action: a JP table is a second action. An id past the end of the
+table grows it (empty entries up to the id, then the entry) unless `options.grow` is
+false. Edits layer — two actions on one DAT both land, the second reading the first's
+copy from the target — so a project can split a big table's edits by theme.
+
+```bash
+uv run xi ui strings export Spell_Names -o edits/spell_names_en.json     # then keep only the changed entries
+uv run xi dats prepare edits/spell_names_en.json --project names --type ui --target ROM/181/73.DAT --category strings
+uv run xi dats build --project names --pivot
+```
+
+Or a self-describing file, which `prepare` reads without flags — the table and the edits
+in one place, the shape a repository would keep:
+
+```json
+{
+  "schema": "xi.ui.v1",
+  "type": "ui",
+  "target": {"dat": "ROM/25/52.DAT", "category": "dialog"},
+  "edits": [{"id": 3, "text": "Welcome back.\\v"}]
+}
+```
+
+`undo` deletes a table the build created in the target; one it edited in place (the
+install's own file, or a copy an earlier build put there) holds other edits too, so it is
+left and named — restore it from its `.base`, or rebuild without the action.
+
 ## Building (`xi dats build`)
 
 A build writes DATs and patches their file_ids **directly into the base install
@@ -407,7 +451,7 @@ resource files that live next to the source JSON into `projects/resources/<type>
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder), and the DATs of `--pivot` builds into the release's pivot folder. Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back (an ability's only while the row still holds what the build wrote), then remove the manifest (`--keep-json` keeps it). `--apply-db` also reverts the database row an ability inserted or changed and deletes its unedited Lua stub; without it they are listed (with the revert SQL) and left, and the manifest is **kept** — its cleared actions marked `undone` — until a later `undo --apply-db` removes them (a row already gone or already back at its old animation counts as done). An ability menu record that can't be written back (the game has `114.DAT` open) also keeps the manifest, and the next undo retries it |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`) |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`; for a table's edits `--type ui --target <ROM path> --category strings|items|dialog`) |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
@@ -441,6 +485,14 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   action, emits a server row template to `projects/server/spells|commands/`. No file
   ids, no table expansion; the client needs a ceiling plugin such as cexislots to show
   the band. A `--force` overwrite keeps the old row on `result.replaced` for `undo`.
+- `ui`: a client table with some entries changed (`xi.dats.xi_tables`) — a d_msg
+  string table (`strings`), an item table (`items`) or a zone's dialog table (`dialog`).
+  The build reads the table as the target sees it, applies the edits in `resources.json`
+  and writes the result at the same ROM path; a retail file, so no file id and no table
+  expansion. Everything the edits do not name is carried over byte for byte. An id past
+  the end grows the table unless `options.grow` is false. Records `entries`, `grown_to`
+  and `created` (the target held no copy before, so `undo` deletes it; an in-place edit
+  is left). See [Table edits](#table-edits-ui-action).
 
 GLB-rebuild / package types:
 
