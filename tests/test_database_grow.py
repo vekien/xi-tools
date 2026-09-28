@@ -86,3 +86,12 @@ def test_an_install_grown_table_keeps_its_rows_through_a_pivot_reset(game, tmp_p
         r = CliRunner().invoke(group, ["build", "--list", "--reset", "--pivot"], catch_exceptions=False)
         assert r.exit_code == 0, r.output
         assert titles(pivot / Path(*TITLES_EN.split("/")))[3:] == ["", "", "Pivot Title"]
+
+
+def test_a_grown_row_keeps_the_last_rows_numbers(game):
+    from test_dats_database_build import KI_EN
+    path = game / Path(*KI_EN.split("/"))
+    assert grow(KI_EN, "4").exit_code == 0
+    last, new = (DB._block_subs(D.parse(path.read_bytes()).blocks[i]) for i in (1, 3))
+    assert [DB.sub_value(x) for x in new] == [2, 1, "", "", "", "", ""]      # numbers as row 1's
+    assert [DB.sub_value(x) for x in last][:2] == [2, 1]

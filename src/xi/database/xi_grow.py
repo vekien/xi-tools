@@ -5,7 +5,7 @@ apart by what the file holds.
 
 The new rows are a filler:
 
-- a d_msg table: a blank row (the last row's shape, its text empty);
+- a d_msg table: a blank row (the last row, its text empty and its numbers kept);
 - an item table: a copy of the table's last placeholder record (named '.' or nothing), its
   text emptied;
 - ``--fill-from ROW``: a copy of that row; ``--fill-hex``: exact bytes (a d_msg block, or a
@@ -91,8 +91,12 @@ def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> byt
             return bytes(t.blocks[row])
         if not t.num:
             raise GrowError("the table has no row to take the shape of a new one from; give --fill-hex")
-        from xi.database.xi_build import _blank, _block_subs
-        return D._assemble_block(_blank(_block_subs(t.blocks[-1]), ""), t.stride)
+        from xi.database.xi_build import _block_subs, set_sub
+        subs = _block_subs(t.blocks[-1])
+        for s in subs:
+            if s["flag"] == 0:
+                set_sub(s, "")            # the text blank; a number kept as the last row has it
+        return D._assemble_block(subs, t.stride)
     from xi.ui.items.xi_layout import detect_stride
     from xi.ui.items.xi_parser import _decrypt
     stride = detect_stride(data)
@@ -194,7 +198,8 @@ def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool,
     """Grow TABLE (a ROM path: an item DAT or a d_msg table) to COUNT rows, once.
 
     
-    New rows are a filler: a blank d_msg row, or the item table's last placeholder record
+    New rows are a filler: the last d_msg row with its text blank (its numbers kept), or the
+    item table's last placeholder record
     with its text emptied (its id following the table's numbering), unless --fill-from / --fill-hex says
     otherwise. In the install the table's .base grows too, so `xi dats build
     --reset` (and `--reset --pivot`, which copies the install's .base) keeps the rows. A table
