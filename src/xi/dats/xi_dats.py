@@ -364,7 +364,13 @@ def _ftable_entries(ft: Path) -> int:
 
 def _backup_once(path: Path) -> None:
     """Copy a table to <name>.base once before its first modification, so the
-    change stays recoverable (matches `xi ftable reset`'s .base backups)."""
+    change stays recoverable (matches `xi ftable reset`'s .base backups). In the
+    install only: a pivot folder keeps no .base."""
+    from xi.xi_config import FFXI_DIR
+    try:
+        Path(path).resolve().relative_to(Path(FFXI_DIR).resolve())
+    except ValueError:
+        return
     base = path.with_name(path.name + ".base")
     if path.exists() and not base.exists():
         shutil.copy2(path, base)
