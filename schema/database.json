@@ -1064,7 +1064,7 @@
     "menuSet": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Fields of a spell (spellData) or command (abilityData) record, as xi.menu.xi_menu_table reads them. Spells: kind, element, targets, skill, mp, cast and recast (quarter seconds), menu_index, icon, icon2, requirements, and levels. Commands: type, icon, icon2, charges, targets, tp, level, range, radius, aoe, valid_targets, tp_modifier.",
+      "description": "Fields of a spell (spellData) or command (abilityData) record, as xi.menu.xi_menu_table reads them. Spells: kind, element, targets, skill, mp, cast and recast (quarter seconds), menu_index, icon, icon2, requirements, and levels. Commands: type, icon, icon2, charges, targets, tp, level, range, radius, aoe, valid_targets, tp_modifier. Bytes nobody has named yet are unknown_<offset> (spells unknown_45–62, commands unknown_08–2e).",
       "properties": {
         "targets": {
           "type": "integer",
@@ -1214,6 +1214,192 @@
               }
             ]
           }
+        },
+        "unknown_45": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_46": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_48": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_4a": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_4c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_4e": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_50": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_52": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_54": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_56": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_58": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_5a": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_5c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_5e": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_60": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_62": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_08": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_0e": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_16": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_18": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_1a": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_1c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_1e": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_20": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_22": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_24": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_26": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_28": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_2a": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_2c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
+        },
+        "unknown_2e": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "A record value nobody has named yet (its byte offset, hex)."
         }
       }
     },

@@ -86,9 +86,10 @@ def tables() -> list[str]:
 
 def menu_fields(table: str) -> list[str]:
     """The fields ``set`` may name for a spell / command record table."""
-    from xi.menu.xi_menu_table import KINDS
+    from xi.menu.xi_menu_table import KINDS, unknown_fields
     kind = MENU_KINDS[table]
-    return [n for n in KINDS[kind].fields if n != "id"] + (["levels"] if kind == "spell" else [])
+    return ([n for n in KINDS[kind].fields if n != "id"] + (["levels"] if kind == "spell" else [])
+            + list(unknown_fields(kind)))
 
 
 def set_fields(table: str) -> list[str]:
@@ -249,7 +250,7 @@ def _check_strings(table: str, strings, at: str, errs: list) -> None:
 
 
 def _check_menu_set(table: str, values, at: str, errs: list) -> None:
-    from xi.menu.xi_menu_table import ELEMENTS as M_ELEMENTS, JOBS as M_JOBS, KINDS, SPELL_KINDS
+    from xi.menu.xi_menu_table import ELEMENTS as M_ELEMENTS, JOBS as M_JOBS, KINDS, SPELL_KINDS, unknown_fields
     if not isinstance(values, dict):
         errs.append(f"{at} must be an object")
         return
@@ -275,7 +276,7 @@ def _check_menu_set(table: str, values, at: str, errs: list) -> None:
             if v.lower() not in SPELL_KINDS.values():
                 errs.append(f"{where}: {v!r} is not a spell kind ({', '.join(SPELL_KINDS.values())})")
         else:
-            size = KINDS[kind].fields[name][1]
+            size = (KINDS[kind].fields.get(name) or unknown_fields(kind)[name])[1]
             if not _is_int(v, 0, 0xFF if size == 1 else 0xFFFF):
                 errs.append(f"{where} must be an integer 0-{0xFF if size == 1 else 0xFFFF}")
 

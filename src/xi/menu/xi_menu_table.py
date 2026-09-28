@@ -215,6 +215,39 @@ def _put(rec: bytearray, off: int, size: int, value: int) -> None:
         struct.pack_into('<H', rec, off, value)
 
 
+def _unknown_fields(kind: str) -> Dict[str, tuple]:
+    """The record bytes no named field covers (nor, for spells, the job levels), as fields
+    ``unknown_<offset hex>`` (a u16 on an even offset, else a byte): real values nobody has
+    named yet, so a whole record can be written as fields. Not in ``read_fields``."""
+    k = KINDS[kind]
+    covered = set()
+    for off, size in k.fields.values():
+        covered.update(range(off, off + size))
+    if kind == 'spell':
+        covered.update(range(SPELL_LEVELS, SPELL_LEVELS + 48))
+    out: Dict[str, tuple] = {}
+    off = 0
+    while off < k.stride:
+        if off in covered:
+            off += 1
+        elif off % 2 == 0 and off + 1 < k.stride and off + 1 not in covered:
+            out[f'unknown_{off:02x}'] = (off, 2)
+            off += 2
+        else:
+            out[f'unknown_{off:02x}'] = (off, 1)
+            off += 1
+    return out
+
+
+def unknown_fields(kind: str) -> Dict[str, tuple]:
+    if kind not in _UNKNOWN:
+        _UNKNOWN[kind] = _unknown_fields(kind)
+    return _UNKNOWN[kind]
+
+
+_UNKNOWN: Dict[str, Dict[str, tuple]] = {}
+
+
 def read_fields(kind: str, rec: bytes) -> dict:
     """The named fields of a decoded record; spells also carry ``levels``
     ({JOB: level} for the jobs that can learn it)."""
@@ -244,11 +277,12 @@ def write_fields(kind: str, rec: bytes, fields: dict) -> bytes:
                 table[JOBS.index(job)] = lvl
             struct.pack_into('<24H', out, SPELL_LEVELS, *table)
             continue
-        if name not in k.fields:
+        spec = k.fields.get(name) or unknown_fields(kind).get(name)
+        if spec is None:
             raise MenuError(f'{kind} record has no field {name!r}')
         if isinstance(value, str):
             value = _named_value(name, value)
-        off, size = k.fields[name]
+        off, size = spec
         _put(out, off, size, int(value))
     return bytes(out)
 
