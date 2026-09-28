@@ -49,7 +49,7 @@ A spell: [schema/spell_definition.json](../../schema/spell_definition.json)
 {
   "schema": "xi.spell.v1",
   "name": "testspell",
-  "like": 144,
+  "copy_from": 144,
   "id": "auto",
   "text": {"name_en": "Testspell", "help_en": "A test spell: deals fire damage to the target."},
   "fields": {"mp": 12, "cast": 8, "recast": 40, "element": "fire", "levels": {"BLM": 20, "RDM": 25}}
@@ -62,13 +62,13 @@ A command: [schema/command_definition.json](../../schema/command_definition.json
 {
   "schema": "xi.command.v1",
   "name": "war_cry",
-  "like": 547,
+  "copy_from": 547,
   "text": {"name_en": "War Cry", "help_en": "Goads all enemies in range into attacking you."},
   "fields": {"level": 30}
 }
 ```
 
-`like` is the retail record to clone: everything you do not name (icon, target bits,
+`copy_from` is the retail record to clone (an older definition's `like` is refused, naming the new key): everything you do not name (icon, target bits,
 flags, the donor's job table) is kept. `fields` are the decoded record fields:
 
 | spell field | record | meaning |

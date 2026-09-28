@@ -296,10 +296,12 @@ def _npc_sql(npc: dict, sid: int, zone: int, warnings: list) -> list[str]:
 
 def build(action: dict, *, root: Path, target: str | None, manifest: dict | None = None,
           sql_path: Path | None = None, project: str = "", force: bool = False, dry_run: bool = False,
-          unwound: bool = False) -> dict:
+          unwound: bool = False, apply: bool = False) -> dict:
     """Apply ``action`` to the zone's entity-name table in ``root`` and write the proposed SQL;
     the build result (``records`` is what gets recorded for this root). ``unwound``: the
-    previous build's names were already put back (``xi dats build`` does that first)."""
+    previous build's names aren't put back first (``xi dats build --reset`` did that, or the
+    table was reset). ``apply``: they are still there — an NPC this action added is its own
+    to rename, and one already named as the edit says is left alone."""
     from xi.database import xi_build as DB
     from xi.dats import xi_stage
     errs = validate_action(action)
@@ -325,7 +327,8 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict | None
         auto = npc.get("id") == "auto"
         if auto:
             local = kept.get(npc["name"])
-            if local is None or local in taken:
+            mine = local is not None and _name_of(data, CN.make_npcid(zone, local)) == npc["name"]
+            if local is None or (local in taken and not mine):
                 local = free_local(taken)
             taken.add(local)
         else:
@@ -334,15 +337,19 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict | None
         cur = _name_of(data, sid)
         try:
             if npc.get("new"):
-                if cur is not None and not force:
+                own = apply and any(e.get("sid") == sid and e.get("created") for e in prev) \
+                    and next((e for e in reversed(prev) if e.get("sid") == sid), {}).get("to") == cur
+                if cur is not None and cur != npc["name"] and not (force or own):
                     raise ZoneNpcsError(f"zone {zone} already has NPC {local:#x} ({cur!r}); pick another id, "
-                                        "\"auto\", or --force")
+                                        "\"auto\", or --force (--reset rebuilds this action's own NPCs)")
                 if local < CN.CUSTOM_NPC_LOCAL_START:
                     warnings.append(f"NPC {local:#x} is below the custom band (0x{CN.CUSTOM_NPC_LOCAL_START:X}+), "
                                     "where retail updates add NPCs")
-                data = CN.inject_name_record(data, sid, npc["name"])
-                entry = {"zone": zone, "dat": rel, "sid": sid, "local": local, "from": cur,
-                         "to": npc["name"], "created": cur is None}
+                entry = None
+                if cur != npc["name"]:                  # else already there
+                    data = CN.inject_name_record(data, sid, npc["name"])
+                    entry = {"zone": zone, "dat": rel, "sid": sid, "local": local, "from": cur,
+                             "to": npc["name"], "created": cur is None}
             else:
                 if cur is None:
                     raise ZoneNpcsError(f"zone {zone} has no NPC {local:#x}; mark it \"new\": true to add it")

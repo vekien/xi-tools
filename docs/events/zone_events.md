@@ -120,10 +120,13 @@ Each event records, per target, its id and every change it made:
   and the lines it added as one run per table.
 - **camera**: the scene DAT's file id and placement.
 
-`xi dats build` first puts back what the project's zone and database actions changed last time,
-newest first, then applies them in order. Where several actions change one table (events on one
-NPC, lines added to one zone by `zone_dialog` and `zone_events`), each gets back exactly the table
-it changed. A rebuild writes the same bytes, and `xi dats undo` restores the tables as they were.
+A build replaces the action's own events: it puts back what its last build of them changed, then
+compiles them again, so a rebuild writes the same bytes and an edited cutscene keeps its event and
+line ids. `xi dats build --reset` puts back what all of the project's zone and database actions
+changed last time, newest first, then applies them in order; where several actions change one
+table (events on one NPC, lines added to one zone by `zone_dialog` and `zone_events`), each gets
+back exactly the table it changed. The zone editor, `xi event cutscene compile` and
+`xi event dialogue new` build that way. `xi dats undo` restores the tables as they were.
 A dry run holds each step's writes in memory, so it plans against what the steps before it would
 leave.
 

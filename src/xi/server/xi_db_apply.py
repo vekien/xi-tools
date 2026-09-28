@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from xi.server.xi_commands import _resolve, db_configured, friendly_db_error, resolved_creds
-from xi.server.xi_step import DASH, Step, current_server_dir, now_iso, q
+from xi.server.xi_step import DASH, Step, current_server_dir, now_iso, q, recorded_donor
 
 
 class DbUnavailable(Exception):
@@ -556,7 +556,7 @@ class DbPlan:
     id: int | None = None
     row: dict | None = None             # the located row as it is now
     state: str | None = None            # ours | foreign | gone | none (from locate)
-    like: dict | None = None            # the donor of an insert {id, name, group?, …}
+    copy_from: dict | None = None       # the donor of an insert {id, name, group?, …}
     confirmed: bool = False             # --db-row matched a foreign row
     reason: str | None = None           # skip / refused / error / needs-confirm
     warnings: list = field(default_factory=list)
@@ -580,7 +580,7 @@ class DbPlan:
         if self.op == "update":
             text = f"{t} #{self.id} {q(rn)} animation {self.row['animation']} -> {self.animation}{srv}"
         elif self.op == "insert":
-            text = (f"{t} #{self.id} {q(self.name)} like #{self.like['id']} {q(self.like['name'])} "
+            text = (f"{t} #{self.id} {q(self.name)} like #{self.copy_from['id']} {q(self.copy_from['name'])} "
                     f"animation {self.animation}{srv}")
         elif self.op == "unchanged":
             text = f"{t} #{self.id} {q(rn)} animation {self.animation}{srv}"
@@ -601,9 +601,9 @@ class DbPlan:
         same = bool(prev) and prev.get("table") == t and prev.get("id") == self.id
         if self.op == "insert" and self.executed:
             out = {"table": t, "id": self.id, "name": self.name, "created": True, "confirmed": False,
-                   "like": {"id": self.like["id"], "name": self.like["name"]}}
+                   "copy_from": {"id": self.copy_from["id"], "name": self.copy_from["name"]}}
             if self.kind == "spell":
-                out["group"] = self.like.get("group")
+                out["group"] = self.copy_from.get("group")
             out.update(animation=self.animation, before=None, op="insert", server=self.server, at=at)
             return out
         if (self.op == "update" and self.executed) or (self.op == "unchanged" and (self.state == "ours" or self.confirmed)):
@@ -611,7 +611,7 @@ class DbPlan:
             created = bool(base.get("created"))
             out = {"table": t, "id": self.id, "name": (self.row or {}).get("name") or self.name,
                    "created": created, "confirmed": bool(base.get("confirmed") or self.confirmed),
-                   "like": base.get("like")}
+                   "copy_from": recorded_donor(base) or None}
             if self.kind == "spell":
                 out["group"] = base.get("group", (self.row or {}).get("group"))
             before = base.get("before")
@@ -676,7 +676,7 @@ def _restart(table: str) -> str:
 
 
 def _insert_warnings(plan: DbPlan, ctx: DbCtx) -> list:
-    t, d, i = plan.table.name, plan.like, plan.id
+    t, d, i = plan.table.name, plan.copy_from, plan.id
     w = []
     if plan.kind == "spell":
         w.append(f"learn it in game with !addspell {i}")
@@ -722,14 +722,14 @@ def _build_insert(plan: DbPlan, pr: Probe, new_id: int, donor_id: int) -> None:
     plan.insert_parts = (list(pr.columns), exprs, tuple(params), int(donor_id))
 
 
-def _check_clone_from(conn, pr: Probe, ctx: DbCtx, like: dict | None, row_id: int, plan: DbPlan) -> None:
+def _check_clone_from(conn, pr: Probe, ctx: DbCtx, copy_from: dict | None, row_id: int, plan: DbPlan) -> None:
     """A created row keeps its donor: a different --clone-from only warns."""
-    if not ctx.clone_from or not like:
+    if not ctx.clone_from or not copy_from:
         return
     donor, _why = resolve_donor(conn, pr, ctx.clone_from)
-    if donor and donor["id"] != like.get("id"):
+    if donor and donor["id"] != copy_from.get("id"):
         x = str(ctx.clone_from).strip()
-        plan.warnings.append(f"#{row_id} was cloned from #{like.get('id')} {q(like.get('name'))}; "
+        plan.warnings.append(f"#{row_id} was cloned from #{copy_from.get('id')} {q(copy_from.get('name'))}; "
                              f"Clone from {q(x)} is ignored (undo, then publish again, to clone it from {q(x)})")
 
 
@@ -783,7 +783,7 @@ def plan(conn, ctx: DbCtx, *, choose_id=None) -> DbPlan:
             p.id = r["id"]
             prev = p.prev_db or {}
             if loc.state == "ours" and prev.get("created"):
-                _check_clone_from(conn, pr, ctx, prev.get("like"), r["id"], p)
+                _check_clone_from(conn, pr, ctx, recorded_donor(prev), r["id"], p)
                 if ctx.server_id is not None and int(ctx.server_id) != r["id"]:
                     p.warnings.append(f"#{r['id']} is this mix's row; Server id {ctx.server_id} is ignored")
             if r["animation"] == n:
@@ -813,19 +813,19 @@ def plan(conn, ctx: DbCtx, *, choose_id=None) -> DbPlan:
         # ── insert: a created row that is gone, or no row named after the mix ──
         prev = p.prev_db or {}
         if loc.state == "gone":
-            like = prev.get("like") or {}
-            if like.get("id") is None:
+            copy_from = recorded_donor(prev)
+            if copy_from.get("id") is None:
                 return _refuse(p, f"#{prev.get('id')}, which this mix created, is missing and its donor "
                                   "isn't recorded; undo it (xi dats undo --apply-db) and publish again")
-            rows = _by_id(conn, pr, like["id"])
+            rows = _by_id(conn, pr, copy_from["id"])
             if not rows:
                 return _refuse(p, f"#{prev.get('id')}, which this mix created, is missing, and its donor "
-                                  f"#{like['id']} {q(like.get('name'))} is gone too")
+                                  f"#{copy_from['id']} {q(copy_from.get('name'))} is gone too")
             donor = rows[0]
             if ctx.server_id is not None and int(ctx.server_id) != prev.get("id"):
                 return _refuse(p, f"this mix already created #{prev.get('id')}; undo it first to move it "
                                   "(xi dats undo --apply-db), or clear Server id (--server-id)")
-            _check_clone_from(conn, pr, ctx, like, prev.get("id"), p)
+            _check_clone_from(conn, pr, ctx, copy_from, prev.get("id"), p)
             p.warnings.append(f"#{prev.get('id')} {q(name)}, which this mix created, was missing (a dbtool "
                               f"re-import?); re-inserted it from #{donor['id']} {q(donor['name'])} as before")
             choice = IdChoice(int(prev["id"]), False, "bound")
@@ -852,7 +852,7 @@ def plan(conn, ctx: DbCtx, *, choose_id=None) -> DbPlan:
             return _refuse(p, "the name must start with a letter or digit and use only a-z, 0-9, _ and -")
         if pr.name_max is not None and len(name) > pr.name_max:
             return _refuse(p, f"the name {q(name)} is longer than {t.name}.name holds ({pr.name_max})")
-        p.like = dict(donor)
+        p.copy_from = dict(donor)
         p.op = "insert"
         if choice is None:
             choice = choose_id(p) if choose_id else pick_server_id(conn, ctx.kind, ctx.server_id, server_dir=server_dir)

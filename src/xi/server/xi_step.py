@@ -32,6 +32,13 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def recorded_donor(rec) -> dict:
+    """The donor a recorded ``result.db`` / ``result.menu`` names: ``copy_from`` (``like``
+    in a result written before it was renamed)."""
+    rec = rec if isinstance(rec, dict) else {}
+    return rec.get("copy_from") or rec.get("like") or {}
+
+
 def current_server_dir() -> str | None:
     """``XI_SERVER_DIR`` as :mod:`xi.xi_config` holds it now (read at call time: the
     zone editor's setup hot-reloads it, and tests patch it). ``None`` when unset."""

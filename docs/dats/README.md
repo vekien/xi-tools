@@ -164,7 +164,7 @@ Full detail: [../ability/mixer.md](../ability/mixer.md#publish).
 
 Point it at a **definition** (`*.spell.json` / `*.command.json`,
 [schema](../../schema/spell_definition.json), [schema](../../schema/command_definition.json)):
-the retail record to clone (`like`), the names and help, and the fields that differ
+the retail record to clone (`copy_from`), the names and help, and the fields that differ
 (MP, cast/recast, element, learnable jobs and levels; level, TP, targets for commands).
 Then choose the id — auto takes the highest free one above the retail band (spells
 1024–4095, commands 2816–4095), top-down so retail can never reach it. The build grows
@@ -190,7 +190,7 @@ Full detail: [../menu/records.md](../menu/records.md).
 Pick a table (Armor, Weapons, Key items, …), give a record id, see what it holds now, then
 type the changes one per line — `level=50`, `jobs=WAR,PLD`, `description~HP+15=>HP+30`,
 `mod.HP=30` for the proposed SQL. An empty item slot asks which record to copy into it
-(`like`). The edits go into `database.<project>`, merged by table and id with what an
+(`copy_from`). The edits go into `database.<project>`, merged by table and id with what an
 earlier run wrote. Non-interactive: `xi dats prepare edits.json --project P [--merge]` with
 a list of edits. See [../database/README.md](../database/README.md).
 
@@ -239,11 +239,49 @@ uv run xi dats build --project gyokko_mask --dry-run  # preview only, writes not
 uv run xi dats changelog --project gyokko_mask        # table of recorded results
 ```
 
-The types that record what they changed (`database`, `zone_dialog`, `zone_npcs`,
-`zone_events`) are first put back, newest first, to what they held before the project's last
-build, then applied in order. Where two of them change one table (lines added to one zone,
-events on one NPC), each gets back what it changed, and a rebuild converges. A dry run holds
-each step's writes in memory, so later steps plan against earlier ones.
+### Building on top, `--reset` and `--all`
+
+The types that edit tables in place (`database`, `zone_dialog`, `zone_npcs`, `zone_events`)
+record what each build changed. How a build treats what the last one left:
+
+| Build | What it does |
+|---|---|
+| `xi dats build P` | **Applies** the edits to the tables as they are. An edit already there changes nothing and records nothing; a record, line or NPC this action created last time is its own to rewrite; one someone else put there is refused (`--force` for items and spells). A `zone_events` action replaces its own events. An edit taken out of the project stays in the tables. Its records are kept ahead of this build's, so `undo` and `--reset` take both back. |
+| `xi dats build P --reset` | First **takes back** what this project's last build changed, record by record and newest first, then applies. Only this project's changes move: a table another project also edits keeps that project's changes. The zone editor's Publish / Delete, `xi event cutscene compile` and `xi event dialogue new` build this way. |
+| `xi dats build --all` | Builds every project of the **build order** in its order, after every table any of them edits in place is reset from its `.base` once. The clean, repeatable build: projects that share a table layer the same way every time, and nothing a project dropped lingers. |
+
+The build order is `projects/build_order.json` ([`schema/build_order.json`](../../schema/build_order.json);
+`--order` names another file):
+
+```json
+{
+  "schema": "xi.dats.build_order.v1",
+  "projects": ["tweaks", "abyssea", "../editor/lower-jeuno/dats.json"]
+}
+```
+
+A bare name is `projects/<name>.json`; anything else is a path relative to the order file (a
+zone editor project's `dats.json`). `--all` reads and checks every project first and builds
+nothing if one is missing or has an invalid action. It resets the tables the projects'
+recorded results name (the database, dialog, NPC-name and event tables, and `114.DAT` with its
+name tables for spell / command records and ability menu records) plus the ones the last
+`--all` recorded in the order file's `result`, so a table a project no longer edits goes back
+too. DATs an action places (gear, abilities, camera scenes) aren't reset: a build replaces
+them. Anything else written to a reset table since its `.base` was taken goes with it.
+
+In the install the `.base` is the one every in-place edit keeps. A `--pivot` build keeps what
+the pivot folder held as `.base` too, or an empty `.base` when it had no copy, which
+`--all --pivot` takes back out (a pivot copy written before this has no `.base` and is left, with a
+warning). `xi database grow` grows a table's `.base` with it, so a reset keeps the rows.
+
+```bash
+uv run xi dats build --all --dry-run       # what would be reset and built
+uv run xi dats build --all                 # into FFXI_DIR
+uv run xi dats build --all --pivot         # into FFXI_PIVOT_DIR
+```
+
+A dry run holds each step's writes in memory, so later steps (and later projects) plan against
+earlier ones.
 
 ### Ability server options (`--apply-db`, `--menu-record`, `--lua-stub`)
 
@@ -485,7 +523,7 @@ files — gear, record edits, events — without splitting the build:
 | Command | What it does |
 |---|---|
 | `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity/NPC) at new model ids, publish an ability recipe, or add a spell / command menu record, and write a manifest action; `--pivot` checks and builds into `FFXI_PIVOT_DIR` |
-| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--pivot` builds into `FFXI_PIVOT_DIR` instead (no sync); `--dry-run` previews (no separate `plan` command); for abilities `--apply-db` / `--menu-record` / `--lua-stub` ([above](#ability-server-options---apply-db---menu-record---lua-stub)) |
+| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--pivot` builds into `FFXI_PIVOT_DIR` instead (no sync); `--dry-run` previews (no separate `plan` command); `--reset` takes the project's last build back first; `--all` builds every project of `projects/build_order.json` after resetting the tables they edit ([above](#building-on-top---reset-and---all)); for abilities `--apply-db` / `--menu-record` / `--lua-stub` ([above](#ability-server-options---apply-db---menu-record---lua-stub)) |
 | `xi dats package <project>` | Zip the project's built DATs + F/V tables (`--from dir`/`pivot`/`hd`, default where it was built) into `projects/packages/<project>.zip` (ROM-relative, XIPivot-ready) |
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder), and the DATs of `--pivot` builds into the release's pivot folder. Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back (an ability's only while the row still holds what the build wrote), then remove the manifest (`--keep-json` keeps it). `--apply-db` also reverts the database row an ability inserted or changed and deletes its unedited Lua stub; without it they are listed (with the revert SQL) and left, and the manifest is **kept** — its cleared actions marked `undone` — until a later `undo --apply-db` removes them (a row already gone or already back at its old animation counts as done). An ability menu record that can't be written back (the game has `114.DAT` open) also keeps the manifest, and the next undo retries it |
@@ -532,29 +570,30 @@ Record edits:
   the tables the model viewer's Database shows (items by category, key items, titles, quest
   and mission logs, spell and ability text) — by table key and id, with the viewer's field
   and sub-string names. Only the named fields change, in the English and Japanese records,
-  in legacy or retail DATs; `like` copies another record into an empty slot first. Records
-  each changed field's value before and after per target, so a rebuild converges and
-  `undo` puts the records back. An item edit may carry its server rows (`item_basic`,
+  in legacy or retail DATs; `copy_from` copies another record into an empty slot first. Records
+  each changed field's value before and after per target, so `--reset` and `undo` put the
+  records back. An item edit may carry its server rows (`item_basic`,
   `item_equipment` with `MId` or a gear action's model, `item_mods`, …), written as proposed
   SQL to `<project>.sql`, never run. No file ids, no table expansion. A text row past the
-  end is added with `like` (the rows in between hold `.`). The spell and ability records of
+  end is added with `copy_from` (the rows in between hold `.`). The spell and ability records of
   `ROM/118/114.DAT` (`spellData`, `abilityData`: MP, cast, recast, job levels, TP, range …)
   edit the same way, a spell's `spell_list` row going to the SQL; `hex` writes a whole record
-  exactly, and a d_msg table may be named by its ROM path.
+  exactly, and any other table may be named by its ROM path (an item table with its `layout`).
 - `zone_dialog` ([`schema/zone_dialog.json`](../../schema/zone_dialog.json),
   [../dialog/zone_dialog.md](../dialog/zone_dialog.md)): a zone's dialog lines, edited or
   added by line id in its English and Japanese tables (`new` lines grow both). Records each
-  line's bytes before and after per target, so a rebuild converges and `undo` is exact.
+  line's bytes before and after per target, so `--reset` and `undo` are exact.
 - `zone_npcs` ([`schema/zone_npcs.json`](../../schema/zone_npcs.json),
   [../zone/zone_npcs.md](../zone/zone_npcs.md)): a zone's NPC names renamed or added (ids from
   the custom band 0x380+, `auto` allocates past the name and event tables), with the new or
   changed `npc_list` rows as proposed SQL in `<project>.sql`. Renames set `polutils_name`,
-  never `name` (it binds the NPC's Lua). Recorded per target; `undo` is exact.
+  never `name` (it binds the NPC's Lua). Recorded per target; `--reset` and `undo` are exact.
 - `zone_events` ([`schema/zone_events.json`](../../schema/zone_events.json),
   [../events/zone_events.md](../events/zone_events.md)): cutscenes (`xi.cutscene.v1`) and
   dialogues compiled into a zone's event table, with their lines in its English and Japanese
   dialog tables, lint-checked before anything is written. Records each changed block as the
-  splice that puts it back and each line's bytes, per target; an `auto` event keeps its id.
+  splice that puts it back and each line's bytes, per target; an `auto` event keeps its id,
+  and a build replaces the action's own events.
   A camera gets its own scene DAT, placed and registered at a safe-band file id. The
   cast-name SQL goes to `<project>.sql`, the start scripts to `<project>.lua`, never run.
   `xi event cutscene compile` and `xi event dialogue new` are aliases of prepare + build.

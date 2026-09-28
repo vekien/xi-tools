@@ -602,6 +602,21 @@ server.add_command(server_check.check_cmd,        'check')      # read-only setu
 server.add_command(server_ws_widen.ws_widen_cmd,  'ws-widen')   # write the weapon-skill 16-bit C++ patch + SQL
 
 
+# ── database (the client's record tables; their edits are `xi dats` database actions) ──
+
+from xi.database import xi_grow as database_grow
+
+
+@cli.group()
+def database():
+    """The client's record tables: item DATs and d_msg tables. Edits to their records are
+    `xi dats` database actions; this sets a table up (its size) once."""
+    pass
+
+
+database.add_command(database_grow.cmd, "grow")
+
+
 # ── mv (xi-model-viewer list refresh) ─────────────────────────────────────────
 
 from xi.mv import xi_update as mv_update

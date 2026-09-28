@@ -296,7 +296,7 @@ def pick_id(kind: str, menu: MenuDat, taken=()) -> int:
 # ── definitions (schema/spell_definition.json, schema/command_definition.json) ──
 
 DEFINITION_SCHEMAS = {'xi.spell.v1': 'spell', 'xi.command.v1': 'command'}
-_DEF_KEYS = {'schema', 'name', 'description', 'like', 'id', 'menu_index', 'text', 'fields'}
+_DEF_KEYS = {'schema', 'name', 'description', 'copy_from', 'id', 'menu_index', 'text', 'fields'}
 _TEXT_KEYS = {'name_en', 'name_jp', 'help_en', 'help_jp'}
 _NAME_RX = re.compile(r'[A-Za-z0-9_\-]+')
 
@@ -332,7 +332,9 @@ def validate_definition(d) -> List[str]:
     if not isinstance(d, dict):
         return ['definition must be a JSON object']
     for k in d:
-        if k not in _DEF_KEYS:
+        if k == 'like':
+            errs.append('like is now copy_from')
+        elif k not in _DEF_KEYS:
             errs.append(f'unknown key {k!r}')
     kind = DEFINITION_SCHEMAS.get(d.get('schema'))
     if kind is None:
@@ -340,8 +342,8 @@ def validate_definition(d) -> List[str]:
     name = d.get('name')
     if not isinstance(name, str) or not _NAME_RX.fullmatch(name):
         errs.append('name must be letters, digits, _ or -')
-    if not _is_int(d.get('like')) or d['like'] < 0:
-        errs.append('like must be the id of the retail record to clone (a non-negative integer)')
+    if 'like' not in d and (not _is_int(d.get('copy_from')) or d['copy_from'] < 0):
+        errs.append('copy_from must be the id of the retail record to clone (a non-negative integer)')
     for key in ('id', 'menu_index'):
         v = d.get(key, 'auto')
         if not (v == 'auto' or (_is_int(v) and v >= 0)):
@@ -395,9 +397,9 @@ def build_record(kind: str, menu: MenuDat, d: dict, new_id: int, menu_index: Opt
     """The decoded record for a definition: the donor's bytes with the id, menu
     index and the definition's field overrides applied."""
     recs = menu.records(kind)
-    donor = d['like']
+    donor = d['copy_from']
     if donor >= len(recs) or is_empty(recs[donor]):
-        raise MenuError(f'{kind} {donor} (like) is not a retail record on this install')
+        raise MenuError(f'{kind} {donor} (copy_from) is not a retail record on this install')
     fields = dict(d.get('fields') or {})
     fields['id'] = new_id
     if kind == 'spell':
@@ -430,7 +432,8 @@ def client_warning(kind: str, record_id: Optional[int] = None) -> Optional[str]:
 # DAT root such as FFXI_PIVOT_DIR (``xi dats build --pivot``). Nothing here picks a root
 # on its own. A root without its own copy of a table reads the install's, as the client
 # does, and a write copies that table into the root first. Edits in the install are in
-# place with a ``.base`` backup; another root gets none (xi_config's redirect rules).
+# place with a ``.base`` backup; another root keeps what it held there as ``.base`` too (an
+# empty one when it held nothing), which ``xi dats build --all`` resets from.
 
 def _install_file(rom_path: str) -> Path:
     from xi.xi_config import FFXI_DIR
@@ -464,8 +467,9 @@ def target_path(root, rom_path: str) -> Path:
 
 
 def _write(root, rom_path: str, data: bytes) -> Path:
-    from xi.xi_config import editable_dat
+    from xi.xi_config import editable_dat, keep_redirect_base
     with _into(root):
+        keep_redirect_base(_install_file(rom_path))
         out = editable_dat(_install_file(rom_path), fresh=False)
     out.write_bytes(data)
     return out
@@ -704,7 +708,7 @@ def row_is_restored(kind: str, idx: int, replaced: Optional[dict], *, menu: Menu
 
 def place_record(kind: str, root, idx: int, d: dict, *, menu_index: Optional[int] = None,
                  prev_root: Optional[dict] = None, dry_run: bool = False) -> dict:
-    """Write the record ``d`` describes (``like``, ``text``) at ``idx`` in ``root`` —
+    """Write the record ``d`` describes (``copy_from``, ``text``) at ``idx`` in ``root`` —
     the body of the record action's build without its ``--force`` rules; the caller has
     checked the row is empty, a placeholder or its own. ``prev_root`` is what the last
     placement in this root recorded (``record_id``, ``replaced``, ``written``):

@@ -45,7 +45,7 @@
       "properties": {
         "record_id": {"type": "integer", "minimum": 0},
         "menu_index": {"type": "integer", "minimum": 0},
-        "like": {"type": "integer", "minimum": 0},
+        "copy_from": {"type": "integer", "minimum": 0, "description": "The retail record it was cloned from."},
         "dat": {"$ref": "common.json#/$defs/romPath"},
         "strings": {"type": "array", "items": {"$ref": "common.json#/$defs/romPath"}},
         "server": {"type": ["string", "null"]},

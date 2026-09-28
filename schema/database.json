@@ -156,7 +156,7 @@
       ],
       "properties": {
         "table": {
-          "description": "The viewer's table key (ui/js/database.js, xi.mv.xi_database). Item tables: general, usable, puppet, armor, weapons, maze, monst1, items7, roeObj, items6, gil. d_msg tables: the quest (q_*) and mission (m_*) logs, keyitems, titles, jobs, spells, spellHelp, abilities, abilityHelp, bluHelp, status, mounts, mountHelp, monsterFamilies, slots, augments, merits, jobPoints, jobGifts, soulplates, trust, emoteHelp, chatHelp, mazeRunes, headings, servers. Spell and command records of ROM/118/114.DAT (one file for every client language): spellData, abilityData. A d_msg table the viewer doesn't name may be given by its ROM path (ROM/181/72.DAT): its sub-strings are then sub0, sub1, …, a row is its index, and the one file is edited whatever the language.",
+          "description": "The viewer's table key (ui/js/database.js, xi.mv.xi_database). Item tables: general, usable, puppet, armor, weapons, maze, monst1, items7, roeObj, items6, gil. d_msg tables: the quest (q_*) and mission (m_*) logs, keyitems, titles, jobs, spells, spellHelp, abilities, abilityHelp, bluHelp, status, mounts, mountHelp, monsterFamilies, slots, augments, merits, jobPoints, jobGifts, soulplates, trust, emoteHelp, chatHelp, mazeRunes, headings, servers. Spell and command records of ROM/118/114.DAT (one file for every client language): spellData, abilityData. Any other table may be given by its ROM path, one file whatever the language, a row by its index: a d_msg table (ROM/181/72.DAT), its sub-strings sub0, sub1, …; or an item table with `layout`, the layout of its records (a table a server grew or added, ROM/288/80.DAT row 1030), its strings sub0, sub1, … by position.",
           "anyOf": [
             {
               "type": "string",
@@ -235,10 +235,24 @@
           "minimum": 0,
           "description": "Item tables: the item id; the id decides which DAT of the table holds it (armor 10240-16383 -> ROM/118/109, 23040-28671 -> ROM/286/73). d_msg tables: the row index, except where each row carries its own id (keyitems, the q_* and m_* logs), where it is that id. spellData / abilityData: the spell or command id (the record index)."
         },
-        "like": {
+        "layout": {
+          "type": "string",
+          "enum": [
+            "general",
+            "usable",
+            "puppet",
+            "armor",
+            "weapon",
+            "maze",
+            "instinct",
+            "roe"
+          ],
+          "description": "An item table given by its ROM path: the layout of its records (which header fields `set` names and where the strings are). A record copied in (copy_from, a row of the same file) takes the donor's id moved by as many rows. No server side."
+        },
+        "copy_from": {
           "type": "integer",
           "minimum": 0,
-          "description": "Create the record. Item tables: copy record `like` of the same table into the empty slot `id`, then apply this edit (the proposed SQL copies the donor's server rows the same way). Text tables: add row `id` past the end, copying row `like` (the rows in between hold '.'), or for key items and the quest / mission logs a new id, copying the record with id `like`. A new text row goes in both languages; the Japanese one takes the English text unless strings.jp gives its own. spellData / abilityData: copy that record into the empty slot `id` (past the end grows the section, as a client that reads them needs)."
+          "description": "Create the record as a copy of another. Item tables: copy record `copy_from` of the same table into the empty slot `id`, then apply this edit (the proposed SQL copies the donor's server rows the same way). Text tables: add row `id` past the end, copying row `copy_from` (the rows in between hold '.'), or for key items and the quest / mission logs a new id, copying the record with id `copy_from`. A new text row goes in both languages; the Japanese one takes the English text unless strings.jp gives its own. spellData / abilityData: copy that record into the empty slot `id` (past the end grows the section, as a client that reads them needs)."
         },
         "note": {
           "type": "string",
@@ -301,7 +315,7 @@
           ]
         },
         "hex": {
-          "description": "The whole record, exactly: item tables the decrypted record (0xC00 legacy / 0x1400 retail bytes), d_msg tables the block, spell / command records the decoded record (0x64 / 0x30 bytes). Per language for the named item and d_msg tables; one text for a record of 114.DAT or a table by path. Given alone: no set, strings, icon or like. Undo puts the record back as it was.",
+          "description": "The whole record, exactly: item tables the decrypted record (0xC00 legacy / 0x1400 retail bytes), d_msg tables the block, spell / command records the decoded record (0x64 / 0x30 bytes). Per language for the named item and d_msg tables; one text for a record of 114.DAT or a table by path. Given alone: no set, strings, icon or copy_from. Undo puts the record back as it was.",
           "anyOf": [
             {
               "$ref": "#/$defs/hexText"
@@ -1131,7 +1145,7 @@
         {
           "table": "armor",
           "id": 10294,
-          "like": 11697,
+          "copy_from": 11697,
           "set": {
             "level": 75,
             "flags": [

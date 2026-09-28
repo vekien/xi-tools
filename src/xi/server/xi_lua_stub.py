@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from xi.server.xi_step import DASH, Step, current_server_dir, now_iso
+from xi.server.xi_step import DASH, Step, current_server_dir, now_iso, recorded_donor
 
 MARKER = "-- xi: mixer lua stub (xi dats build --lua-stub); delete this line to keep your own edits"
 _STUB_RX = re.compile(r"^-- xi-stub: v=(\d+) project=(\S+) action=(\S+) kind=(\S+) donor=(\S+) "
@@ -245,7 +245,7 @@ def read_stub(path: Path) -> StubInfo | None:
 @dataclass
 class StubCtx:
     """One ability action's Lua Stub inputs. ``db`` is ``result.db`` as it stands after
-    this build's database step (``created``, ``like``, ``group``)."""
+    this build's database step (``created``, ``copy_from``, ``group``)."""
     kind: str                           # spell | ja | ws
     name: str                           # the recipe name; the script is name.lower()
     db: dict | None
@@ -387,11 +387,11 @@ def plan_stub(ctx: StubCtx) -> StubPlan:
         return _refuse(p, f"scripts/actions/{kd} not found in the server folder; "
                           "is XI_SERVER_DIR a LandSandBoat checkout?")
     name = str(ctx.name).lower()
-    like = db.get("like") or {}
-    if like.get("id") is None or not like.get("name"):
-        return _skip(p, "the row's donor isn't recorded (result.db.like)")
-    donor = str(like["name"]).lower()
-    donor_id = int(like["id"])
+    copy_from = recorded_donor(db)
+    if copy_from.get("id") is None or not copy_from.get("name"):
+        return _skip(p, "the row's donor isn't recorded (result.db.copy_from)")
+    donor = str(copy_from["name"]).lower()
+    donor_id = int(copy_from["id"])
     if not NAME_RX.match(name):
         return _refuse(p, f"'{name}' can't be a script name (a-z, 0-9, _ and -, starting with a letter or digit)")
     if name in SEGMENT_NAMES:

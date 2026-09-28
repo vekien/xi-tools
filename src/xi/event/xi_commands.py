@@ -375,7 +375,8 @@ def compile_cmd(cutscene_json: Path, zone_id, project, event_name, camera, force
     action_id = next(a["id"] for a in manifest.get("actions", [])
                      if a.get("type") == "zone_events" and a.get("zone") == zone)
     click.echo()
-    ctx.invoke(build_cmd, project=project, only=(action_id,), force=force, dry_run=dry_run, pivot=pivot)
+    ctx.invoke(build_cmd, project=project, only=(action_id,), force=force, dry_run=dry_run, pivot=pivot,
+               reset=True)
 
 
 # ---------------------------------------------------------------------------
@@ -794,4 +795,4 @@ def dialogue_new_cmd(dat, json_file: Path, actor_id, paged, event_id, project, e
         source.write_text(json.dumps({"zone": zone_id, "events": [ev]}), encoding="utf-8")
         ctx.invoke(prepare_cmd, source=source, project=project, action_id=action_id, merge=True)
     click.echo()
-    ctx.invoke(build_cmd, project=project, only=(action_id,), dry_run=dry_run, pivot=pivot)
+    ctx.invoke(build_cmd, project=project, only=(action_id,), dry_run=dry_run, pivot=pivot, reset=True)

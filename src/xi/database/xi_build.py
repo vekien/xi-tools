@@ -17,7 +17,7 @@ stores the number 1.
 
 Spell and command records: fixed-size records of ROM/118/114.DAT (xi.menu.xi_menu_table),
 one file for every client language; an edit sets named fields, copies a record into an empty
-slot (``like``), or writes one whole (``hex``). A d_msg table may be named by its ROM path;
+slot (``copy_from``), or writes one whole (``hex``). A d_msg table may be named by its ROM path;
 its sub-strings are then ``sub0``, ``sub1``, …, and it is one file, whatever the language.
 """
 from __future__ import annotations
@@ -62,12 +62,6 @@ ITEM_PARTS = {
     "items6": [("ROM/332/48.DAT", "ROM/332/46.DAT", 63024, 63024, 63263)],
     "gil": [("ROM/174/48.DAT", "ROM/0/9.DAT", 65535, 65535, 65535)],
 }
-# CatsEyeXI's cexidats band: ROM/288/79-80 grown past Monstrosity's 1,024 records, each
-# sub-range holding records in its own item layout (dats repo README, "Custom_Items").
-BAND_DAT = ("ROM/288/80.DAT", "ROM/288/79.DAT", 29696)
-BAND = {"general": [(30720, 34815), (55296, 57343)], "usable": [(34816, 38911)],
-        "armor": [(38912, 47103)], "weapons": [(47104, 55295)]}
-BAND_FIRST = 30720          # a 288/80 holding records past this carries the band
 
 DMSG_PARTS = {key: (en, jp) for key, en, jp in DMSG_TABLES}
 LAYOUT_NAMES = {v: k for k, v in _FIELD_KEYS.items()}     # viewer field name -> xi_layout name
@@ -207,9 +201,14 @@ class _Files:
             from xi.menu.xi_menu_table import dat_path
             from xi.ui.items.xi_parser import _decrypt, detect_stride
             raw = xi_stage.read(self.root, rel)
-            self.items[rel] = (None if raw is None else
-                               ItemDat(path=dat_path(self.root, rel), data=bytearray(_decrypt(raw)),
-                                       stride=detect_stride(raw)))
+            if raw is not None and raw[:5] == b"d_msg":
+                raise DbError(f"{rel} is a d_msg table, not an item table (drop layout)")
+            try:
+                self.items[rel] = (None if raw is None else
+                                   ItemDat(path=dat_path(self.root, rel), data=bytearray(_decrypt(raw)),
+                                           stride=detect_stride(raw)))
+            except ValueError as e:
+                raise DbError(f"{rel} isn't an item table ({e})") from None
             if self.items[rel] is not None:
                 self.orig[rel] = bytes(self.items[rel].data)
         return self.items[rel]
@@ -224,7 +223,8 @@ class _Files:
                 try:
                     self.dmsg[rel] = D.parse(data)
                 except D.DmsgError as e:
-                    raise DbError(f"{rel}: {e}")
+                    hint = " (an item table given by path needs its layout)" if data[:5] != b"d_msg" else ""
+                    raise DbError(f"{rel}: {e}{hint}")
                 self.orig[rel] = data
         return self.dmsg[rel]
 
@@ -263,19 +263,10 @@ class _Files:
 
 # ── item records ─────────────────────────────────────────────────────────────
 
-def _parts(files: _Files, table: str) -> list[tuple]:
-    parts = list(ITEM_PARTS[table])
-    en, jp, base = BAND_DAT
-    dat = files.item(en) if table in BAND else None
-    if dat is not None and base + dat.count > BAND_FIRST:
-        parts += [(en, jp, base, lo, hi) for lo, hi in BAND[table]]
-    return parts
-
-
 def locate_item(files: _Files, table: str, item_id: int) -> tuple[str, str, int]:
     """``(EN DAT, JP DAT, record index)`` of item ``item_id`` in ``table``."""
     ranges = []
-    for en, jp, base, lo, hi in _parts(files, table):
+    for en, jp, base, lo, hi in ITEM_PARTS[table]:
         ranges.append(f"{lo}-{hi}")
         if not lo <= item_id <= hi:
             continue
@@ -378,8 +369,9 @@ def _apply_item(files: _Files, edit: dict, lang: str, rec: bytearray, layout: st
         if old != new:
             write_field(rec, layout, fmt, lname, new)
             changed[name] = {"from": old, "to": read_field(rec, layout, fmt, lname)}
-    spec = dict(((edit.get("strings") or {}).get(lang)) or {})
-    if lang == "jp" and "like" in edit and not spec:
+    strings = edit.get("strings") or {}
+    spec = dict((strings if lang == "all" else strings.get(lang)) or {})
+    if lang == "jp" and "copy_from" in edit and not spec:
         # A new record shouldn't show its donor's Japanese name: carry the English text over.
         en = (edit.get("strings") or {}).get("en") or {}
         spec = {k: en[k] for k in ("name", "description") if isinstance(en.get(k), str)}
@@ -388,7 +380,7 @@ def _apply_item(files: _Files, edit: dict, lang: str, rec: bytearray, layout: st
         if found is None:
             raise DbError("the record has no string block to edit")
         off, subs, end = found
-        names = C.ITEM_STRINGS[lang]
+        names = _item_sub_names(lang, subs)
         touched = False
         for key, want in spec.items():
             i = names.index(key)
@@ -414,6 +406,12 @@ def _apply_item(files: _Files, edit: dict, lang: str, rec: bytearray, layout: st
     return changed
 
 
+def _item_sub_names(lang: str, subs: list) -> list[str]:
+    """What an item record's sub-strings are called: by language, or sub0, sub1, … in a table
+    given by path (``lang`` "all")."""
+    return C.ITEM_STRINGS[lang] if lang in C.ITEM_STRINGS else [f"sub{i}" for i in range(len(subs))]
+
+
 def _restore_item(rec: bytearray, layout: str, fmt: str, entry: dict, warnings: list, label: str) -> None:
     """Put back what ``entry`` (a recorded edit) changed, field by field — only where the
     record still holds what the build wrote."""
@@ -432,7 +430,7 @@ def _restore_item(rec: bytearray, layout: str, fmt: str, entry: dict, warnings: 
                 warnings.append(f"{label}: its string block is gone; {key} left as it is")
                 continue
             name = key.split(".", 1)[1]
-            names = C.ITEM_STRINGS[entry["lang"]]
+            names = _item_sub_names(entry["lang"], strings[1])
             sub = strings[1][names.index(name)]
             if sub_value(sub) != ch["to"]:
                 warnings.append(f"{label}: {name} changed since the last build; left as it is")
@@ -531,7 +529,7 @@ def _restore(files: _Files, entry: dict, warnings: list) -> None:
     """Undo one recorded edit in ``files`` (in memory)."""
     table, rid, lang = entry["table"], entry["id"], entry["lang"]
     label = _label(table, rid, lang)
-    if is_item_table(table):
+    if is_item_table(table) or entry.get("layout"):
         dat = files.item(entry["dat"])
         if dat is None:
             warnings.append(f"{label}: {entry['dat']} is gone; nothing to put back")
@@ -540,13 +538,13 @@ def _restore(files: _Files, entry: dict, warnings: list) -> None:
             warnings.append(f"{label}: {entry['dat']} is {dat.format}-format now; left as it is")
             return
         rec = bytearray(dat.record(entry["block"]))
-        if entry.get("before_block") is not None:          # a record copied (like) or written whole (hex)
+        if entry.get("before_block") is not None:          # a record copied (copy_from) or written whole (hex)
             if entry.get("sha1") and _sha1(rec) != entry["sha1"]:
                 warnings.append(f"{label}: the record changed since the last build; left as it is")
                 return
             dat.set_record(entry["block"], base64.b64decode(entry["before_block"]))
             return
-        _restore_item(rec, _layout(table), dat.format, entry, warnings, label)
+        _restore_item(rec, entry.get("layout") or _layout(table), dat.format, entry, warnings, label)
         dat.set_record(entry["block"], bytes(rec))
         return
     if table in C.MENU_KINDS:
@@ -586,11 +584,23 @@ def _base_texts(prev: dict, table: str, rid: int, lang: str) -> dict:
     return {}
 
 
-def _item_edit(files: _Files, edit: dict, prev: list, force: bool) -> list[dict]:
+def _key(e: dict) -> tuple:
+    return e["table"], e["id"], e["lang"], e["dat"]
+
+
+def _own(prev: list, key: tuple, current: bytes) -> bool:
+    """The record at ``key`` is one this action's last build created and still holds what
+    that build wrote there (applied on top, a rebuild rewrites its own record)."""
+    mine = [e for e in prev if _key(e) == key]
+    return (any(e.get("created") for e in mine) and
+            (mine[-1].get("sha1") is None or mine[-1]["sha1"] == _sha1(current)))
+
+
+def _item_edit(files: _Files, edit: dict, prev: list, force: bool, apply: bool = False) -> list[dict]:
     table, rid = edit["table"], edit["id"]
     layout = _layout(table)
     en, jp, idx = locate_item(files, table, rid)
-    donor = locate_item(files, table, edit["like"]) if "like" in edit else None
+    donor = locate_item(files, table, edit["copy_from"]) if "copy_from" in edit else None
     out = []
     for lang, rel in (("en", en), ("jp", jp)):
         dat = files.item(rel)
@@ -614,28 +624,82 @@ def _item_edit(files: _Files, edit: dict, prev: list, force: bool) -> list[dict]
                 dat.set_record(idx, new)
                 out.append(entry)
             continue
+        before = bytes(rec)
         if donor is not None:
             ddat = files.item(donor[0] if lang == "en" else donor[1])
             if ddat is None or ddat.format != fmt:
-                raise DbError(f"{table} {edit['like']} ({lang}) isn't in a {fmt}-format DAT like {rid}")
-            if not is_empty_item(rec, layout, fmt) and not force:
-                raise DbError(f"{table} {rid} already holds {item_name(rec, layout, fmt)!r}; "
-                              "pick an empty id or pass --force")
-            entry["created"] = True
-            entry["before_block"] = base64.b64encode(bytes(rec)).decode("ascii")
+                raise DbError(f"{table} {edit['copy_from']} ({lang}) isn't in a {fmt}-format DAT as {rid} is")
             rec = bytearray(ddat.record(donor[2]))
             struct.pack_into("<I", rec, 0, rid)
         elif is_empty_item(rec, layout, fmt):
-            raise DbError(f"{table} {rid} is an empty slot; give like: <id> to create a record there")
+            raise DbError(f"{table} {rid} is an empty slot; give copy_from: <id> to create a record there")
         entry["name"] = item_name(rec, layout, fmt)
         entry["changed"] = _apply_item(files, edit, lang, rec, layout, fmt, _base_texts(prev, table, rid, lang))
         entry["name"] = item_name(rec, layout, fmt) or entry["name"]
+        if donor is not None:
+            if bytes(rec) == before:
+                continue                        # already there (the last build, applied on top)
+            if not (is_empty_item(before, layout, fmt) or force or (apply and _own(prev, _key(entry), before))):
+                raise DbError(f"{table} {rid} already holds {item_name(before, layout, fmt)!r}; "
+                              "pick an empty id or pass --force (--reset rebuilds this action's own records)")
+            entry.update(created=True, before_block=base64.b64encode(before).decode("ascii"),
+                         sha1=_sha1(rec))       # what undo checks is still there
         dat.set_record(idx, bytes(rec))
-        if entry.get("created"):
-            entry["sha1"] = _sha1(rec)          # what undo checks is still there
         if entry["changed"] or entry.get("created"):
             out.append(entry)
     return out
+
+
+def _rom(table: str) -> str:
+    rel = table.replace("\\", "/")
+    return "ROM" + rel[3:] if rel[:3].upper() == "ROM" else rel
+
+
+def _item_path_edit(files: _Files, edit: dict, prev: list, force: bool, apply: bool = False) -> list[dict]:
+    """An item table given by its ROM path: one file, a row by its index, in the layout the
+    edit names. A record copied in takes the id its row has in the donor's numbering (the
+    donor's id, moved by as many rows)."""
+    table, idx, layout = edit["table"], edit["id"], edit["layout"]
+    rel = _rom(table)
+    dat = files.item(rel)
+    if dat is None:
+        raise DbError(f"{rel} is missing")
+    if idx >= dat.count:
+        raise DbError(f"{rel} holds {dat.count} records; row {idx} is past its end (grow it first: "
+                      "xi database grow)")
+    fmt = dat.format
+    rec = bytearray(dat.record(idx))
+    before = bytes(rec)
+    entry = {"table": table, "id": idx, "lang": "all", "dat": rel, "format": fmt, "block": idx, "layout": layout}
+    if "hex" in edit:
+        new = bytes.fromhex(edit["hex"].replace(" ", ""))
+        if len(new) != len(rec):
+            raise DbError(f"hex is {len(new)} bytes; {rel} holds {len(rec):#x}-byte records")
+        if new == before:
+            return []
+        entry.update(hex=True, before_block=base64.b64encode(before).decode("ascii"), sha1=_sha1(new),
+                     name=item_name(new, layout, fmt), changed={})
+        dat.set_record(idx, new)
+        return [entry]
+    donor = edit.get("copy_from")
+    if donor is not None:
+        if not 0 <= donor < dat.count:
+            raise DbError(f"copy_from: {rel} has no row {donor} ({dat.count} records)")
+        rec = bytearray(dat.record(donor))
+        struct.pack_into("<I", rec, 0, (struct.unpack_from("<I", rec)[0] + idx - donor) & 0xFFFFFFFF)
+    elif is_empty_item(rec, layout, fmt):
+        raise DbError(f"{rel} row {idx} is an empty slot; give copy_from: <row> to create a record there")
+    entry["changed"] = _apply_item(files, edit, "all", rec, layout, fmt, _base_texts(prev, table, idx, "all"))
+    entry["name"] = item_name(rec, layout, fmt)
+    if donor is not None:
+        if bytes(rec) == before:
+            return []
+        if not (is_empty_item(before, layout, fmt) or force or (apply and _own(prev, _key(entry), before))):
+            raise DbError(f"{rel} row {idx} already holds {item_name(before, layout, fmt)!r}; pick an empty "
+                          "row or pass --force (--reset rebuilds this action's own records)")
+        entry.update(created=True, before_block=base64.b64encode(before).decode("ascii"), sha1=_sha1(rec))
+    dat.set_record(idx, bytes(rec))
+    return [entry] if entry["changed"] or entry.get("created") else []
 
 
 def _blank(subs: list[dict], text: str) -> list[dict]:
@@ -644,40 +708,55 @@ def _blank(subs: list[dict], text: str) -> list[dict]:
     return subs
 
 
-def _new_row(t: D.DmsgTable, table: str, rid: int, like, lang: str = "en") -> tuple[int, list | None]:
-    """Add record ``rid`` to ``t``: ``(index, [rows before, rows after])``. Key items and the
-    quest / mission logs append a block carrying the id (a copy of ``like`` when given);
-    a table read by row grows to ``rid`` — the rows in between hold '.', as retail's unnamed
-    rows do — and needs ``like``, the row whose shape and text the new one copies."""
+def _copied_block(t: D.DmsgTable, table: str, rid: int, copy_from, lang: str = "en") -> bytearray:
+    """Record ``rid`` as a copy of ``copy_from``: a key item / quest / mission log record
+    carrying ``rid`` as its id (blank without ``copy_from``), else row ``copy_from``."""
     if table in C.ID_KEYED:
-        if like is not None:
-            src = locate_block(t, table, like)
+        if copy_from is not None:
+            src = locate_block(t, table, copy_from)
             if src is None:
-                raise DbError(f"like: {table} has no id {like} to copy")
+                raise DbError(f"copy_from: {table} has no id {copy_from} to copy")
             subs = _block_subs(t.blocks[src])
         else:
             subs = _blank(_block_subs(_template_block(t, len(C.subs(table, lang)))), "")
         set_sub(subs[0], rid)
-        t.blocks.append(bytearray(D._assemble_block(subs, t.stride)))
+        return bytearray(D._assemble_block(subs, t.stride))
+    if copy_from is None:
+        raise DbError(f"{table} has no row {rid} ({t.num} rows); give copy_from: <row> to add it, copying that "
+                      "row, or grow the table first (xi database grow)")
+    if not 0 <= copy_from < t.num:
+        raise DbError(f"copy_from: {table} has no row {copy_from} to copy ({t.num} rows)")
+    return bytearray(t.blocks[copy_from])
+
+
+def _new_row(t: D.DmsgTable, table: str, rid: int, copy_from, lang: str = "en") -> tuple[int, list | None]:
+    """Add record ``rid`` to ``t``: ``(index, [rows before, rows after])``. Key items and the
+    quest / mission logs append a block carrying the id (a copy of ``copy_from`` when given);
+    a table read by row grows to ``rid`` — the rows in between hold '.', as retail's unnamed
+    rows do — and needs ``copy_from``, the row whose shape and text the new one copies."""
+    block = _copied_block(t, table, rid, copy_from, lang)
+    if table in C.ID_KEYED:
+        t.blocks.append(block)
         return t.num - 1, None
-    if like is None:
-        raise DbError(f"{table} has no row {rid} ({t.num} rows); give like: <row> to add it, copying that row")
-    if not 0 <= like < t.num:
-        raise DbError(f"like: {table} has no row {like} to copy ({t.num} rows)")
     before = t.num
-    template = t.blocks[like]
     while t.num < rid:
-        t.blocks.append(bytearray(D._assemble_block(_blank(_block_subs(template), "."), t.stride)))
-    t.blocks.append(bytearray(template))
+        t.blocks.append(bytearray(D._assemble_block(_blank(_block_subs(block), "."), t.stride)))
+    t.blocks.append(block)
     return rid, [before, t.num]
 
 
-def _dmsg_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
+def _row_name(t: D.DmsgTable, idx: int, table: str, lang: str) -> str:
+    subs = _block_subs(t.blocks[idx])
+    names = _sub_names(table, lang, subs)
+    name_i = names.index("name") if "name" in names else (1 if len(names) > 1 and not C.is_raw(table) else 0)
+    return sub_value(subs[name_i]) if name_i < len(subs) and subs[name_i]["flag"] == 0 else ""
+
+
+def _dmsg_edit(files: _Files, edit: dict, prev: list, apply: bool = False) -> list[dict]:
     table, rid = edit["table"], edit["id"]
     if C.is_raw(table):
         # One file, whatever the language: its strings and hex name no language.
-        rel = table.replace("\\", "/")
-        rel = "ROM" + rel[3:] if rel[:3].upper() == "ROM" else rel
+        rel = _rom(table)
         langs = [("all", rel)]
         strings = {"all": edit.get("strings") or {}}
         hexes = {"all": edit["hex"]} if "hex" in edit else {}
@@ -696,7 +775,7 @@ def _dmsg_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
                 raise DbError(f"{rel} is missing")
             idx = locate_block(t, table, rid)
             if idx is None:
-                raise DbError(f"{rel} has no record {rid}; hex rewrites a record that is there")
+                raise DbError(f"{rel} has no record {rid}; hex rewrites a record that is there (grow the table first: xi database grow)")
             new = bytes.fromhex(hexes[lang].replace(" ", ""))
             if t.stride and len(new) != t.stride:
                 raise DbError(f"hex{'' if lang == 'all' else '.' + lang} is {len(new)} bytes; "
@@ -715,28 +794,40 @@ def _dmsg_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
                 raise DbError(f"{rel} is missing")
             continue
         idx = locate_block(t, table, rid)
-        if idx is None:
+        copying = "copy_from" in edit
+        if idx is None or copying:
             # A new row goes in both languages, so the tables stay aligned; the Japanese one
             # takes the English text unless it has its own.
             spec = spec or {k: v for k, v in (strings.get("en") or {}).items()
                             if lang != "jp" or k in C.subs(table, "jp")}
         elif not spec:
             continue
+        base = _base_texts(prev, table, rid, lang)
+        if idx is not None and copying:
+            # The row is there: this action's last build (applied on top), or another's.
+            cur = bytes(t.blocks[idx])
+            t.blocks[idx] = _copied_block(t, table, rid, edit["copy_from"], lang)
+            _apply_block(t, idx, table, lang, spec, base)
+            new = bytes(t.blocks[idx])
+            if new == cur:
+                continue
+            if not (apply and _own(prev, (table, rid, lang, rel), cur)):
+                t.blocks[idx] = bytearray(cur)
+                raise DbError(f"{table} already has {'id' if table in C.ID_KEYED else 'row'} {rid}; "
+                              "copy_from only adds a new one (--reset rebuilds this action's own rows)")
+            out.append({"table": table, "id": rid, "lang": lang, "dat": rel, "block": idx, "hex": True,
+                        "before_block": base64.b64encode(cur).decode("ascii"), "sha1": _sha1(new),
+                        "changed": {}, "name": _row_name(t, idx, table, lang)})
+            continue
         created, grew = False, None
         if idx is None:
-            idx, grew = _new_row(t, table, rid, edit.get("like"), lang)
+            idx, grew = _new_row(t, table, rid, edit.get("copy_from"), lang)
             created = True
-        elif "like" in edit:
-            raise DbError(f"{table} already has {'id' if table in C.ID_KEYED else 'row'} {rid}; "
-                          "like only adds a new one")
         entry = {"table": table, "id": rid, "lang": lang, "dat": rel, "block": idx}
         if grew:
             entry["grew"] = grew
-        entry["changed"] = _apply_block(t, idx, table, lang, spec, _base_texts(prev, table, rid, lang))
-        subs = _block_subs(t.blocks[idx])
-        names = _sub_names(table, lang, subs)
-        name_i = names.index("name") if "name" in names else (1 if len(names) > 1 and not C.is_raw(table) else 0)
-        entry["name"] = sub_value(subs[name_i]) if name_i < len(subs) and subs[name_i]["flag"] == 0 else ""
+        entry["changed"] = _apply_block(t, idx, table, lang, spec, base)
+        entry["name"] = _row_name(t, idx, table, lang)
         if created:
             entry["created"] = True
         if entry["changed"] or created:
@@ -783,7 +874,8 @@ def _menu_set(kind: str, rec: bytes, values: dict) -> bytes:
     return out
 
 
-def _menu_edit(files: _Files, edit: dict, force: bool, warnings: list) -> list[dict]:
+def _menu_edit(files: _Files, edit: dict, force: bool, warnings: list, prev: list = (),
+               apply: bool = False) -> list[dict]:
     table, rid = edit["table"], edit["id"]
     kind = C.MENU_KINDS[table]
     k = MT.KINDS[kind]
@@ -797,25 +889,27 @@ def _menu_edit(files: _Files, edit: dict, force: bool, warnings: list) -> list[d
     whole = None
     if "hex" in edit:
         whole = bytes.fromhex(edit["hex"].replace(" ", ""))
-    elif "like" in edit:
-        like = edit["like"]
-        if like >= count or MT.is_empty(menu.records(kind)[like]):
-            raise DbError(f"like: {kind} {like} is empty or past the table ({count} records)")
-        if rid < count and not MT.is_empty(menu.records(kind)[rid]) and not force:
-            raise DbError(f"{table} {rid} already holds {_menu_name(files, kind, rid) or 'a record'!r}; "
-                          "pick an empty id or pass --force")
-        whole = bytearray(menu.records(kind)[like])
+    elif "copy_from" in edit:
+        donor = edit["copy_from"]
+        if donor >= count or MT.is_empty(menu.records(kind)[donor]):
+            raise DbError(f"copy_from: {kind} {donor} is empty or past the table ({count} records)")
+        whole = bytearray(menu.records(kind)[donor])
         struct.pack_into("<H", whole, 0, rid)
         whole = bytes(whole)
+        if edit.get("set"):
+            whole = _menu_set(kind, whole, edit["set"])
+        cur = menu.records(kind)[rid] if rid < count else None
+        if (cur is not None and not MT.is_empty(cur) and cur != whole and not force
+                and not (apply and _own(prev, (table, rid, "all", MENU_DAT), cur))):
+            raise DbError(f"{table} {rid} already holds {_menu_name(files, kind, rid) or 'a record'!r}; "
+                          "pick an empty id or pass --force (--reset rebuilds this action's own records)")
     elif rid >= count or MT.is_empty(menu.records(kind)[rid]):
-        raise DbError(f"{table} {rid} is an empty slot; give like: <id> to create a record there")
+        raise DbError(f"{table} {rid} is an empty slot; give copy_from: <id> to create a record there")
     if rid >= count:
         menu.ensure_count(kind, rid + 1)
         entry["grew"] = [count, menu.count(kind)]
     before = menu.records(kind)[rid]
     if whole is not None:
-        if edit.get("set"):
-            whole = _menu_set(kind, whole, edit["set"])
         if whole != before:
             entry.update({"hex": True} if "hex" in edit else {"created": True})
             entry["before_hex"] = before.hex()
@@ -918,10 +1012,13 @@ def _pivot_shadow(root: Path, target: str | None, rels: list[str]) -> list[str]:
 
 
 def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_path: Path | None,
-          project: str, force: bool = False, dry_run: bool = False, unwound: bool = False) -> dict:
+          project: str, force: bool = False, dry_run: bool = False, unwound: bool = False,
+          apply: bool = False) -> dict:
     """Apply ``action`` to the DATs of ``root``; the build result (``records`` is what
-    gets recorded for this root). ``unwound``: the previous build's changes were already
-    put back (``xi dats build`` does that for the whole project first)."""
+    gets recorded for this root). ``unwound``: the previous build's changes aren't put back
+    first (``xi dats build --reset`` did that for the whole project, or the tables were
+    reset). ``apply``: they are still there — a record this action created is its own to
+    rewrite, and one already holding what the edit writes is left alone."""
     errs = C.validate_action(action)
     if errs:
         raise DbError("; ".join(errs))
@@ -934,11 +1031,13 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_p
     for i, edit in enumerate(action["edits"]):
         try:
             if is_item_table(edit["table"]):
-                records += _item_edit(files, edit, prev, force)
+                records += _item_edit(files, edit, prev, force, apply)
+            elif "layout" in edit:
+                records += _item_path_edit(files, edit, prev, force, apply)
             elif edit["table"] in C.MENU_KINDS:
-                records += _menu_edit(files, edit, force, warnings)
+                records += _menu_edit(files, edit, force, warnings, prev, apply)
             else:
-                records += _dmsg_edit(files, edit, prev)
+                records += _dmsg_edit(files, edit, prev, apply)
         except DbError as e:
             raise DbError(f"edits[{i}] ({edit['table']} {edit['id']}): {e}") from None
     # The SQL before anything is written: a mod name it can't resolve stops the build clean.
@@ -992,7 +1091,7 @@ _COLUMNS = {
     "item_latents": ["itemId", "modId", "value", "latentId", "latentParam"],
 }
 _ROW_TABLES = ["item_basic", "item_equipment", "item_weapon", "item_usable", "item_furnishing"]
-# The server tables that hold rows for an item of each client table (what a `like` copies).
+# The server tables that hold rows for an item of each client table (what a `copy_from` copies).
 _SERVER_TABLES = {
     "armor": ["item_basic", "item_equipment", "item_mods", "item_mods_pet", "item_latents"],
     "weapons": ["item_basic", "item_equipment", "item_weapon", "item_mods", "item_mods_pet", "item_latents"],
@@ -1059,7 +1158,7 @@ def _server_columns(edit: dict, mirror: bool, manifest: dict) -> dict[str, dict]
                 t, c = MIRROR[field]
                 cols.setdefault(t, {})[c] = value
         name = ((edit.get("strings") or {}).get("en") or {}).get("name")
-        if "like" in edit and isinstance(name, str):
+        if "copy_from" in edit and isinstance(name, str):
             for t in _SERVER_TABLES.get(edit["table"], ["item_basic"]):
                 if t in _ROW_TABLES:
                     cols.setdefault(t, {})["name"] = _server_name(name)
@@ -1117,15 +1216,15 @@ def _spell_sql(edit: dict, entry: dict | None, mirror: bool) -> list[str]:
     """The ``spell_list`` statements for one spell record edit."""
     rid = edit["id"]
     cols = (entry or {}).get("server") if mirror else None
-    if not (cols or "like" in edit):
+    if not (cols or "copy_from" in edit):
         return []
     lines = [f"-- spellData {rid} {(entry or {}).get('name') or ''}".rstrip()
              + (f": {edit['note']}" if edit.get("note") else "")]
-    if "like" in edit:
-        lines += [f"-- a new spell, its row copied from {edit['like']}",
+    if "copy_from" in edit:
+        lines += [f"-- a new spell, its row copied from {edit['copy_from']}",
                   f"DELETE FROM `spell_list` WHERE `spellid` = {rid};",
                   "CREATE TEMPORARY TABLE `_xi_spell` SELECT * FROM `spell_list` WHERE `spellid` = "
-                  f"{edit['like']};",
+                  f"{edit['copy_from']};",
                   f"UPDATE `_xi_spell` SET `spellid` = {rid};",
                   "INSERT INTO `spell_list` SELECT * FROM `_xi_spell`;",
                   "DROP TEMPORARY TABLE `_xi_spell`;"]
@@ -1144,19 +1243,19 @@ def _edit_sql(edit: dict, mirror: bool, manifest: dict, names: dict) -> list[str
     server = edit.get("server") or {}
     mods = server.get("item_mods") or {}
     lists = {t: server[t] for t in ("item_mods_pet", "item_latents") if t in server}
-    if not (cols or mods or lists or "like" in edit):
+    if not (cols or mods or lists or "copy_from" in edit):
         return []
     head = f"-- {edit['table']} {rid} {names.get((edit['table'], rid)) or ''}".rstrip()
     lines.append(head + (f": {edit['note']}" if edit.get("note") else ""))
-    if "like" in edit:
-        like = edit["like"]
-        lines.append(f"-- a new item, its rows copied from {like}")
+    if "copy_from" in edit:
+        donor = edit["copy_from"]
+        lines.append(f"-- a new item, its rows copied from {donor}")
         for t in _SERVER_TABLES.get(edit["table"], ["item_basic"]):
             columns, idc = _COLUMNS[t], _ID_COL[t]
             rest = ", ".join(f"`{c}`" for c in columns[1:])
             lines.append(f"DELETE FROM `{t}` WHERE `{idc}` = {rid};")
             lines.append(f"INSERT INTO `{t}` (`{idc}`, {rest}) SELECT {rid}, {rest} FROM `{t}` "
-                         f"WHERE `{idc}` = {like};")
+                         f"WHERE `{idc}` = {donor};")
     for t in _ROW_TABLES:
         row = cols.get(t)
         if row:

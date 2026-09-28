@@ -91,7 +91,6 @@ ITEM_DATS = [
     # item table (ids 30720-31743), all placeholders at launch. Absent on a
     # legacy install — the loaders skip DATs that do not exist.
     ('Items_7',       30720, 0, 'ROM/387/14.DAT',  'ROM/387/13.DAT'),
-    # Custom_Items shares the same DAT as Monstrosity_1
     ('RoE_Objectives',57344, 0, 'ROM/307/16.DAT',  'ROM/307/15.DAT'),
     ('Items_3',       61432, 0, 'ROM/314/89.DAT',  'ROM/314/89.DAT'),
     ('Monstrosity_2', 61440, 0, 'ROM/288/67.DAT',  'ROM/288/66.DAT'),

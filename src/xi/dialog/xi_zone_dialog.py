@@ -46,11 +46,9 @@ def _check_text(v, at: str, errs: list) -> None:
     for key in ("hex", "entry_hex"):
         if isinstance(v, dict) and set(v) == {key} and isinstance(v[key], str):
             try:
-                raw = bytes.fromhex(v[key].replace(" ", ""))
+                bytes.fromhex(v[key].replace(" ", ""))
             except ValueError:
                 break
-            if key == "entry_hex" and not raw.endswith(b"\x00"):
-                errs.append(f"{at}.entry_hex is the whole entry: it ends in the 00 that closes the line")
             return
     errs.append(f"{at} must be text, {{\"replace\": {{old: new, …}}}}, {{\"hex\": \"…\"}} (the shown "
                 "text's bytes) or {\"entry_hex\": \"…\"} (the whole entry)")
@@ -226,10 +224,20 @@ def _entry(zone, lang, rel, lid, before: bytes, after: bytes, **more) -> dict:
             "from_hex": before.hex(), "to_hex": after.hex(), **more}
 
 
-def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False, unwound: bool = False) -> dict:
+def _mine(prev: list, lid: int, lang: str, blob: bytes) -> list[dict]:
+    """This action's recorded entries for line ``lid`` while the line still holds what the
+    last of them wrote (applied on top, the tables keep the last build's lines)."""
+    mine = [e for e in prev if e.get("id") == lid and e.get("lang") == lang]
+    return mine if mine and mine[-1].get("to_hex") == blob.hex() else []
+
+
+def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False, unwound: bool = False,
+          apply: bool = False) -> dict:
     """Apply ``action`` to the zone's dialog tables in ``root``; the build result
     (``records`` is what gets recorded for this root). ``unwound``: the previous build's
-    changes were already put back (``xi dats build`` does that for the whole project first)."""
+    changes aren't put back first (``xi dats build --reset`` did that for the whole project,
+    or the tables were reset). ``apply``: they are still there — a line this action added is
+    its own to rewrite, and one already holding what the edit writes is left alone."""
     errs = validate_action(action)
     if errs:
         raise ZoneDialogError("; ".join(errs))
@@ -258,10 +266,16 @@ def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False
                         warnings.append(f"zone {zone} has no Japanese dialog table; line {lid} is English only")
                         continue
                 if lid < len(blobs):
-                    if blobs[lid] != BLANK:
-                        raise ZoneDialogError(f"lines: zone {zone} already has line {lid} ({lang}); drop new to edit it")
                     blob = _set_line(b"\x00", spec)          # a blank id (see _restore)
-                    records.append(_entry(zone, lang, tables.rel[lang], lid, blobs[lid], blob, created=True))
+                    if blobs[lid] == blob:
+                        continue                             # already there
+                    if blobs[lid] != BLANK:
+                        if not (apply and any(e.get("created") for e in _mine(prev, lid, lang, blobs[lid]))):
+                            raise ZoneDialogError(f"lines: zone {zone} already has line {lid} ({lang}); drop new "
+                                                  "to edit it (--reset rebuilds this action's own lines)")
+                        records.append(_entry(zone, lang, tables.rel[lang], lid, blobs[lid], blob))
+                    else:
+                        records.append(_entry(zone, lang, tables.rel[lang], lid, blobs[lid], blob, created=True))
                     blobs[lid] = blob
                     continue
                 before_n = len(blobs)
@@ -280,8 +294,11 @@ def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False
                 raise ZoneDialogError(f"lines: zone {zone} has {len(blobs)} lines ({lang}); line {lid} is past "
                                       "the end — mark it \"new\": true to add it")
             before = blobs[lid]
+            # Text and replace go on the line as it was before this action changed it.
+            mine = _mine(prev, lid, lang, before)
+            base = bytes.fromhex(mine[0]["from_hex"]) if mine and mine[0].get("from_hex") else before
             try:
-                after = _set_line(before, spec)
+                after = _set_line(base, spec)
             except XD.DialogError as e:
                 raise ZoneDialogError(f"line {lid} ({lang}): {e}")
             except ZoneDialogError as e:

@@ -107,6 +107,15 @@ def test_validator_names_the_field():
     assert "edits[5]: the edit changes nothing" in text
 
 
+def test_like_is_now_copy_from():
+    errs = db.validate_action({"id": "db.x", "type": "database", "edits": [
+        {"table": "titles", "id": 9, "like": 1, "strings": {"en": {"name": "x"}}},
+        {"table": "spellData", "id": 9, "like": 1}]})
+    assert errs == ["edits[0]: like is now copy_from", "edits[1]: like is now copy_from"]
+    assert db.validate_action({"id": "db.x", "type": "database", "edits": [
+        {"table": "titles", "id": 9, "copy_from": 1, "strings": {"en": {"name": "x"}}}]}) == []
+
+
 def test_validator_takes_every_table_example_shape():
     ok = {"id": "db.ok", "type": "database", "edits": [
         {"table": "keyitems", "id": 1, "strings": {"en": {"category": 2, "plural": "reports"}}},

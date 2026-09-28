@@ -168,3 +168,17 @@ def test_prepare_list_merge_and_pivot(game, tmp_path: Path, monkeypatch):
     assert build("jeuno", "--pivot").exit_code == 0
     assert (game / NAMES).read_bytes() == before
     assert ("Pheri", sid(2)) in names(pivot) and ("Vekien", sid(0x382)) in names(pivot)
+
+
+def test_on_top_an_npc_it_added_is_renamed_and_undo_takes_it_out(game):
+    before = (game / NAMES).read_bytes()
+    prepare({"zone": ZONE, "npcs": [{"id": "auto", "new": True, "name": "Vekien", "server": {"model": 1}}]})
+    assert build().exit_code == 0
+    prepare({"zone": ZONE, "npcs": [{"id": 0x382, "new": True, "name": "Vekien Two", "server": {"model": 1}}]},
+            "jeuno", "--replace")
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert ("Vekien Two", sid(0x382)) in names(game) and ("Vekien", sid(0x382)) not in names(game)
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / NAMES).read_bytes() == before

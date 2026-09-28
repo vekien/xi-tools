@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/build_order.json",
+  "title": "xi dats build order",
+  "description": "The projects `xi dats build --all` builds, in order. Every table any of them edits in place (database records, zone dialog, NPC names and events, spell / command records) is reset from its .base once, then each project is built on top of the ones before it, so projects that share a table layer the same way every time. Keep it at projects/build_order.json (--order names another).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "projects"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "xi.dats.build_order.v1"
+    },
+    "description": {
+      "type": "string"
+    },
+    "projects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Each project: a name (projects/<name>.json), or a path to a project file relative to this file (a zone editor project's dats.json). Built first to last."
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Written by the last --all build: per target, the tables it reset and the projects edit. The next --all resets these too, so a table a project no longer edits (or a project taken off the list) goes back as well.",
+      "properties": {
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "dir": {
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/romPath"
+              }
+            },
+            "pivot": {
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/romPath"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.dats.build_order.v1",
+      "description": "The server's client build: the base tweaks, then the Abyssea content, then the zone editor's cutscenes.",
+      "projects": [
+        "tweaks",
+        "abyssea",
+        "../editor/lower-jeuno/dats.json"
+      ]
+    }
+  ]
+}

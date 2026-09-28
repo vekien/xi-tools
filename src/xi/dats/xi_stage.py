@@ -26,8 +26,13 @@ def _key(path) -> str:
 
 @contextmanager
 def session(dry_run: bool):
-    """One build: writes held when ``dry_run``; claims kept either way."""
+    """One build: writes held when ``dry_run``; claims kept either way. Inside another
+    session (each project of ``xi dats build --all``) it is that one's: the later projects
+    see what the earlier ones would write, and don't take the ids they took."""
     global _held, _claims
+    if _claims is not None:
+        yield
+        return
     was = (_held, _claims)
     _held = {} if dry_run else None
     _claims = {}

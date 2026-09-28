@@ -29,9 +29,9 @@ def game(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "exports" / "menu").mkdir(parents=True)
     sp = tmp_path / "exports" / "menu" / "testspell.spell.json"
-    sp.write_text(json.dumps(dict(SPELL_EXAMPLE, like=3)), encoding="utf-8")
+    sp.write_text(json.dumps(dict(SPELL_EXAMPLE, copy_from=3)), encoding="utf-8")
     cp = tmp_path / "exports" / "menu" / "war_cry.command.json"
-    cp.write_text(json.dumps(dict(COMMAND_EXAMPLE, like=2)), encoding="utf-8")
+    cp.write_text(json.dumps(dict(COMMAND_EXAMPLE, copy_from=2)), encoding="utf-8")
     return root, sp, cp
 
 
@@ -55,7 +55,7 @@ def test_prepare_writes_record_actions(game):
 
     # A re-prepare keeps the recorded id; an explicit flag replaces the target.
     m = _read_manifest(Path("projects/fs.json"))
-    m["actions"][0]["result"] = {"record_id": 4090, "like": 3}
+    m["actions"][0]["result"] = {"record_id": 4090, "copy_from": 3}
     Path("projects/fs.json").write_text(json.dumps(m), encoding="utf-8")
     r = runner.invoke(group, ["prepare", str(sp), "--project", "fs", "--replace", "--record-id", "4000"],
                       catch_exceptions=False)
@@ -142,7 +142,7 @@ def test_build_refuses_retail_band_and_occupied_ids(game):
     r = runner.invoke(group, ["build", "fs", "--only", "command.war_cry"], catch_exceptions=False)
     assert r.exit_code == 0, r.output                       # took command 4095
     other = cp.with_name("other.command.json")
-    other.write_text(json.dumps(dict(COMMAND_EXAMPLE, name="other", like=2, id=4095)), encoding="utf-8")
+    other.write_text(json.dumps(dict(COMMAND_EXAMPLE, name="other", copy_from=2, id=4095)), encoding="utf-8")
     r = runner.invoke(group, ["prepare", str(other), "--project", "fs", "--replace"], catch_exceptions=False)
     assert r.exit_code == 0, r.output
     r = runner.invoke(group, ["build", "fs", "--only", "command.other"])
@@ -210,7 +210,7 @@ def test_text_that_does_not_fit_fails_before_writing(game):
     runner = CliRunner()
     # 41 bytes is over a command name's 39: refused as soon as the definition is read
     long_cmd = cp.with_name("long.command.json")
-    long_cmd.write_text(json.dumps(dict(COMMAND_EXAMPLE, name="long", like=2, text={"name_en": "x" * 41})),
+    long_cmd.write_text(json.dumps(dict(COMMAND_EXAMPLE, name="long", copy_from=2, text={"name_en": "x" * 41})),
                         encoding="utf-8")
     r = runner.invoke(group, ["prepare", str(long_cmd), "--project", "fs", "--replace"])
     assert r.exit_code != 0 and "a command name holds 39" in r.output
@@ -218,7 +218,7 @@ def test_text_that_does_not_fit_fails_before_writing(game):
     # 60 bytes fits a retail spell name (99) but not this install's 80-byte blocks: the
     # build stops before 114.DAT or any name table is written
     long_spell = sp.with_name("long.spell.json")
-    long_spell.write_text(json.dumps(dict(SPELL_EXAMPLE, name="long", like=3, text={"name_en": "x" * 60})),
+    long_spell.write_text(json.dumps(dict(SPELL_EXAMPLE, name="long", copy_from=3, text={"name_en": "x" * 60})),
                           encoding="utf-8")
     assert runner.invoke(group, ["prepare", str(long_spell), "--project", "fs", "--replace"],
                          catch_exceptions=False).exit_code == 0
@@ -232,7 +232,8 @@ def test_text_that_does_not_fit_fails_before_writing(game):
 def test_pivot_flag_builds_into_the_pivot_folder_only(game, tmp_path: Path, monkeypatch):
     """A configured FFXI_PIVOT_DIR is used only with --pivot: a plain build edits the base
     install; --pivot edits the pivot folder's own 114.DAT (copying in the name tables it
-    lacks, without .base), records the target, and undo clears the record there."""
+    lacks; each keeps what the folder held as .base, empty when it held nothing), records
+    the target, and undo clears the record there."""
     import xi.xi_config as cfg
     from xi.dats.xi_dats import _read_manifest, group
     from test_menu_table import menu_dat
@@ -240,6 +241,7 @@ def test_pivot_flag_builds_into_the_pivot_folder_only(game, tmp_path: Path, monk
     pivot = tmp_path / "pivot"
     (pivot / "ROM" / "118").mkdir(parents=True)
     (pivot / "ROM" / "118" / "114.DAT").write_bytes(menu_dat(9, 6))
+    pivot_menu = (pivot / "ROM" / "118" / "114.DAT").read_bytes()
     monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot), raising=False)
     runner = CliRunner()
 
@@ -260,8 +262,10 @@ def test_pivot_flag_builds_into_the_pivot_folder_only(game, tmp_path: Path, monk
     menu = MT.load_menu(pivot)
     assert menu.count("spell") == 4096 and MT.read_fields("spell", menu.records("spell")[4095])["mp"] == 12
     assert MT.read_names("spell", pivot)[4095] == "Testspell"
-    assert sorted(p.name for p in (pivot / "ROM" / "181").iterdir()) == ["69.DAT", "71.DAT", "73.DAT", "75.DAT"]
-    assert not list(pivot.rglob("*.base"))
+    names = ["69.DAT", "71.DAT", "73.DAT", "75.DAT"]
+    assert sorted(p.name for p in (pivot / "ROM" / "181").iterdir() if p.suffix == ".DAT") == names
+    assert (pivot / "ROM" / "118" / "114.DAT.base").read_bytes() == pivot_menu
+    assert all((pivot / "ROM" / "181" / f"{n}.base").read_bytes() == b"" for n in names)
     a = _read_manifest(Path("projects/piv.json"))["actions"][0]
     assert a["result"]["targets"] == ["pivot"] and a["result"]["record_id"] == 4095
 

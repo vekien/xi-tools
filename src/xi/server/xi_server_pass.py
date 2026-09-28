@@ -31,7 +31,7 @@ from pathlib import Path
 from xi.menu import xi_menu_table as MT
 from xi.server import xi_db_apply as D
 from xi.server import xi_lua_stub as L
-from xi.server.xi_step import DASH, Step, current_server_dir, now_iso, q
+from xi.server.xi_step import DASH, Step, current_server_dir, now_iso, q, recorded_donor
 
 #: The client record a publish kind's menu entry is (design2 §2.4.2).
 RECORD_KIND = {"spell": "spell", "ja": "command", "ws": "command"}
@@ -359,7 +359,7 @@ class _Pass:
             lua_op = sp["lua"].op if sp["lua"] else None
             if (plan is not None and planned_op == "insert" and kind == "spell"
                     and lua_op not in ("write", "rewrite", "unchanged", "kept")):
-                folder = D.SPELL_GROUP_FOLDERS.get(int((plan.like or {}).get("group") or 0), "<group>")
+                folder = D.SPELL_GROUP_FOLDERS.get(int((plan.copy_from or {}).get("group") or 0), "<group>")
                 plan.warnings.append(f"no script yet {DASH} turn on Lua Stub, or write scripts/actions/spells/"
                                      f"{folder}/{plan.name}.lua (without one it cannot be cast)")
 
@@ -470,20 +470,20 @@ class _Pass:
         self.claimed[kind].add(sid)
 
         # 3. the donor
-        created_like = None
-        if plan is not None and plan.op == "insert" and plan.like:
-            created_like = plan.like
-        elif created_prev and isinstance((prev_db.get("like") or {}).get("id"), int):
-            created_like = prev_db["like"]
+        created_donor = None
+        if plan is not None and plan.op == "insert" and plan.copy_from:
+            created_donor = plan.copy_from
+        elif created_prev and isinstance(recorded_donor(prev_db).get("id"), int):
+            created_donor = recorded_donor(prev_db)
         # Priority: the DB insert's donor, then an explicit --clone-from, then this mix's own
         # record's donor, then the kind's default (Cure / Berserk / Fast Blade) so a menu
         # record clones a working record with no typing.
         explicit = str(opts.clone_from).strip() if opts.clone_from else ""
         reuse_own = (st == "own" and prev_menu and prev_menu.get("server_id") == sid
-                     and isinstance((prev_menu.get("like") or {}).get("server_id"), int))
+                     and isinstance(recorded_donor(prev_menu).get("server_id"), int))
         clone = explicit or ("" if reuse_own else D.DEFAULT_DONOR.get(kind, ""))
-        if created_like:
-            donor_sid, donor_name = int(created_like["id"]), created_like.get("name")
+        if created_donor:
+            donor_sid, donor_name = int(created_donor["id"]), created_donor.get("name")
             x = donor_name or str(donor_sid)
         elif clone:
             x = clone
@@ -500,14 +500,14 @@ class _Pass:
                 donor_sid, donor_name = int(row["id"]), row.get("name")
         elif reuse_own:
             # Only to rewrite this mix's own record at the same id.
-            donor_sid, donor_name = int(prev_menu["like"]["server_id"]), None
+            donor_sid, donor_name = int(recorded_donor(prev_menu)["server_id"]), None
             x = str(donor_sid)
         else:
             return skip(NO_DONOR)
-        like_idx = record_index(kind, donor_sid)
+        donor_idx = record_index(kind, donor_sid)
         lo, hi = DONOR_BAND[kind]
-        drec = client.record(like_idx) if lo <= like_idx < hi else None
-        if drec is None or client.state(like_idx)[0] != "taken":
+        drec = client.record(donor_idx) if lo <= donor_idx < hi else None
+        if drec is None or client.state(donor_idx)[0] != "taken":
             return refused(f"Clone from {q(x)} is not a {label} record in {self.target}")
 
         # 4. the menu name (checked before anything is written; never printed when refused)
@@ -538,7 +538,7 @@ class _Pass:
                 return refused(f"menu index {mi} is already used by spell {dup}")
 
         # 6. place (or find it unchanged)
-        d = {"schema": "xi.spell.v1" if rk == "spell" else "xi.command.v1", "name": name, "like": like_idx,
+        d = {"schema": "xi.spell.v1" if rk == "spell" else "xi.command.v1", "name": name, "copy_from": donor_idx,
              "text": {"name_en": mname}}
         new_rec = MT.build_record(rk, client.menu, d, idx, mi)
         unchanged = (st == "own" and new_rec.hex() == own_hex
@@ -586,7 +586,7 @@ class _Pass:
                 text = f"spell {sid} {q(mname)} like spell {donor_sid}, menu index {mi}, in {self.target} ({why})"
             elif kind == "ja":
                 text = (f"job ability {sid} {q(mname)} at command {idx} like job ability {donor_sid} "
-                        f"(command {like_idx}), in {self.target} ({why})")
+                        f"(command {donor_idx}), in {self.target} ({why})")
             else:
                 text = (f"weapon skill {sid} {q(mname)} at command {idx} like weapon skill {donor_sid}, "
                         f"in {self.target} ({why})")
@@ -598,7 +598,7 @@ class _Pass:
         roots[self.target] = {"record_id": idx, "menu_index": placed.get("menu_index"),
                               "replaced": placed.get("replaced"), "written": placed.get("written")}
         new_menu = {"kind": kind, "record_kind": rk, "server_id": sid, "name": mname,
-                    "like": {"server_id": donor_sid, "record_id": like_idx},
+                    "copy_from": {"server_id": donor_sid, "record_id": donor_idx},
                     "provisional": bool(provisional), "roots": roots, "at": self.at}
         return step, (None if self.dry_run else new_menu)
 
@@ -608,9 +608,10 @@ class _Pass:
         if planned_op == "insert" and not self.dry_run and not (plan and plan.executed):
             return Step.skip("no database row (the insert failed)", would=would), prev.get("lua")
         db = new_db
-        if self.dry_run and plan is not None and planned_op == "insert" and plan.like:
+        if self.dry_run and plan is not None and planned_op == "insert" and plan.copy_from:
             db = {"table": plan.table.name, "id": plan.id, "name": plan.name, "created": True,
-                  "like": {"id": plan.like["id"], "name": plan.like["name"]}, "group": plan.like.get("group")}
+                  "copy_from": {"id": plan.copy_from["id"], "name": plan.copy_from["name"]},
+                  "group": plan.copy_from.get("group")}
         ctx = L.StubCtx(kind, name, db if isinstance(db, dict) else None, project=self.project or "",
                         action=aid, prev_lua=prev.get("lua"), server_dir=self.server_dir,
                         created_now=planned_op == "insert")

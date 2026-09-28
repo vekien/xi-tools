@@ -51,7 +51,7 @@ def test_validator_names_the_field():
     ]}))
     assert "edits[0].set.bogus: table 'spellData' has no field 'bogus'" in errs
     assert "edits[0].set.levels: 'XXX' is not a job" in errs and "'plasma' is not an element" in errs
-    assert "edits[1].strings: 'spellData' takes set, like, hex or server: false" in errs
+    assert "edits[1].strings: 'spellData' takes set, copy_from, hex or server: false" in errs
     assert "edits[2].hex is 2 bytes; a record of this table is 48" in errs
     assert "edits[3].strings.name: a table by path names its sub-strings sub0, sub1" in errs
     assert "edits[4]: hex is the whole record; give it alone" in errs
@@ -92,7 +92,7 @@ def test_ability_field_and_no_sql(game):
 
 def test_like_past_the_end_grows_and_undo_shrinks(game):
     before = snapshot(game)
-    T.prepare([{"table": "spellData", "id": 10, "like": 1, "set": {"mp": 99}}])
+    T.prepare([{"table": "spellData", "id": 10, "copy_from": 1, "set": {"mp": 99}}])
     r = T.build()
     assert r.exit_code == 0, r.output
     m = menu(game)
@@ -106,7 +106,7 @@ def test_like_past_the_end_grows_and_undo_shrinks(game):
 def test_an_empty_slot_needs_like(game):
     T.prepare([{"table": "spellData", "id": 20, "set": {"mp": 1}}])
     r = T.build()
-    assert r.exit_code != 0 and "is an empty slot; give like" in r.output
+    assert r.exit_code != 0 and "is an empty slot; give copy_from" in r.output
 
 
 def test_exact_bytes_for_a_spell_an_item_and_a_text_row(game):
@@ -135,7 +135,7 @@ def test_a_d_msg_table_by_path(game):
     before = snapshot(game)
     rel = MT.KINDS["spell"].help["en"]
     T.prepare([{"table": rel, "id": 2, "strings": {"sub0": "Freezes the target."}},
-               {"table": rel, "id": 9, "like": 1, "strings": {"sub0": "A new help text."}}])
+               {"table": rel, "id": 9, "copy_from": 1, "strings": {"sub0": "A new help text."}}])
     r = T.build()
     assert r.exit_code == 0, r.output
     t = D.parse((game / rel).read_bytes())
@@ -165,3 +165,17 @@ def test_the_viewer_rows_and_describe(game):
     d = DB.describe(game, "spellData", 1)
     assert d["name"] == "Name 1" and d["fields"]["mp"] == 7 and d["fields"]["levels.BLM"] == 13
     assert DB.describe(game, "spellData", 50)["empty"]
+
+
+def test_a_spell_copied_in_is_left_alone_on_top_and_rewritten_when_it_changes(game):
+    before = snapshot(game)
+    T.prepare([{"table": "spellData", "id": 10, "copy_from": 1, "set": {"mp": 99}}])
+    assert T.build().exit_code == 0
+    once = snapshot(game)
+    assert T.build().exit_code == 0 and snapshot(game) == once
+    T.prepare([{"table": "spellData", "id": 10, "copy_from": 1, "set": {"mp": 50}}], "tweaks", "--replace")
+    r = T.build()
+    assert r.exit_code == 0, r.output
+    assert spell(game, 10)["mp"] == 50
+    undo()
+    assert snapshot(game) == before

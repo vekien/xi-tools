@@ -10,7 +10,7 @@ import _srvtree as T
 from xi.server import xi_lua_stub as L
 
 SPELL_DB = {"table": "spell_list", "id": 1023, "name": "love", "created": True, "confirmed": False,
-            "like": {"id": 144, "name": "fire"}, "group": 2, "animation": 1100, "before": None}
+            "copy_from": {"id": 144, "name": "fire"}, "group": 2, "animation": 1100, "before": None}
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ def test_spell_write_then_unchanged(srv, no_rename):
 
 def test_rewrite_when_the_template_or_donor_changes(srv):
     L.write_stub(L.plan_stub(ctx(srv)))
-    db = dict(SPELL_DB, like={"id": 145, "name": "fire"})           # same file, different donor id
+    db = dict(SPELL_DB, copy_from={"id": 145, "name": "fire"})           # same file, different donor id
     p = L.plan_stub(ctx(srv, db=db))
     assert p.op == "rewrite" and p.step().line("lua").endswith("(donor or template changed)")
     assert "the server reloads changed scripts on its own (restart it if the change doesn't show)" in p.warnings
@@ -110,14 +110,14 @@ def test_a_script_of_that_name_in_another_folder_is_refused(srv):
     p = L.plan_stub(ctx(srv))
     assert p.op == "refused" and p.reason == "love already has a script: scripts/actions/spells/white/love.lua"
     (srv / "scripts/actions/abilities/pets/love.lua").write_text("return {}\n", encoding="utf-8")
-    ja = dict(SPELL_DB, table="abilities", like={"id": 35, "name": "provoke"})
+    ja = dict(SPELL_DB, table="abilities", copy_from={"id": 35, "name": "provoke"})
     p = L.plan_stub(ctx(srv, kind="ja", db=ja))
     assert p.op == "refused" and p.reason == "love already has a script: scripts/actions/abilities/pets/love.lua"
 
 
 def test_a_group_change_moves_our_own_stub(srv):
     old = L.write_stub(L.plan_stub(ctx(srv)))
-    white = dict(SPELL_DB, group=6, like={"id": 1, "name": "cure"})
+    white = dict(SPELL_DB, group=6, copy_from={"id": 1, "name": "cure"})
     p = L.plan_stub(ctx(srv, db=white, prev_lua=old.result_lua()))
     assert p.op == "write" and p.path == "scripts/actions/spells/white/love.lua"
     L.write_stub(p)
@@ -130,7 +130,7 @@ def test_a_group_change_keeps_an_edited_old_stub(srv):
     old = L.write_stub(L.plan_stub(ctx(srv)))
     f = srv / old.path
     f.write_text(f.read_text(encoding="utf-8") + "-- mine\n", encoding="utf-8", newline="\n")
-    white = dict(SPELL_DB, group=6, like={"id": 1, "name": "cure"})
+    white = dict(SPELL_DB, group=6, copy_from={"id": 1, "name": "cure"})
     p = L.write_stub(L.plan_stub(ctx(srv, db=white, prev_lua=old.result_lua())))
     assert p.op == "write" and p.executed and f.is_file()
     assert any(w.startswith("the old stub scripts/actions/spells/black/love.lua was edited by hand") for w in p.warnings)
@@ -148,10 +148,10 @@ def test_path_segment_names_are_refused(srv, name):
 
 
 def test_donor_guards(srv):
-    p = L.plan_stub(ctx(srv, db=dict(SPELL_DB, like={"id": 150, "name": "flare"})))
+    p = L.plan_stub(ctx(srv, db=dict(SPELL_DB, copy_from={"id": 150, "name": "flare"})))
     assert p.op == "refused" and p.reason == "flare has no script in scripts/actions (a module-defined donor isn't supported)"
     for donor in ("corsairs_roll", "box_step"):
-        ja = dict(SPELL_DB, table="abilities", like={"id": 98, "name": donor})
+        ja = dict(SPELL_DB, table="abilities", copy_from={"id": 98, "name": donor})
         p = L.plan_stub(ctx(srv, kind="ja", db=ja))
         assert p.op == "refused" and "looks its tuning up by ability id" in p.reason, donor
     for g in (0, 3, 8, None):
@@ -187,7 +187,7 @@ def test_the_server_dir_defaults_to_xi_server_dir(srv, monkeypatch):
 
 
 def test_ja_and_ws_stubs(srv):
-    ja = dict(SPELL_DB, table="abilities", id=511, like={"id": 35, "name": "provoke"})
+    ja = dict(SPELL_DB, table="abilities", id=511, copy_from={"id": 35, "name": "provoke"})
     ja.pop("group")
     p = L.write_stub(L.plan_stub(ctx(srv, kind="ja", db=ja)))
     text = (srv / "scripts/actions/abilities/love.lua").read_text(encoding="utf-8")
@@ -195,7 +195,7 @@ def test_ja_and_ws_stubs(srv):
     assert _entry_points(text) == {"onAbilityCheck", "onUseAbility"} and "local DONOR_NAME = 'provoke'" in text
     assert p.step().line("lua") == "lua: write scripts/actions/abilities/love.lua (calls provoke #35 at run time)"
     assert not any("tried in game" in w for w in p.warnings)
-    ws = dict(SPELL_DB, table="weapon_skills", id=237, like={"id": 32, "name": "fast_blade"})
+    ws = dict(SPELL_DB, table="weapon_skills", id=237, copy_from={"id": 32, "name": "fast_blade"})
     p = L.write_stub(L.plan_stub(ctx(srv, kind="ws", db=ws)))
     text = (srv / "scripts/actions/weaponskills/love.lua").read_text(encoding="utf-8")
     assert "-- Weapon Skill: love" in text and _entry_points(text) == {"onUseWeaponSkill"}
@@ -204,7 +204,7 @@ def test_ja_and_ws_stubs(srv):
 
 
 def test_the_donor_is_always_the_rows_like(srv):
-    p = L.plan_stub(ctx(srv, db=dict(SPELL_DB, like={"id": 1, "name": "cure"}, group=6)))
+    p = L.plan_stub(ctx(srv, db=dict(SPELL_DB, copy_from={"id": 1, "name": "cure"}, group=6)))
     assert p.donor == "white/cure#1" and "local DONOR_NAME  = 'cure'" in p.content.decode()
 
 
@@ -238,3 +238,10 @@ def test_crlf_normalised_before_hashing(srv):
     f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
     assert L.read_stub(f).body_ok
     assert L.plan_stub(ctx(srv)).op == "unchanged"
+
+
+def test_a_result_recorded_before_the_rename_still_names_its_donor():
+    from xi.server.xi_step import recorded_donor
+    assert recorded_donor({"like": {"id": 144, "name": "fire"}}) == {"id": 144, "name": "fire"}
+    assert recorded_donor({"copy_from": {"id": 1}, "like": {"id": 2}}) == {"id": 1}
+    assert recorded_donor(None) == {}
