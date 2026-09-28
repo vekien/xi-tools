@@ -13,7 +13,7 @@ The new rows are a filler:
 An item record's id continues the table's numbering: row 0's id plus its row.
 
 Growing is set-up, not content: the table's ``.base`` grows too (the install's, or the pivot
-folder's with ``--pivot``), so a reset (``xi dats build --all``) keeps the rows and takes back
+folder's with ``--pivot``), so a reset (``xi dats build --reset``) keeps the rows and takes back
 only what the projects wrote into them. A table already that long is left alone.
 """
 from __future__ import annotations
@@ -178,7 +178,7 @@ def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool,
     \b
     New rows are a filler: a d_msg row blanked to '.', or the item table's last placeholder
     record (its id following the table's numbering), unless --fill-from / --fill-hex says
-    otherwise. The table's .base grows too, so `xi dats build --all` resets back to the
+    otherwise. The table's .base grows too, so `xi dats build --reset` resets back to the
     grown table. A table already COUNT rows long is left alone.
 
     \b

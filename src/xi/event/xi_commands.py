@@ -340,7 +340,9 @@ def import_cmd(json_file, dry_run):
 @click.option("--force", is_flag=True, help="Repoint a camera file id that is registered elsewhere.")
 @click.option("--dry-run", is_flag=True, help="Show the plan: event id, lines, blocks, Lua; write no DATs.")
 @click.option("--pivot", is_flag=True, help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
-def compile_cmd(cutscene_json: Path, zone_id, project, event_name, camera, force, dry_run, pivot):
+@click.option("--reset", is_flag=True,
+              help="Reset the zone's event and dialog tables from .base first (xi dats build --reset).")
+def compile_cmd(cutscene_json: Path, zone_id, project, event_name, camera, force, dry_run, pivot, reset):
     """Compile a xi.cutscene.v1 JSON into its zone, through `xi dats`.
 
     \b
@@ -376,7 +378,7 @@ def compile_cmd(cutscene_json: Path, zone_id, project, event_name, camera, force
                      if a.get("type") == "zone_events" and a.get("zone") == zone)
     click.echo()
     ctx.invoke(build_cmd, project=project, only=(action_id,), force=force, dry_run=dry_run, pivot=pivot,
-               reset=True)
+               reset=reset)
 
 
 # ---------------------------------------------------------------------------
@@ -752,7 +754,10 @@ def dialogue_actors_cmd(dat, limit):
               help="What the event is recorded by (default: the JSON file's name); one of the same name is replaced.")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without writing.")
 @click.option("--pivot", is_flag=True, help="Build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
-def dialogue_new_cmd(dat, json_file: Path, actor_id, paged, event_id, project, event_name, dry_run, pivot):
+@click.option("--reset", is_flag=True,
+              help="Reset the zone's event and dialog tables from .base first (xi dats build --reset).")
+def dialogue_new_cmd(dat, json_file: Path, actor_id, paged, event_id, project, event_name, dry_run, pivot,
+                     reset):
     """Inject dialogue lines + a new event that prints them, through `xi dats`.
 
     \b
@@ -795,4 +800,4 @@ def dialogue_new_cmd(dat, json_file: Path, actor_id, paged, event_id, project, e
         source.write_text(json.dumps({"zone": zone_id, "events": [ev]}), encoding="utf-8")
         ctx.invoke(prepare_cmd, source=source, project=project, action_id=action_id, merge=True)
     click.echo()
-    ctx.invoke(build_cmd, project=project, only=(action_id,), dry_run=dry_run, pivot=pivot, reset=True)
+    ctx.invoke(build_cmd, project=project, only=(action_id,), dry_run=dry_run, pivot=pivot, reset=reset)

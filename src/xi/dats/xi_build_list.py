@@ -1,35 +1,37 @@
-"""The build order (schema/build_order.json): the projects ``xi dats build --all`` builds,
-first to last, after every table any of them edits in place is reset from its ``.base``.
+"""A build list (schema/build_list.json): the projects ``xi dats build --list`` builds, first
+to last. With ``--reset`` every table any of them edits in place is reset from its ``.base``
+once, before the first project.
 
-Projects that share a table (two that edit ``ROM/118/114.DAT``, a zone editor project and
-a project that edits the same zone's dialog) then layer the same way on every build: each
-starts from the tables as the ones before it left them, and nothing a project dropped
-lingers. The file records, per target, the tables the last ``--all`` left edited, so the
-next one resets those too.
+Projects that share a table (two that edit ``ROM/118/114.DAT``, a zone editor project and a
+project that edits the same zone's dialog) then layer the same way on every build: each
+starts from the tables as the ones before it left them. The file records, per target, the
+tables the projects edit, so a ``--reset`` resets a table a project dropped (or a project
+taken off the list) too. Resetting is here as well: :func:`reset_tables`, which a single
+project's ``--reset`` uses.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-ORDER_SCHEMA = "xi.dats.build_order.v1"
-DEFAULT_PATH = Path("projects") / "build_order.json"
+LIST_SCHEMA = "xi.dats.build_list.v1"
+DEFAULT_PATH = Path("projects") / "build_list.json"
 TARGETS = ("dir", "pivot")
 _KEYS = {"schema", "description", "projects", "result"}
 
 
-class OrderError(ValueError):
+class ListError(ValueError):
     pass
 
 
 def validate(doc) -> list[str]:
-    """Problems with a build order, each naming the field; ``[]`` when it is valid.
-    Mirrors schema/build_order.json."""
+    """Problems with a build list, each naming the field; ``[]`` when it is valid.
+    Mirrors schema/build_list.json."""
     if not isinstance(doc, dict):
-        return ["the build order must be an object"]
+        return ["the build list must be an object"]
     errs = [f"unknown key {k!r}" for k in doc if k not in _KEYS]
-    if doc.get("schema") != ORDER_SCHEMA:
-        errs.append(f'schema must be "{ORDER_SCHEMA}"')
+    if doc.get("schema") != LIST_SCHEMA:
+        errs.append(f'schema must be "{LIST_SCHEMA}"')
     if "description" in doc and not isinstance(doc["description"], str):
         errs.append("description must be a string")
     projects = doc.get("projects")
@@ -56,18 +58,35 @@ def validate(doc) -> list[str]:
     return errs
 
 
+def is_list(path: Path) -> bool:
+    """``path`` is a build list (by its ``schema``), not a project."""
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8")).get("schema") == LIST_SCHEMA
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def list_path(arg) -> Path:
+    """The build list ``xi dats build --list [LIST]`` names: a bare name is
+    ``projects/<name>.json``, anything else a path; none is ``projects/build_list.json``."""
+    if not arg:
+        return DEFAULT_PATH
+    p = Path(arg)
+    return Path("projects") / f"{p.name}.json" if p.parent == Path(".") and p.suffix == "" else p
+
+
 def load(path: Path) -> dict:
     path = Path(path)
     if not path.is_file():
-        raise OrderError(f"no build order at {path} (see schema/build_order.json: "
-                         f'{{"schema": "{ORDER_SCHEMA}", "projects": ["main", …]}})')
+        raise ListError(f"no build list at {path} (see schema/build_list.json: "
+                        f'{{"schema": "{LIST_SCHEMA}", "projects": ["main", …]}})')
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except ValueError as e:
-        raise OrderError(f"{path}: not valid JSON ({e})") from None
+        raise ListError(f"{path}: not valid JSON ({e})") from None
     errs = validate(doc)
     if errs:
-        raise OrderError(f"{path}: " + "; ".join(errs))
+        raise ListError(f"{path}: " + "; ".join(errs))
     return doc
 
 
@@ -75,13 +94,13 @@ def save(path: Path, doc: dict) -> None:
     Path(path).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def project_path(entry: str, order_path: Path) -> Path:
-    """A project of the order: a bare name is ``projects/<name>.json``; anything else is a
-    path, relative to the order file."""
+def project_path(entry: str, list_file: Path) -> Path:
+    """A project of the list: a bare name is ``projects/<name>.json``; anything else is a
+    path, relative to the list file."""
     p = Path(entry)
     if p.parent == Path(".") and p.suffix == "":
         return Path("projects") / f"{p.name}.json"
-    return p if p.is_absolute() else Path(order_path).parent / p
+    return p if p.is_absolute() else Path(list_file).parent / p
 
 
 def recorded(doc: dict, target: str) -> list[str]:

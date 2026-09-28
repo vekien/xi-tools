@@ -10,9 +10,9 @@ take the band from 0x380 (xi.entity.xi_custom_npc), where no retail mob and almo
 sits. ``"id": "auto"`` takes the first local there that neither the name table nor the zone's
 event table (whose blocks begin with their actor's id) uses; a rebuild keeps the one it took.
 
-Like the ``database`` action, a build starts from the table as it was before this action (the
-records a previous build added come off, renamed ones get their names back), then applies the
-NPCs — a rebuild converges and undo is exact.
+Like the ``database`` action, a build applies the NPCs to the table as it is and records each
+name before and after, which ``xi dats undo`` puts back exactly; ``xi dats build --reset``
+resets the table from its ``.base`` first.
 """
 from __future__ import annotations
 
@@ -295,13 +295,11 @@ def _npc_sql(npc: dict, sid: int, zone: int, warnings: list) -> list[str]:
 
 
 def build(action: dict, *, root: Path, target: str | None, manifest: dict | None = None,
-          sql_path: Path | None = None, project: str = "", force: bool = False, dry_run: bool = False,
-          unwound: bool = False, apply: bool = False) -> dict:
-    """Apply ``action`` to the zone's entity-name table in ``root`` and write the proposed SQL;
-    the build result (``records`` is what gets recorded for this root). ``unwound``: the
-    previous build's names aren't put back first (``xi dats build --reset`` did that, or the
-    table was reset). ``apply``: they are still there — an NPC this action added is its own
-    to rename, and one already named as the edit says is left alone."""
+          sql_path: Path | None = None, project: str = "", dry_run: bool = False) -> dict:
+    """Apply ``action`` to the zone's entity-name table in ``root`` as it is and write the
+    proposed SQL: each name is written, replacing what is at its id (a ``new`` NPC too), and
+    one already there writes nothing. The build result's ``records`` is what gets recorded
+    for this root."""
     from xi.database import xi_build as DB
     from xi.dats import xi_stage
     errs = validate_action(action)
@@ -316,8 +314,6 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict | None
     prev = ((prev_result.get("roots") or {}).get(target)) or []
     warnings: list[str] = []
     data = orig
-    for entry in ([] if unwound else reversed(prev)):
-        data = _restore(data, entry, warnings)
     kept = {e["name_key"]: e["local"] for e in prev if e.get("name_key")}     # auto ids a build took
     taken = {sid & 0xFFF for _n, sid in parse_names(data) if (sid >> 12) & 0xFFF == zone}
     taken |= {a & 0xFFF for a in event_actors(root, zone) if (a >> 12) & 0xFFF == zone}
@@ -337,11 +333,6 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict | None
         cur = _name_of(data, sid)
         try:
             if npc.get("new"):
-                own = apply and any(e.get("sid") == sid and e.get("created") for e in prev) \
-                    and next((e for e in reversed(prev) if e.get("sid") == sid), {}).get("to") == cur
-                if cur is not None and cur != npc["name"] and not (force or own):
-                    raise ZoneNpcsError(f"zone {zone} already has NPC {local:#x} ({cur!r}); pick another id, "
-                                        "\"auto\", or --force (--reset rebuilds this action's own NPCs)")
                 if local < CN.CUSTOM_NPC_LOCAL_START:
                     warnings.append(f"NPC {local:#x} is below the custom band (0x{CN.CUSTOM_NPC_LOCAL_START:X}+), "
                                     "where retail updates add NPCs")

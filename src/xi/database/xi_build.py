@@ -2,11 +2,11 @@
 in the DATs of the build's root, and the proposed SQL for their server rows is written
 beside the project.
 
-Every build starts from the records as they were before this action touched them: what a
-previous build of the action changed in this root is put back first (from the values its
-``result`` recorded), then the edits are applied. So a rebuild converges, an edit removed
-from the action goes back to what it was, and a ``replace`` text edit always applies to the
-original text. A file is written only when its bytes changed.
+A build applies the edits to the records as they are, replacing what they name; each record
+it changes is recorded with its values before and after, which ``xi dats undo`` puts back. A
+``replace`` text edit always applies to the original text a previous build recorded, so the
+same edits build the same bytes again. ``xi dats build --reset`` resets the tables from their
+``.base`` first. A file is written only when its bytes changed.
 
 Item records: an item DAT holds fixed-size records (0xC00 legacy / 0x1400 retail, detected
 per file), each a typed header, a string block and the icon (xi.ui.items.xi_layout). d_msg
@@ -584,19 +584,7 @@ def _base_texts(prev: dict, table: str, rid: int, lang: str) -> dict:
     return {}
 
 
-def _key(e: dict) -> tuple:
-    return e["table"], e["id"], e["lang"], e["dat"]
-
-
-def _own(prev: list, key: tuple, current: bytes) -> bool:
-    """The record at ``key`` is one this action's last build created and still holds what
-    that build wrote there (applied on top, a rebuild rewrites its own record)."""
-    mine = [e for e in prev if _key(e) == key]
-    return (any(e.get("created") for e in mine) and
-            (mine[-1].get("sha1") is None or mine[-1]["sha1"] == _sha1(current)))
-
-
-def _item_edit(files: _Files, edit: dict, prev: list, force: bool, apply: bool = False) -> list[dict]:
+def _item_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
     table, rid = edit["table"], edit["id"]
     layout = _layout(table)
     en, jp, idx = locate_item(files, table, rid)
@@ -638,10 +626,8 @@ def _item_edit(files: _Files, edit: dict, prev: list, force: bool, apply: bool =
         entry["name"] = item_name(rec, layout, fmt) or entry["name"]
         if donor is not None:
             if bytes(rec) == before:
-                continue                        # already there (the last build, applied on top)
-            if not (is_empty_item(before, layout, fmt) or force or (apply and _own(prev, _key(entry), before))):
-                raise DbError(f"{table} {rid} already holds {item_name(before, layout, fmt)!r}; "
-                              "pick an empty id or pass --force (--reset rebuilds this action's own records)")
+                continue                        # already there
+            # Whatever the slot held is replaced; undo puts it back.
             entry.update(created=True, before_block=base64.b64encode(before).decode("ascii"),
                          sha1=_sha1(rec))       # what undo checks is still there
         dat.set_record(idx, bytes(rec))
@@ -655,7 +641,7 @@ def _rom(table: str) -> str:
     return "ROM" + rel[3:] if rel[:3].upper() == "ROM" else rel
 
 
-def _item_path_edit(files: _Files, edit: dict, prev: list, force: bool, apply: bool = False) -> list[dict]:
+def _item_path_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
     """An item table given by its ROM path: one file, a row by its index, in the layout the
     edit names. A record copied in takes the id its row has in the donor's numbering (the
     donor's id, moved by as many rows)."""
@@ -694,9 +680,6 @@ def _item_path_edit(files: _Files, edit: dict, prev: list, force: bool, apply: b
     if donor is not None:
         if bytes(rec) == before:
             return []
-        if not (is_empty_item(before, layout, fmt) or force or (apply and _own(prev, _key(entry), before))):
-            raise DbError(f"{rel} row {idx} already holds {item_name(before, layout, fmt)!r}; pick an empty "
-                          "row or pass --force (--reset rebuilds this action's own records)")
         entry.update(created=True, before_block=base64.b64encode(before).decode("ascii"), sha1=_sha1(rec))
     dat.set_record(idx, bytes(rec))
     return [entry] if entry["changed"] or entry.get("created") else []
@@ -752,7 +735,7 @@ def _row_name(t: D.DmsgTable, idx: int, table: str, lang: str) -> str:
     return sub_value(subs[name_i]) if name_i < len(subs) and subs[name_i]["flag"] == 0 else ""
 
 
-def _dmsg_edit(files: _Files, edit: dict, prev: list, apply: bool = False) -> list[dict]:
+def _dmsg_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
     table, rid = edit["table"], edit["id"]
     if C.is_raw(table):
         # One file, whatever the language: its strings and hex name no language.
@@ -804,17 +787,13 @@ def _dmsg_edit(files: _Files, edit: dict, prev: list, apply: bool = False) -> li
             continue
         base = _base_texts(prev, table, rid, lang)
         if idx is not None and copying:
-            # The row is there: this action's last build (applied on top), or another's.
+            # The row is there: it is replaced by the copy (undo puts it back).
             cur = bytes(t.blocks[idx])
             t.blocks[idx] = _copied_block(t, table, rid, edit["copy_from"], lang)
             _apply_block(t, idx, table, lang, spec, base)
             new = bytes(t.blocks[idx])
             if new == cur:
                 continue
-            if not (apply and _own(prev, (table, rid, lang, rel), cur)):
-                t.blocks[idx] = bytearray(cur)
-                raise DbError(f"{table} already has {'id' if table in C.ID_KEYED else 'row'} {rid}; "
-                              "copy_from only adds a new one (--reset rebuilds this action's own rows)")
             out.append({"table": table, "id": rid, "lang": lang, "dat": rel, "block": idx, "hex": True,
                         "before_block": base64.b64encode(cur).decode("ascii"), "sha1": _sha1(new),
                         "changed": {}, "name": _row_name(t, idx, table, lang)})
@@ -874,8 +853,7 @@ def _menu_set(kind: str, rec: bytes, values: dict) -> bytes:
     return out
 
 
-def _menu_edit(files: _Files, edit: dict, force: bool, warnings: list, prev: list = (),
-               apply: bool = False) -> list[dict]:
+def _menu_edit(files: _Files, edit: dict, warnings: list) -> list[dict]:
     table, rid = edit["table"], edit["id"]
     kind = C.MENU_KINDS[table]
     k = MT.KINDS[kind]
@@ -898,11 +876,6 @@ def _menu_edit(files: _Files, edit: dict, force: bool, warnings: list, prev: lis
         whole = bytes(whole)
         if edit.get("set"):
             whole = _menu_set(kind, whole, edit["set"])
-        cur = menu.records(kind)[rid] if rid < count else None
-        if (cur is not None and not MT.is_empty(cur) and cur != whole and not force
-                and not (apply and _own(prev, (table, rid, "all", MENU_DAT), cur))):
-            raise DbError(f"{table} {rid} already holds {_menu_name(files, kind, rid) or 'a record'!r}; "
-                          "pick an empty id or pass --force (--reset rebuilds this action's own records)")
     elif rid >= count or MT.is_empty(menu.records(kind)[rid]):
         raise DbError(f"{table} {rid} is an empty slot; give copy_from: <id> to create a record there")
     if rid >= count:
@@ -1012,32 +985,28 @@ def _pivot_shadow(root: Path, target: str | None, rels: list[str]) -> list[str]:
 
 
 def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_path: Path | None,
-          project: str, force: bool = False, dry_run: bool = False, unwound: bool = False,
-          apply: bool = False) -> dict:
-    """Apply ``action`` to the DATs of ``root``; the build result (``records`` is what
-    gets recorded for this root). ``unwound``: the previous build's changes aren't put back
-    first (``xi dats build --reset`` did that for the whole project, or the tables were
-    reset). ``apply``: they are still there — a record this action created is its own to
-    rewrite, and one already holding what the edit writes is left alone."""
+          project: str, dry_run: bool = False) -> dict:
+    """Apply ``action`` to the DATs of ``root`` as they are: what an edit names is written,
+    replacing what is there (a record copied into a slot holding one included), and an edit
+    already there writes nothing. The build result's ``records`` is what gets recorded for
+    this root; ``replace`` edits apply to the original text a previous build recorded."""
     errs = C.validate_action(action)
     if errs:
         raise DbError("; ".join(errs))
     prev = (((action.get("result") or {}).get("roots") or {}).get(target)) or []
     files = _Files(Path(root))
     warnings: list[str] = []
-    for entry in ([] if unwound else reversed(prev)):
-        _restore(files, entry, warnings)
     records: list[dict] = []
     for i, edit in enumerate(action["edits"]):
         try:
             if is_item_table(edit["table"]):
-                records += _item_edit(files, edit, prev, force, apply)
+                records += _item_edit(files, edit, prev)
             elif "layout" in edit:
-                records += _item_path_edit(files, edit, prev, force, apply)
+                records += _item_path_edit(files, edit, prev)
             elif edit["table"] in C.MENU_KINDS:
-                records += _menu_edit(files, edit, force, warnings, prev, apply)
+                records += _menu_edit(files, edit, warnings)
             else:
-                records += _dmsg_edit(files, edit, prev, apply)
+                records += _dmsg_edit(files, edit, prev)
         except DbError as e:
             raise DbError(f"edits[{i}] ({edit['table']} {edit['id']}): {e}") from None
     # The SQL before anything is written: a mod name it can't resolve stops the build clean.

@@ -80,11 +80,10 @@ names change.
 
 Each line written is recorded per target with its bytes before and after (and, for a new
 line, the table's line count before and after). A build applies the lines to the tables as
-they are: the same lines write nothing new, a `replace` always applies to the original text,
-and a `new` line this action added last time is its own to rewrite (a line someone else put at
-that id is refused). A line taken out of the action stays until a build with `--reset`, which
-first puts back what the action's builds changed, or `xi dats build --all`
-([../dats/README.md](../dats/README.md#building-on-top---reset-and---all)). `xi dats undo`
+they are: each line is written over what its id holds (a `new` line on an id that has one
+replaces it), the same lines write nothing new, and a `replace` always applies to the original
+text. A line taken out of the action stays until a build with `--reset`, which resets the
+tables from `.base` first ([../dats/README.md](../dats/README.md#applying---reset-and---list)). `xi dats undo`
 restores each line and trims the lines the action added — only while the table still holds
 what the build wrote; anything else is left and named.
 

@@ -252,7 +252,7 @@
         "copy_from": {
           "type": "integer",
           "minimum": 0,
-          "description": "Create the record as a copy of another. Item tables: copy record `copy_from` of the same table into the empty slot `id`, then apply this edit (the proposed SQL copies the donor's server rows the same way). Text tables: add row `id` past the end, copying row `copy_from` (the rows in between hold '.'), or for key items and the quest / mission logs a new id, copying the record with id `copy_from`. A new text row goes in both languages; the Japanese one takes the English text unless strings.jp gives its own. spellData / abilityData: copy that record into the empty slot `id` (past the end grows the section, as a client that reads them needs)."
+          "description": "Create the record as a copy of another. Item tables: copy record `copy_from` of the same table into slot `id` (replacing what it holds), then apply this edit (the proposed SQL copies the donor's server rows the same way). Text tables: add row `id` past the end, copying row `copy_from` (the rows in between hold '.'), or for key items and the quest / mission logs a new id, copying the record with id `copy_from`. A new text row goes in both languages; the Japanese one takes the English text unless strings.jp gives its own. spellData / abilityData: copy that record into slot `id` (past the end grows the section, as a client that reads them needs)."
         },
         "note": {
           "type": "string",

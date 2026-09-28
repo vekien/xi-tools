@@ -1875,31 +1875,30 @@ def _action_file(action: dict, manifest_path: Path, manifest: dict) -> Path:
 
 
 def _build_database(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
-                    dry_run: bool = False, apply: bool = False) -> dict:
+                    dry_run: bool = False) -> dict:
     from xi.database import xi_build as DB
     root = _active_build_root()
     sql_path = DB.sql_path(action, _action_file(action, manifest_path, manifest), manifest_path)
     try:
         return DB.build(action, root=root, target=_root_target_name(root) or "dir", manifest=manifest,
                         sql_path=sql_path, project=manifest.get("name") or manifest_path.stem,
-                        force=force, dry_run=dry_run, unwound=True, apply=apply)
+                        dry_run=dry_run)
     except DB.DbError as e:
         raise click.ClickException(f"{action.get('id')}: {e}")
 
 
 def _build_zone_dialog(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
-                       dry_run: bool = False, apply: bool = False) -> dict:
+                       dry_run: bool = False) -> dict:
     from xi.dialog import xi_zone_dialog as ZD
     root = _active_build_root()
     try:
-        return ZD.build(action, root=root, target=_root_target_name(root) or "dir", dry_run=dry_run,
-                        unwound=True, apply=apply)
+        return ZD.build(action, root=root, target=_root_target_name(root) or "dir", dry_run=dry_run)
     except ZD.ZoneDialogError as e:
         raise click.ClickException(f"{action.get('id')}: {e}")
 
 
 def _build_zone_npcs(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
-                     dry_run: bool = False, apply: bool = False) -> dict:
+                     dry_run: bool = False) -> dict:
     from xi.database import xi_build as DB
     from xi.entity import xi_zone_npcs as ZN
     root = _active_build_root()
@@ -1907,7 +1906,7 @@ def _build_zone_npcs(action: dict, manifest_path: Path, manifest: dict, force: b
     try:
         return ZN.build(action, root=root, target=_root_target_name(root) or "dir", manifest=manifest,
                         sql_path=sql_path, project=manifest.get("name") or manifest_path.stem,
-                        force=force, dry_run=dry_run, unwound=True, apply=apply)
+                        dry_run=dry_run)
     except ZN.ZoneNpcsError as e:
         raise click.ClickException(f"{action.get('id')}: {e}")
 
@@ -2577,23 +2576,20 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
 @click.option("--lua-stub", is_flag=True, default=False,
               help="Lua Stub: write the server script for a row this mix created into XI_SERVER_DIR/scripts/actions.")
 @click.option("--reset", is_flag=True, default=False,
-              help="Take back what this project's last build changed in the target's tables (database, zone "
-                   "dialog, NPC names, events), record by record and newest first, then build. Without it a "
-                   "build applies its edits to the tables as they are.")
-@click.option("--all", "build_all", is_flag=True, default=False,
-              help="Build every project of the build order (projects/build_order.json), in its order: every "
-                   "table any of them edits is reset from its .base once, first.")
-@click.option("--order", "order_path", type=click.Path(path_type=Path), default=None,
-              help="The build order file --all reads (default projects/build_order.json).")
+              help="Reset the tables the actions being built edit in place (database records, zone dialog, "
+                   "NPC names, events, spell / command records) from their .base first. Without it a build "
+                   "applies its edits to the tables as they are.")
+@click.option("--list", "build_list", is_flag=True, default=False,
+              help="MANIFEST / --project names a build list (projects/build_list.json when neither is "
+                   "given): build its projects in order. With --reset, every table they edit is reset once, "
+                   "first.")
 @click.option("--fresh", is_flag=True, default=False, hidden=True,
-              help="The tables were just reset (--all): nothing to take back, and the result records this "
-                   "build only.")
+              help="The tables were just reset (a --list --reset): the result records this build only.")
 def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...], verbose: bool,
               force: bool, dry_run: bool, dry_note: bool = True, pivot: bool = False,
               apply_db: bool = False, db_row: int | None = None, clone_from: str | None = None,
               server_id: int | None = None, menu_record: bool = False, menu_name: str | None = None,
-              lua_stub: bool = False, reset: bool = False, build_all: bool = False,
-              order_path: Path | None = None, fresh: bool = False):
+              lua_stub: bool = False, reset: bool = False, build_list: bool = False, fresh: bool = False):
     """Build a manifest into the base install (FFXI_DIR), or FFXI_PIVOT_DIR with --pivot.
 
     DATs are placed and their file_ids registered straight into the target's tables
@@ -2612,29 +2608,29 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
 
     \b
     The table edits (database, zone_dialog, zone_npcs, zone_events):
-      (default)  applied to the tables as they are; an edit already there changes
-                 nothing, and a zone_events action replaces its own last events
-      --reset    this project's last build taken back first, record by record
-      --all      every project of projects/build_order.json, in order, after each
-                 table they edit is reset from its .base
+      (default)  applied to the tables as they are: what an edit names is written,
+                 replacing whatever is there; a zone_events action replaces its own events
+      --reset    the tables the actions being built edit reset from .base first
+      --list     MANIFEST is a build list: its projects built in order (--reset:
+                 every table they edit reset once, first)
     """
     import xi.xi_config as cfg
+    from xi.dats import xi_build_list as BL
     from xi.server import xi_server_pass as SP
-    if build_all:
-        if manifest is not None or project or only or reset:
-            raise click.ClickException("--all builds the projects of the build order; give no project, "
-                                       "--only or --reset with it.")
-        return _build_all(order_path, pivot=pivot, dry_run=dry_run, dry_note=dry_note, force=force,
-                          verbose=verbose, apply_db=apply_db, db_row=db_row, clone_from=clone_from,
-                          server_id=server_id, menu_record=menu_record, menu_name=menu_name, lua_stub=lua_stub)
-    if reset and fresh:
-        raise click.ClickException("--reset and --fresh don't go together.")
-    mode = "fresh" if fresh else "reset" if reset else "apply"
+    if build_list:
+        if only:
+            raise click.ClickException("--list builds whole projects; --only doesn't go with it.")
+        return _build_list(BL.list_path(manifest or project), reset=reset, pivot=pivot, dry_run=dry_run,
+                           dry_note=dry_note, force=force, verbose=verbose, apply_db=apply_db, db_row=db_row,
+                           clone_from=clone_from, server_id=server_id, menu_record=menu_record,
+                           menu_name=menu_name, lua_stub=lua_stub)
     opts = SP.ServerOpts(apply_db=apply_db, db_row=db_row,
                          clone_from=(clone_from.strip() or None) if isinstance(clone_from, str) else None,
                          server_id=server_id, menu_record=menu_record, menu_name=menu_name, lua_stub=lua_stub)
 
     manifest = _resolve_manifest_path(manifest, project)
+    if BL.is_list(manifest):
+        raise click.ClickException(f"{manifest} is a build list: build it with --list.")
     if not manifest.exists():
         raise click.ClickException(
             f"No manifest at {manifest}. Pass an existing project "
@@ -2649,6 +2645,23 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     selected = set(only)
     active_actions = [a for a in manifest_data.get("actions", [])
                       if a.get("enabled", True) and (not selected or a.get("id") in selected)]
+    target = "pivot" if pivot else "dir"
+    reset_rels: list[str] = []
+    if reset:
+        # The tables the chosen actions edited, and every other action of the project that
+        # edited one of them: a reset table takes all of its edits away, so they all go again.
+        rels = set(_edited_tables({"actions": active_actions}, target))
+        while True:
+            also = [a for a in manifest_data.get("actions", []) if a.get("enabled", True)
+                    and not any(a is b for b in active_actions)
+                    and set(_edited_tables({"actions": [a]}, target)) & rels]
+            if not also:
+                break
+            active_actions = [a for a in manifest_data.get("actions", [])
+                              if any(a is b for b in active_actions + also)]
+            rels |= {r for a in also for r in _edited_tables({"actions": [a]}, target)}
+        reset_rels = sorted(rels)
+    mode = "fresh" if (fresh or reset) else "apply"
 
     click.echo()
     verb = "Previewing" if dry_run else "Building"
@@ -2667,7 +2680,6 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     # 114.DAT and string tables.
     pack_actions = [a for a in active_actions
                     if a.get("type") in ("mesh", "entity", "gear", "mount", "ability")]
-    target = "pivot" if pivot else "dir"
     target_roots = [(target, _target_root(target))]
     if pivot and not target_roots[0][1].is_dir():
         raise click.ClickException(f"FFXI_PIVOT_DIR does not exist: {target_roots[0][1]}")
@@ -2696,7 +2708,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     click.echo(f"Actions: {len(active_actions)}")
     click.echo()
     for i, action in enumerate(active_actions, 1):
-        click.echo(f"{i}. {_action_summary(action)}")
+        also_note = "  (shares a reset table)" if selected and action.get("id") not in selected else ""
+        click.echo(f"{i}. {_action_summary(action)}{also_note}")
         if verbose and action.get("type") == "mesh":
             options = action.get("options") or {}
             click.echo(f"   * Options: {_mesh_options_summary(options)}")
@@ -2726,17 +2739,18 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_ability(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind in RECORD_TYPES:
             return _build_record(action, manifest, manifest_data, force=force, dry_run=dry_run)
-        # The restorable types: with --reset the project's last build of them was put back
-        # first (_unwind); by default they apply to the tables as they are.
-        apply = mode == "apply"
+        # The restorable types write what their edits name over what is there; a zone_events
+        # action takes its own last events back out first (it replaces them), unless the
+        # tables were just reset.
         if kind == "database":
-            return _build_database(action, manifest, manifest_data, force=force, dry_run=dry_run, apply=apply)
+            return _build_database(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "zone_dialog":
-            return _build_zone_dialog(action, manifest, manifest_data, force=force, dry_run=dry_run, apply=apply)
+            return _build_zone_dialog(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "zone_npcs":
-            return _build_zone_npcs(action, manifest, manifest_data, force=force, dry_run=dry_run, apply=apply)
+            return _build_zone_npcs(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "zone_events":
-            return _build_zone_events(action, manifest, manifest_data, force=force, dry_run=dry_run, apply=apply)
+            return _build_zone_events(action, manifest, manifest_data, force=force, dry_run=dry_run,
+                                      apply=mode == "apply")
         raise click.ClickException(
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
@@ -2745,8 +2759,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     from xi.dats import xi_stage
     with xi_stage.session(dry_run):
         # A dry run holds what it would write, so each step sees the ones before it.
-        unwound = (_unwind(active_actions, target_roots[:1] if dry_run else target_roots, dry_run)
-                   if mode == "reset" else {})
+        if reset:
+            _reset_tables(target_roots[0][1], reset_rels, dry_run, active_actions, opts.menu_record)
         for action in active_actions:
             kind = action.get("type")
             if kind == "zone":
@@ -2761,8 +2775,6 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                 for _name, root in (target_roots[:1] if dry_run else target_roots):
                     _set_target_root(root)
                     result = _dispatch(action, kind)
-            if unwound.get(action.get("id")) and isinstance(result, dict):
-                result["warnings"] = unwound[action["id"]] + list(result.get("warnings") or [])
             results.append(result)
             if kind == "ability" and isinstance(result, dict):
                 server_pairs.append((action, result))
@@ -2849,20 +2861,20 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
 RESTORABLE_TYPES = ("database", "zone_dialog", "zone_npcs", "zone_events")
 
 
-def _build_all(order_path: Path | None, *, pivot: bool, dry_run: bool, dry_note: bool, **build_kw) -> None:
-    """``xi dats build --all``: every project of the build order, first to last, after every
-    table any of them edits in place is reset from its ``.base`` (xi.dats.xi_order)."""
-    from xi.dats import xi_order as O
+def _build_list(path: Path, *, reset: bool, pivot: bool, dry_run: bool, dry_note: bool, **build_kw) -> None:
+    """``xi dats build --list``: every project of a build list, first to last; with ``reset``,
+    every table any of them edits in place is reset from its ``.base`` once, first
+    (xi.dats.xi_build_list)."""
+    from xi.dats import xi_build_list as BL
     from xi.dats import xi_stage
-    path = Path(order_path) if order_path else O.DEFAULT_PATH
     try:
-        order = O.load(path)
-    except O.OrderError as e:
+        doc = BL.load(path)
+    except BL.ListError as e:
         raise click.ClickException(str(e))
     # Every project is read and checked before any table is touched.
     projects, problems = [], []
-    for entry in order["projects"]:
-        p = O.project_path(entry, path)
+    for entry in doc["projects"]:
+        p = BL.project_path(entry, path)
         if not p.is_file():
             problems.append(f"{entry}: no project file at {p}")
             continue
@@ -2879,32 +2891,50 @@ def _build_all(order_path: Path | None, *, pivot: bool, dry_run: bool, dry_note:
     root = _target_root(target)
     if pivot and not root.is_dir():
         raise click.ClickException(f"FFXI_PIVOT_DIR does not exist: {root}")
-    rels = sorted(set(O.recorded(order, target)) | {r for _p, m in projects for r in _edited_tables(m, target)})
+    edited = {r for _p, m in projects for r in _edited_tables(m, target)}
 
     click.echo()
-    click.echo(f"{'Previewing' if dry_run else 'Building'} the build order {path}: "
+    click.echo(f"{'Previewing' if dry_run else 'Building'} the build list {path}: "
                f"{len(projects)} project{'s' if len(projects) != 1 else ''} into {_TARGET_LABELS[target]} -> {root}")
     for i, (p, _m) in enumerate(projects, 1):
         click.echo(f"  {i}. {p}")
     with xi_stage.session(dry_run):
-        done = O.reset_tables(root, rels, dry_run)
-        verb = "Would reset" if dry_run else "Reset"
-        click.echo(f"\n{verb} {len(done['restored']) + len(done['removed'])} table(s) from .base"
-                   + (f" ({len(done['removed'])} pivot copies taken out)" if done["removed"] else ""))
-        for rel in done["none"]:
-            click.echo(click.style(f"  ⚠ {rel} has no .base in {root}; left as it is", fg="yellow"))
+        if reset:
+            actions = [a for _p, m in projects for a in m.get("actions", []) if isinstance(a, dict)]
+            _reset_tables(root, sorted(edited | set(BL.recorded(doc, target))), dry_run, actions,
+                          build_kw.get("menu_record"))
         ctx = click.get_current_context()
         for p, _m in projects:
             _rule()
-            ctx.invoke(build_cmd, manifest=p, pivot=pivot, dry_run=dry_run, dry_note=False, fresh=True, **build_kw)
+            ctx.invoke(build_cmd, manifest=p, pivot=pivot, dry_run=dry_run, dry_note=False, fresh=reset, **build_kw)
     if dry_run:
         if dry_note:
             click.echo(click.style("\nDry run — nothing was written. Re-run without --dry-run to build.", fg="cyan"))
         return
-    O.record(order, target, {r for p, _m in projects for r in _edited_tables(_read_manifest(p), target)})
-    O.save(path, order)
+    # What the projects edit now; without a reset, what the list recorded before stays too
+    # (a dropped project's tables still hold its edits until a --reset takes them back).
+    now = {r for p, _m in projects for r in _edited_tables(_read_manifest(p), target)}
+    BL.record(doc, target, now if reset else now | set(BL.recorded(doc, target)))
+    BL.save(path, doc)
     click.echo(click.style(f"\n✓ Built {len(projects)} project{'s' if len(projects) != 1 else ''} from {path}",
                            fg="green"))
+
+
+def _reset_tables(root: Path, rels: list[str], dry_run: bool, actions: list[dict], menu_record) -> None:
+    """Reset ``rels`` in ``root`` from their ``.base`` (--reset), and say what that did."""
+    from xi.dats import xi_build_list as BL
+    done = BL.reset_tables(root, rels, dry_run)
+    n = len(done["restored"]) + len(done["removed"])
+    click.echo(f"\n{'Would reset' if dry_run else 'Reset'} {n} table{'s' if n != 1 else ''} from .base"
+               + (f" ({len(done['removed'])} pivot copies taken out)" if done["removed"] else ""))
+    for rel in done["none"]:
+        click.echo(click.style(f"  ⚠ {rel} has no .base in {root}; left as it is", fg="yellow"))
+    if not menu_record and "ROM/118/114.DAT" in done["restored"]:
+        for a in actions:
+            menu = ((a.get("result") or {}).get("menu") if a.get("type") == "ability" else None) or {}
+            if _root_target_name(root) in (menu.get("roots") or {}):
+                click.echo(click.style(f"  ⚠ {a.get('id')}'s menu record in ROM/118/114.DAT went with the reset; "
+                                       "build with --menu-record to place it again", fg="yellow"))
 
 
 def _manifest_problems(manifest: dict) -> list[str]:
@@ -2924,10 +2954,10 @@ def _manifest_problems(manifest: dict) -> list[str]:
 
 def _edited_tables(manifest: dict, target: str) -> list[str]:
     """ROM paths of the tables a project's builds into ``target`` edited in place — what
-    ``--all`` resets: the database, dialog, NPC-name and event tables its records name, and
-    the spell / command table and its name tables for a record action or an ability's menu
-    record. The DATs actions place (gear, camera scenes …) aren't: a build replaces them."""
-    from xi.menu.xi_menu_table import string_tables
+    ``--reset`` resets: the database, dialog, NPC-name and event tables its records name, and
+    the spell / command table and its name tables for a record action. The DATs actions
+    place (gear, camera scenes …) aren't: a build replaces them. Nor is an ability's menu
+    record, which only a build with --menu-record puts back."""
     rels: set[str] = set()
     for action in manifest.get("actions", []):
         if not isinstance(action, dict) or _undone(action):
@@ -2941,11 +2971,6 @@ def _edited_tables(manifest: dict, target: str) -> list[str]:
         elif typ in RECORD_TYPES and target in _action_targets(action) and isinstance(res.get("record_id"), int):
             rels.add(_rom_rel(res.get("dat") or "ROM/118/114.DAT"))
             rels.update(_rom_rel(s) for s in res.get("strings") or [])
-        elif typ == "ability" and isinstance(res.get("menu"), dict) and target in (res["menu"].get("roots") or {}):
-            menu = res["menu"]
-            rk = menu.get("record_kind") or ("spell" if menu.get("kind") == "spell" else "command")
-            rels.add(_rom_rel("ROM/118/114.DAT"))
-            rels.update(_rom_rel(s) for s in string_tables(rk))
     return sorted(rels)
 
 
@@ -2960,21 +2985,6 @@ def _restorable_module(kind: str):
     else:
         from xi.event import xi_zone_events as mod
     return mod
-
-
-def _unwind(actions: list[dict], roots, dry_run: bool) -> dict[str, list[str]]:
-    """Put back what the last build of each restorable action changed, newest first, before
-    any of them is applied again: a stack taken down in order. Every action then gets back
-    the tables it changed, even where several change one table (two that add a zone's
-    dialog lines, events on one NPC). Returns each action's warnings by id."""
-    out: dict[str, list[str]] = {}
-    for name, root in roots:
-        for action in reversed([a for a in actions if a.get("type") in RESTORABLE_TYPES]):
-            if not (((action.get("result") or {}).get("roots") or {}).get(name)):
-                continue
-            _n, warns = _restorable_module(action["type"]).undo(action, root, name, dry_run=dry_run)
-            out.setdefault(action["id"], []).extend(warns)
-    return out
 
 
 def _project_built_targets(manifest_data: dict) -> list[str]:
@@ -3805,10 +3815,10 @@ def _existing_project_names() -> list[str]:
 
 
 def _is_include_file(path: Path) -> bool:
-    """An include file or the build order: under projects/ but not a project."""
-    from xi.dats.xi_order import ORDER_SCHEMA
+    """An include file or a build list: under projects/ but not a project."""
+    from xi.dats.xi_build_list import LIST_SCHEMA
     try:
-        return json.loads(path.read_text(encoding="utf-8")).get("schema") in (INCLUDE_SCHEMA, ORDER_SCHEMA)
+        return json.loads(path.read_text(encoding="utf-8")).get("schema") in (INCLUDE_SCHEMA, LIST_SCHEMA)
     except (OSError, ValueError, AttributeError):
         return False
 

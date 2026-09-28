@@ -239,6 +239,19 @@ def test_dialogue_event(game):
     assert snapshot(game) == before
 
 
+def test_a_pinned_dialogue_event_replaces_the_one_there(game):
+    before = snapshot(game)
+    prepare({"zone": ZONE, "events": [{"name": "gate", "eventId": 5,
+                                       "dialogue": {"actor": f"0x{sid(1):08X}", "lines": ["Replaced."]}}]})
+    r = build()
+    assert r.exit_code == 0, r.output
+    guard = actor(game, sid(1))
+    assert guard.event_ids == [5] and bytes(guard.scene_data) != b"\x00\x21"
+    assert build().exit_code == 0 and actor(game, sid(1)).event_ids == [5]   # again: its own, replaced
+    undo()
+    assert snapshot(game) == before
+
+
 def test_project_of_zone_actions_rebuilds_in_order(game):
     """zone_npcs adds an NPC, zone_dialog a line, zone_events a cutscene casting the new NPC with
     more lines after: the tables are shared, and each rebuild takes the stack down first."""

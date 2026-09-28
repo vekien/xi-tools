@@ -47,9 +47,9 @@ WebSocket at `ws://HOST:PORT/ws`. Used by xi-zone-editor; exits after idle-secs 
 xi dats json
 xi dats prepare
 xi dats build                    # --pivot: into FFXI_PIVOT_DIR instead of FFXI_DIR
-                                 # applies on top; --reset: the project's last build taken back first
-xi dats build --all              # every project of projects/build_order.json, in order, after the
-                                 #   tables they edit are reset from .base (--order FILE, --pivot, --dry-run)
+                                 # applies on top; --reset: the tables it edits reset from .base first
+xi dats build --list [--reset]   # the projects of projects/build_list.json (NAME --list: projects/NAME.json)
+                                 #   in order; --reset resets every table they edit once, first
                                  # abilities: --apply-db [--db-row ID] --clone-from X --server-id ID
                                  #   --menu-record [--menu-name T] --lua-stub (docs/dats/README.md)
 xi dats new                      # --pivot: the same for the wizard

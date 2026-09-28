@@ -10,7 +10,7 @@ import test_dats_database_build as T
 from test_dats_database_build import ARMOR_EN, TITLES_EN, TITLES_JP, game  # noqa: F401 — the fixture
 from xi.common import xi_dmsg as D
 from xi.database import xi_build as DB
-from xi.dats import xi_order as O
+from xi.dats import xi_build_list as BL
 
 
 def grow(*args):
@@ -40,10 +40,10 @@ def test_rows_it_added_are_edited_like_any_and_a_reset_keeps_them(game):
     assert grow(TITLES_EN, "10").exit_code == 0 and grow(TITLES_JP, "10").exit_code == 0    # both languages
     T.prepare([{"table": "titles", "id": 8, "strings": {"en": {"name": "Abyssea Delver"}}},
                {"table": TITLES_EN, "id": 9, "hex": bytes(D.parse(path.read_bytes()).blocks[0]).hex()}], "a")
-    Path("projects/build_order.json").write_text(json.dumps({"schema": O.ORDER_SCHEMA, "projects": ["a"]}))
+    Path("projects/build_list.json").write_text(json.dumps({"schema": BL.LIST_SCHEMA, "projects": ["a"]}))
     from xi.dats.xi_dats import group
     for _ in range(2):
-        r = CliRunner().invoke(group, ["build", "--all"], catch_exceptions=False)
+        r = CliRunner().invoke(group, ["build", "--list", "--reset"], catch_exceptions=False)
         assert r.exit_code == 0, r.output
         assert titles(path)[7:] == [".", "Abyssea Delver", "Fodderchief Flayer"]
 

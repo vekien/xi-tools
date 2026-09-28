@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://xi.tools/schema/build_order.json",
-  "title": "xi dats build order",
-  "description": "The projects `xi dats build --all` builds, in order. Every table any of them edits in place (database records, zone dialog, NPC names and events, spell / command records) is reset from its .base once, then each project is built on top of the ones before it, so projects that share a table layer the same way every time. Keep it at projects/build_order.json (--order names another).",
+  "$id": "https://xi.tools/schema/build_list.json",
+  "title": "xi dats build list",
+  "description": "The projects `xi dats build --list` builds, in order, each on top of the ones before it. With --reset every table any of them edits in place (database records, zone dialog, NPC names and events, spell / command records) is first reset from its .base, once, so projects that share a table layer the same way every time. projects/build_list.json by default; `xi dats build NAME --list` builds projects/NAME.json.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,7 +12,7 @@
   "properties": {
     "schema": {
       "type": "string",
-      "const": "xi.dats.build_order.v1"
+      "const": "xi.dats.build_list.v1"
     },
     "description": {
       "type": "string"
@@ -29,7 +29,7 @@
     "result": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Written by the last --all build: per target, the tables it reset and the projects edit. The next --all resets these too, so a table a project no longer edits (or a project taken off the list) goes back as well.",
+      "description": "Written by each --list build: per target, the tables the projects edit in place. A --list --reset resets these too, so a table a project no longer edits (or a project taken off the list) goes back as well.",
       "properties": {
         "files": {
           "type": "object",
@@ -54,7 +54,7 @@
   },
   "examples": [
     {
-      "schema": "xi.dats.build_order.v1",
+      "schema": "xi.dats.build_list.v1",
       "description": "The server's client build: the base tweaks, then the Abyssea content, then the zone editor's cutscenes.",
       "projects": [
         "tweaks",

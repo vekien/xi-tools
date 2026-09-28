@@ -60,7 +60,7 @@ Three ways in:
 | `id` | Item tables: the item id — it picks the DAT (armor 10240–16383 → `ROM/118/109`, 23040–28671 → `ROM/286/73`). Key items and quest / mission logs: the id stored in the row. Other text tables, and spell / ability data: the row index. |
 | `set` | Header fields by the viewer's names: `level`, `itemLevel`, `superiorLevel`, `jobs`, `races`, `slots`, `flags`, `stack`, `type`, `targets`, `resourceId`, `shieldSize`, `maxCharges`, `castTime`, `useDelay`, `reuseDelay`; weapons `damage`, `delay`, `dps`, `skill`, `jugSize`, `baseItemId`. Written to both languages' records. |
 | `strings` | `en` / `jp` sub-strings: items `name`, `article`, `logName`, `logPlural`, `description` (JP: `name`, `description`); text tables their own (`name`, `plural`, `description`, …; the help tables have one, `help`; the Japanese key items keep only `name` and `description`, the Japanese status names only `name`). A value is the text, or `{"replace": {old: new}}` on the record's original text. |
-| `copy_from` | Create the record as a copy of another: copy record `copy_from` of the same table into the empty slot `id`, then apply the edit. The Japanese record takes the English name/description unless `strings.jp` says otherwise. (It was called `like`; an edit that still says `like` is refused, naming the new key.) |
+| `copy_from` | Create the record as a copy of another: copy record `copy_from` of the same table into slot `id` (replacing what it holds), then apply the edit. The Japanese record takes the English name/description unless `strings.jp` says otherwise. (It was called `like`; an edit that still says `like` is refused, naming the new key.) |
 | `layout` | Only for an item table given by its ROM path: the layout of its records ([below](#tables-by-path)). |
 | `icon` | `{"from": <item id>}` — copy another item's icon. |
 | `hex` | The whole record, exactly (below). |
@@ -118,21 +118,20 @@ replaces its own part. It is a proposal: review it and copy it into the server's
 - **What's recorded.** `result.roots.<target>` lists every record written — table, id,
   language, DAT, format, block — with each changed field's value before and after. A record
   a `copy_from` created keeps the slot's old bytes.
-- **Building again.** A build applies the edits to the records as they are: the same edits
-  give the same bytes and record nothing new, `replace` always applies to the original text,
-  and a record this action created is its own to rewrite (one another project put in the slot
-  is refused). An edit you remove stays in the DAT until a build with `--reset`, which first
-  puts back what the action's builds changed, or `xi dats build --all`, which resets the
-  tables from `.base` and builds every project of the build order
-  ([../dats/README.md](../dats/README.md#building-on-top---reset-and---all)).
+- **Building again.** A build applies the edits to the records as they are: what an edit names
+  is written, replacing whatever the record or slot holds; the same edits give the same bytes
+  and record nothing new, and `replace` always applies to the original text. An edit you remove
+  stays in the DAT until a build with `--reset`, which resets the tables from `.base` first, or
+  a `xi dats build --list --reset` of the build list
+  ([../dats/README.md](../dats/README.md#applying---reset-and---list)).
 - **Undo** (`xi dats undo P`) puts each record back field by field, removes a created record
   (the slot's old bytes), and drops the action's SQL section. A field something else changed
   since the build is left as it is, and said.
 - `.base`: the first write of a DAT in the base install keeps `<DAT>.base`, as every build does.
 
-Refused, naming the edit: an id outside the table, an empty slot without `copy_from`, a `copy_from`
-into a slot that holds someone else's record (unless `--force`), a `replace` whose text isn't
-there, text that doesn't fit, a mod name the server doesn't have.
+Refused, naming the edit: an id outside the table, an empty slot without `copy_from`, a `replace`
+whose text isn't there, text that doesn't fit, a mod name the server doesn't have. A `copy_from`
+into a slot that holds a record replaces it (undo puts it back).
 
 ## Spell and ability data
 
@@ -154,7 +153,7 @@ One file serves every client language (the names and help live in `spells` / `sp
 | abilities | `type` (1 ability, 3 weapon skill, …), `tp`, `level`, `range`, `radius`, `aoe`, `targets`, `valid_targets`, `tp_modifier`, `charges`, `icon`, `icon2` |
 
 `levels` merges into the spell's: `{"RDM": 1}` adds Red Mage at 1, `null` takes a job off (MON is
-the Monstrosity column). `copy_from` copies a record into an empty slot; an id past the end grows the
+the Monstrosity column). `copy_from` copies a record into a slot; an id past the end grows the
 section (the client reads 1,024 spells and 2,816 commands without a ceiling plugin such as
 cexislots, and the build says so). New spells with their names, help and a menu slot are the
 [`spell` type](../menu/records.md); this edits the records that are there.
@@ -212,7 +211,7 @@ xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's co
 
 The kind of table is read from the file. A new item record's id continues the table's numbering
 (row 0's id plus its row). A table already that long is left alone. The table's `.base` grows
-too, so `xi dats build --all` resets back to the grown table and only takes back what projects
+too, so a `--reset` build resets back to the grown table and only takes back what projects
 wrote into its rows. Named text tables are edited in both languages: grow the English and the
 Japanese file.
 

@@ -433,7 +433,7 @@ def client_warning(kind: str, record_id: Optional[int] = None) -> Optional[str]:
 # on its own. A root without its own copy of a table reads the install's, as the client
 # does, and a write copies that table into the root first. Edits in the install are in
 # place with a ``.base`` backup; another root keeps what it held there as ``.base`` too (an
-# empty one when it held nothing), which ``xi dats build --all`` resets from.
+# empty one when it held nothing), which ``xi dats build --reset`` resets from.
 
 def _install_file(rom_path: str) -> Path:
     from xi.xi_config import FFXI_DIR

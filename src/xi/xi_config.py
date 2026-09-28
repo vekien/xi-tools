@@ -163,7 +163,7 @@ def ensure_base(src) -> bool:
 def keep_redirect_base(src) -> None:
     """Before the first write of ``src`` into a DAT root other than the install (the pivot
     folder, ``xi dats build --pivot``): keep what that root held there as ``<dat>.base``, or
-    an empty ``<dat>.base`` when it held nothing, so ``xi dats build --all`` can reset it
+    an empty ``<dat>.base`` when it held nothing, so ``xi dats build --reset`` can reset it
     (an empty one: the file is taken back out). The install's own ``.base`` comes from
     :func:`editable_dat`."""
     require_ffxi_dir()

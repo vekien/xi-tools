@@ -137,7 +137,6 @@ def test_new_lines_grow_both_tables_and_undo_trims_them(game):
 
 @pytest.mark.parametrize("line, says", [
     ({"id": 9, "en": "past"}, "line 9 is past the end — mark it \"new\""),
-    ({"id": 1, "new": True, "en": "x"}, "already has line 1"),
     ({"id": 1, "en": {"replace": {"Bastok": "Windurst"}}}, "'Bastok' isn't in"),
 ])
 def test_errors_name_the_line(game, line, says):
@@ -202,6 +201,17 @@ def test_on_top_a_line_it_added_is_rewritten(game):
     r = build()
     assert r.exit_code == 0, r.output
     assert ZD.line_text(blobs(game, EN)[5]).startswith("Second.")
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / EN).read_bytes() == en0
+
+
+def test_a_new_line_on_a_line_that_is_there_replaces_it(game):
+    en0 = (game / EN).read_bytes()
+    prepare({"zone": ZONE, "lines": [{"id": 1, "new": True, "en": "Replaced.\\v"}]})
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert ZD.line_text(blobs(game, EN)[1]).startswith("Replaced.") and len(blobs(game, EN)) == 3
     from xi.dats.xi_dats import group
     assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
     assert (game / EN).read_bytes() == en0

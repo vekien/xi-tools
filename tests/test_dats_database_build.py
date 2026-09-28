@@ -298,7 +298,6 @@ def test_pivot_build_leaves_the_install_alone(game, tmp_path: Path, monkeypatch)
 
 @pytest.mark.parametrize("edit, says", [
     ({"table": "armor", "id": 10245, "set": {"level": 5}}, "is an empty slot; give copy_from"),
-    ({"table": "armor", "id": 10241, "copy_from": 10242}, "already holds 'Decennial Coat +1'"),
     ({"table": "armor", "id": 16000, "set": {"level": 5}}, "holds 8 records; armor 16000 is past its end"),
     ({"table": "armor", "id": 30000, "set": {"level": 5}}, "armor has no id 30000"),
     ({"table": "armor", "id": 10241, "server": {"item_mods": {"HPP": 3}}}, "'HPP' isn't an xi.mod name"),
@@ -359,10 +358,16 @@ def test_a_text_row_past_the_end_needs_like_and_grows_both_languages(game):
     assert (game / TITLES_EN).read_bytes() == en0 and (game / TITLES_JP).read_bytes() == jp0
 
 
-def test_like_on_an_existing_text_row_is_refused(game):
+def test_copy_from_onto_an_existing_text_row_replaces_it(game):
+    titles0 = (game / Path(*TITLES_EN.split("/"))).read_bytes()
     prepare([{"table": "titles", "id": 1, "copy_from": 0, "strings": {"en": {"name": "x"}}}])
     r = build()
-    assert r.exit_code != 0 and "already has row 1; copy_from only adds a new one" in r.output
+    assert r.exit_code == 0, r.output
+    t = D.parse((game / Path(*TITLES_EN.split("/"))).read_bytes())
+    assert t.num == 3 and DB.sub_value(DB._block_subs(t.blocks[1])[0]) == "x"
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / Path(*TITLES_EN.split("/"))).read_bytes() == titles0
 
 
 def _files(root: Path) -> dict:
@@ -409,12 +414,19 @@ def test_on_top_a_record_it_created_is_rewritten_and_reset_takes_both_back(game)
     assert (game / ARMOR_EN).read_bytes() == en0 and (game / Path(*TITLES_EN.split("/"))).read_bytes() == titles0
 
 
-def test_on_top_a_record_someone_else_put_there_is_refused(game):
+def test_a_record_already_in_the_slot_is_replaced_and_undo_puts_it_back(game):
     prepare([{"table": "armor", "id": 10245, "copy_from": 10242, "strings": {"en": {"name": "Mine"}}}], "one")
     assert build("one").exit_code == 0
     prepare([{"table": "armor", "id": 10245, "copy_from": 10240, "strings": {"en": {"name": "Theirs"}}}], "two")
     r = build("two")
-    assert r.exit_code != 0 and "already holds 'Mine'" in r.output and "--reset" in r.output
+    assert r.exit_code == 0, r.output
+    assert DB.item_name(record(game, ARMOR_EN, 5), "armor", "legacy") == "Theirs"
+    prepare([{"table": "armor", "id": 10241, "copy_from": 10242}], "three")          # a retail record too
+    assert build("three").exit_code == 0
+    assert DB.item_name(record(game, ARMOR_EN, 1), "armor", "legacy") == "Moonshade Earring"
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "two", "--yes"], catch_exceptions=False).exit_code == 0
+    assert DB.item_name(record(game, ARMOR_EN, 5), "armor", "legacy") == "Mine"
 
 
 MONST_EN = "ROM/288/80.DAT"

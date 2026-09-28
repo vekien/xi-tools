@@ -8,10 +8,10 @@ displayed part and keeps the rest; ``replace`` swaps text inside it, so control 
 text form can't show survive. New lines go past the end in both languages, so event
 scripts, which name lines by index, see the same line in either client.
 
-Like the ``database`` action, every build starts from the lines as they were before this
-action: what a previous build of it changed in this root is put back first (each line's
-bytes before and after are recorded), then the edits are applied — a rebuild converges, a
-line taken out of the action goes back, and undo is exact.
+Like the ``database`` action, a build applies the lines to the tables as they are and records
+each line's bytes before and after, which ``xi dats undo`` puts back exactly. Text and
+``replace`` go on the line as it was before this action changed it, so the same lines build
+the same bytes again; ``xi dats build --reset`` resets the tables from their ``.base`` first.
 """
 from __future__ import annotations
 
@@ -231,13 +231,10 @@ def _mine(prev: list, lid: int, lang: str, blob: bytes) -> list[dict]:
     return mine if mine and mine[-1].get("to_hex") == blob.hex() else []
 
 
-def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False, unwound: bool = False,
-          apply: bool = False) -> dict:
-    """Apply ``action`` to the zone's dialog tables in ``root``; the build result
-    (``records`` is what gets recorded for this root). ``unwound``: the previous build's
-    changes aren't put back first (``xi dats build --reset`` did that for the whole project,
-    or the tables were reset). ``apply``: they are still there — a line this action added is
-    its own to rewrite, and one already holding what the edit writes is left alone."""
+def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False) -> dict:
+    """Apply ``action`` to the zone's dialog tables in ``root`` as they are: each line is
+    written, replacing what is at its id (a ``new`` line too), and a line already holding it
+    writes nothing. The build result's ``records`` is what gets recorded for this root."""
     errs = validate_action(action)
     if errs:
         raise ZoneDialogError("; ".join(errs))
@@ -245,8 +242,6 @@ def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False
     prev = (((action.get("result") or {}).get("roots") or {}).get(target)) or []
     tables = _Tables(Path(root), zone)
     warnings: list[str] = []
-    for entry in ([] if unwound else reversed(prev)):
-        _restore(tables, entry, warnings)
     if tables.load("en") is None:
         raise ZoneDialogError(f"zone {zone} has no English dialog table (file id {dialog_file_id(zone, 'en')} "
                               "is unregistered)")
@@ -269,13 +264,8 @@ def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False
                     blob = _set_line(b"\x00", spec)          # a blank id (see _restore)
                     if blobs[lid] == blob:
                         continue                             # already there
-                    if blobs[lid] != BLANK:
-                        if not (apply and any(e.get("created") for e in _mine(prev, lid, lang, blobs[lid]))):
-                            raise ZoneDialogError(f"lines: zone {zone} already has line {lid} ({lang}); drop new "
-                                                  "to edit it (--reset rebuilds this action's own lines)")
-                        records.append(_entry(zone, lang, tables.rel[lang], lid, blobs[lid], blob))
-                    else:
-                        records.append(_entry(zone, lang, tables.rel[lang], lid, blobs[lid], blob, created=True))
+                    records.append(_entry(zone, lang, tables.rel[lang], lid, blobs[lid], blob,
+                                          **({"created": True} if blobs[lid] == BLANK else {})))
                     blobs[lid] = blob
                     continue
                 before_n = len(blobs)

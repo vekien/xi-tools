@@ -84,10 +84,9 @@ as the `database` action's does.
 ## Builds, rebuilds and undo
 
 Each name written is recorded per target (entity id, name before and after). A build applies the
-NPCs to the name table as it is: a name already there writes nothing, an `auto` NPC keeps the id it
-took, and a `new` NPC this action added is its own to rename (one someone else put at that id is
-refused without `--force`). An NPC taken out of the action is removed by a build with `--reset`,
-which first takes out the names the action's builds added and puts renamed ones back, or by
-`xi dats build --all` ([../dats/README.md](../dats/README.md#building-on-top---reset-and---all)).
+NPCs to the name table as it is: each name is written over what its id holds (a `new` NPC on an
+id that has one replaces it), a name already there writes nothing, and an `auto` NPC keeps the id
+it took. An NPC taken out of the action is removed by a build with `--reset`, which resets the
+table from `.base` first ([../dats/README.md](../dats/README.md#applying---reset-and---list)).
 `xi dats undo` takes them all back and drops the action's SQL section; a name something else
 changed since is left, and said.
