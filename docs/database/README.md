@@ -121,7 +121,8 @@ replaces its own part. It is a proposal: review it and copy it into the server's
 - **Building again.** A build applies the edits to the records as they are: what an edit names
   is written, replacing whatever the record or slot holds; the same edits give the same bytes
   and record nothing new, and `replace` always applies to the original text. An edit you remove
-  stays in the DAT until a build with `--reset`, which resets the tables from `.base` first, or
+  stays in the DAT until a build with `--reset`, which resets the tables to the install's
+  untouched copy (its `.base`) first, or
   a `xi dats build --list --reset` of the build list
   ([../dats/README.md](../dats/README.md#applying---reset-and---list)).
 - **Undo** (`xi dats undo P`) puts each record back field by field, removes a created record
@@ -194,12 +195,26 @@ record: name, article, log name, log plural, description; a Japanese one: name, 
 `copy_from` copies a row of the same file into an empty row, its id field the donor's moved by
 as many rows; `hex` writes the whole decrypted record; `icon.from` takes an item id of the named
 tables. There is no server side (the file says nothing about item ids). A row past the end is
-refused: grow the table first.
+refused: grow the table first ([below](#growing-a-table)).
 
-## Growing a table (`xi database grow`)
+## Growing a table
 
 A table a client plugin reads to a fixed count (a text table to 4,096 rows, an item table to
-its full size) is grown once, as `xi ftable expand` is run once for the file tables:
+its full size) says so with `grow` on the action that edits it, which every build applies
+before the edits (after a `--reset`, so a build from the install's tables grows it again):
+
+```json
+{"id": "database.spell_names", "type": "database",
+ "grow": [{"table": "ROM/181/73.DAT", "count": 4096}],
+ "edits": [{"table": "ROM/181/73.DAT", "id": 4095, "strings": {"sub0": "Meteor Storm"}}]}
+```
+
+The new rows are a filler: a d_msg row blanked to `.`, or the item table's last placeholder
+record (its id following the table's numbering); `fill_from` copies a row, `fill_hex` gives the
+exact bytes (a d_msg block, or a decrypted item record). A table already that long is left
+alone. `--reset` resets the tables `grow` names with the others.
+
+`xi database grow` does the same once, as `xi ftable expand` is run once for the file tables:
 
 ```
 xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows blanked to '.'
@@ -210,9 +225,11 @@ xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's co
 ```
 
 The kind of table is read from the file. A new item record's id continues the table's numbering
-(row 0's id plus its row). A table already that long is left alone. The table's `.base` grows
-too, so a `--reset` build resets back to the grown table and only takes back what projects
-wrote into its rows. Named text tables are edited in both languages: grow the English and the
+(row 0's id plus its row). A table already that long is left alone. In the install the
+table's `.base` grows too, so a `--reset` build (and a `--reset --pivot` one, which copies the
+install's `.base`) resets back to the grown table and only takes back what projects wrote into
+its rows. With `--pivot` only the pivot folder's copy grows, which a `--reset --pivot` build
+replaces with the install's: say `grow` on the action instead. Named text tables are edited in both languages: grow the English and the
 Japanese file.
 
 ## New text rows

@@ -37,6 +37,13 @@
       },
       "uniqueItems": true
     },
+    "grow": {
+      "type": "array",
+      "description": "Tables grown to a fixed row count before the edits, as `xi database grow` does: the rows a client plugin reads up to (a text table to 4,096 rows, an item table a server grew). Applied on every build, after any --reset, so a build from retail grows them again. A table already that long is left alone.",
+      "items": {
+        "$ref": "#/$defs/grow"
+      }
+    },
     "edits": {
       "type": "array",
       "minItems": 1,
@@ -147,6 +154,41 @@
     }
   },
   "$defs": {
+    "grow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "table",
+        "count"
+      ],
+      "properties": {
+        "table": {
+          "$ref": "common.json#/$defs/romPath",
+          "description": "The table's ROM path: a d_msg table or an item DAT, told apart by what the file holds."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Rows the table holds after growing."
+        },
+        "fill_from": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Each new row a copy of this row. Default: a d_msg row blanked to '.', or the item table's last placeholder record."
+        },
+        "fill_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F ]+$",
+          "description": "Each new row exactly these bytes: a d_msg block, or a decrypted item record (its id is set per row, following the table's numbering)."
+        }
+      },
+      "not": {
+        "required": [
+          "fill_from",
+          "fill_hex"
+        ]
+      }
+    },
     "edit": {
       "type": "object",
       "additionalProperties": false,

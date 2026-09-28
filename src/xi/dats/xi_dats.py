@@ -2577,12 +2577,13 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
               help="Lua Stub: write the server script for a row this mix created into XI_SERVER_DIR/scripts/actions.")
 @click.option("--reset", is_flag=True, default=False,
               help="Reset the tables the actions being built edit in place (database records, zone dialog, "
-                   "NPC names, events, spell / command records) from their .base first. Without it a build "
-                   "applies its edits to the tables as they are.")
+                   "NPC names, events, spell / command records) to the install's untouched copy first: its "
+                   ".base, else the file; with --pivot the pivot folder's copy is replaced by it. Without it a "
+                   "build applies its edits to the tables as they are.")
 @click.option("--list", "build_list", is_flag=True, default=False,
               help="MANIFEST / --project names a build list (projects/build_list.json when neither is "
-                   "given): build its projects in order. With --reset, every table they edit is reset once, "
-                   "first.")
+                   "given): build its projects in order. A build list file is built as one without it too. "
+                   "With --reset, every table they edit is reset once, first.")
 @click.option("--fresh", is_flag=True, default=False, hidden=True,
               help="The tables were just reset (a --list --reset): the result records this build only.")
 def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...], verbose: bool,
@@ -2610,17 +2611,23 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     The table edits (database, zone_dialog, zone_npcs, zone_events):
       (default)  applied to the tables as they are: what an edit names is written,
                  replacing whatever is there; a zone_events action replaces its own events
-      --reset    the tables the actions being built edit reset from .base first
+      --reset    the tables the actions being built edit reset first, to the install's
+                 .base (else its file); with --pivot copied over the pivot folder's
       --list     MANIFEST is a build list: its projects built in order (--reset:
-                 every table they edit reset once, first)
+                 every table they edit reset once, first). A list file needs no --list.
     """
     import xi.xi_config as cfg
     from xi.dats import xi_build_list as BL
     from xi.server import xi_server_pass as SP
-    if build_list:
+    # A build list: named with --list (projects/build_list.json by default), or a file whose
+    # schema says it is one.
+    list_file = BL.list_path(manifest or project) if build_list else None
+    if list_file is None and BL.is_list(_resolve_manifest_path(manifest, project)):
+        list_file = _resolve_manifest_path(manifest, project)
+    if list_file is not None:
         if only:
-            raise click.ClickException("--list builds whole projects; --only doesn't go with it.")
-        return _build_list(BL.list_path(manifest or project), reset=reset, pivot=pivot, dry_run=dry_run,
+            raise click.ClickException("A build list builds whole projects; --only doesn't go with it.")
+        return _build_list(list_file, reset=reset, pivot=pivot, dry_run=dry_run,
                            dry_note=dry_note, force=force, verbose=verbose, apply_db=apply_db, db_row=db_row,
                            clone_from=clone_from, server_id=server_id, menu_record=menu_record,
                            menu_name=menu_name, lua_stub=lua_stub)
@@ -2629,8 +2636,6 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                          server_id=server_id, menu_record=menu_record, menu_name=menu_name, lua_stub=lua_stub)
 
     manifest = _resolve_manifest_path(manifest, project)
-    if BL.is_list(manifest):
-        raise click.ClickException(f"{manifest} is a build list: build it with --list.")
     if not manifest.exists():
         raise click.ClickException(
             f"No manifest at {manifest}. Pass an existing project "
@@ -2921,14 +2926,16 @@ def _build_list(path: Path, *, reset: bool, pivot: bool, dry_run: bool, dry_note
 
 
 def _reset_tables(root: Path, rels: list[str], dry_run: bool, actions: list[dict], menu_record) -> None:
-    """Reset ``rels`` in ``root`` from their ``.base`` (--reset), and say what that did."""
+    """Reset ``rels`` in ``root`` to the install's untouched copy (--reset), and say what that
+    did: in the install from each table's ``.base``, into the pivot folder from the install."""
     from xi.dats import xi_build_list as BL
     done = BL.reset_tables(root, rels, dry_run)
-    n = len(done["restored"]) + len(done["removed"])
-    click.echo(f"\n{'Would reset' if dry_run else 'Reset'} {n} table{'s' if n != 1 else ''} from .base"
-               + (f" ({len(done['removed'])} pivot copies taken out)" if done["removed"] else ""))
-    for rel in done["none"]:
-        click.echo(click.style(f"  ⚠ {rel} has no .base in {root}; left as it is", fg="yellow"))
+    n = len(done["restored"])
+    pivot = _root_target_name(root) == "pivot"
+    click.echo(f"\n{'Would reset' if dry_run else 'Reset'} {n} table{'s' if n != 1 else ''} "
+               + ("from the install (FFXI_DIR)" if pivot else "from .base"))
+    for rel in done["none"] if pivot else ():
+        click.echo(click.style(f"  ⚠ {rel} isn't in the install; left as it is", fg="yellow"))
     if not menu_record and "ROM/118/114.DAT" in done["restored"]:
         for a in actions:
             menu = ((a.get("result") or {}).get("menu") if a.get("type") == "ability" else None) or {}
@@ -2955,14 +2962,25 @@ def _manifest_problems(manifest: dict) -> list[str]:
 def _edited_tables(manifest: dict, target: str) -> list[str]:
     """ROM paths of the tables a project's builds into ``target`` edited in place — what
     ``--reset`` resets: the database, dialog, NPC-name and event tables its records name, and
-    the spell / command table and its name tables for a record action. The DATs actions
-    place (gear, camera scenes …) aren't: a build replaces them. Nor is an ability's menu
-    record, which only a build with --menu-record puts back."""
+    the spell / command table and its name tables for a record action; for a database or
+    zone_dialog action also the tables its definition names, so a project that hasn't been
+    built into ``target`` yet resets them too. The DATs actions place (gear, camera scenes …)
+    aren't: a build replaces them. Nor is an ability's menu record, which only a build with
+    --menu-record puts back."""
     rels: set[str] = set()
     for action in manifest.get("actions", []):
         if not isinstance(action, dict) or _undone(action):
             continue
         typ, res = action.get("type"), action.get("result") or {}
+        if typ == "database" and action.get("enabled", True):
+            from xi.database import xi_build as DB
+            rels.update(DB.tables(action))
+        elif typ == "zone_dialog" and action.get("enabled", True):
+            from xi.dialog import xi_zone_dialog as ZD
+            try:
+                rels.update(ZD.tables(action, _target_root(target)))
+            except click.ClickException:
+                pass
         if typ in RESTORABLE_TYPES:
             for e in (res.get("roots") or {}).get(target) or []:
                 if e.get("dat"):

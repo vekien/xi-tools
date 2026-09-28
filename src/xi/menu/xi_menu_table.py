@@ -467,9 +467,8 @@ def target_path(root, rom_path: str) -> Path:
 
 
 def _write(root, rom_path: str, data: bytes) -> Path:
-    from xi.xi_config import editable_dat, keep_redirect_base
+    from xi.xi_config import editable_dat
     with _into(root):
-        keep_redirect_base(_install_file(rom_path))
         out = editable_dat(_install_file(rom_path), fresh=False)
     out.write_bytes(data)
     return out

@@ -285,14 +285,13 @@ def test_capture_and_restore_put_back_a_replaced_row(tmp_path: Path, monkeypatch
 def test_pivot_root_is_used_only_when_asked(tmp_path: Path, monkeypatch):
     """Reads and writes go to the root they are given. A configured FFXI_PIVOT_DIR
     changes nothing by itself; given as the root, its own copy is read and written,
-    and a table it lacks reads the install's and is copied in on write. The pivot keeps what
-    it held as .base (empty for a table it didn't have); the install gets none from this."""
+    and a table it lacks reads the install's and is copied in on write. Neither the pivot nor
+    the install gets a .base from this (a pivot reset starts from the install's)."""
     import xi.xi_config as cfg
     root = install(tmp_path / "game")
     pivot = tmp_path / "pivot"
     (pivot / "ROM" / "118").mkdir(parents=True)
     (pivot / "ROM" / "118" / "114.DAT").write_bytes(menu_dat(9, 6))     # one more spell than the install
-    pivot_menu = (pivot / "ROM" / "118" / "114.DAT").read_bytes()
     monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
     monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot), raising=False)
     assert MT.menu_path(root) == root / "ROM" / "118" / "114.DAT"
@@ -309,9 +308,7 @@ def test_pivot_root_is_used_only_when_asked(tmp_path: Path, monkeypatch):
     assert written == pivot / "ROM" / "181" / "73.DAT"
     assert MT.read_names("spell", pivot)[4095] == "Testspell"
     assert len(D.parse((root / "ROM" / "181" / "73.DAT").read_bytes()).blocks) == 8
-    assert (pivot / "ROM" / "118" / "114.DAT.base").read_bytes() == pivot_menu
-    assert (pivot / "ROM" / "181" / "73.DAT.base").read_bytes() == b""
-    assert not list(root.rglob("*.base"))
+    assert not list(pivot.rglob("*.base")) and not list(root.rglob("*.base"))
     # undo in a root leaves tables it has no copy of alone instead of copying them in
     MT.restore_record("spell", pivot, 4095)
     assert MT.is_empty(MT.load_menu(pivot).records("spell")[4095])

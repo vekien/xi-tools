@@ -241,7 +241,6 @@ def test_pivot_flag_builds_into_the_pivot_folder_only(game, tmp_path: Path, monk
     pivot = tmp_path / "pivot"
     (pivot / "ROM" / "118").mkdir(parents=True)
     (pivot / "ROM" / "118" / "114.DAT").write_bytes(menu_dat(9, 6))
-    pivot_menu = (pivot / "ROM" / "118" / "114.DAT").read_bytes()
     monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot), raising=False)
     runner = CliRunner()
 
@@ -264,8 +263,7 @@ def test_pivot_flag_builds_into_the_pivot_folder_only(game, tmp_path: Path, monk
     assert MT.read_names("spell", pivot)[4095] == "Testspell"
     names = ["69.DAT", "71.DAT", "73.DAT", "75.DAT"]
     assert sorted(p.name for p in (pivot / "ROM" / "181").iterdir() if p.suffix == ".DAT") == names
-    assert (pivot / "ROM" / "118" / "114.DAT.base").read_bytes() == pivot_menu
-    assert all((pivot / "ROM" / "181" / f"{n}.base").read_bytes() == b"" for n in names)
+    assert not list(pivot.rglob("*.base"))                  # a pivot build keeps no .base
     a = _read_manifest(Path("projects/piv.json"))["actions"][0]
     assert a["result"]["targets"] == ["pivot"] and a["result"]["record_id"] == 4095
 

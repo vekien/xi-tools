@@ -248,17 +248,19 @@ they are; resetting is asked for with `--reset`.
 | Build | What it does |
 |---|---|
 | `xi dats build P` | **Applies** the edits to the tables as they are. What an edit names is written, replacing whatever is there (a record, line or NPC another build or retail put at that id included); an edit already there writes nothing. A `zone_events` action replaces its own events from its last build. An edit taken out of the project stays in the tables. The build's records are kept after the last build's, so `undo` takes both back. |
-| `xi dats build P --reset` | First **resets from `.base`** every table the actions being built edited in place, then applies. With `--only`, any other action of the project that edited one of those tables is built again too (a reset table loses all of its edits). The zone editor's Publish / Delete builds this way; `xi event cutscene compile` and `xi event dialogue new` take `--reset` too. |
+| `xi dats build P --reset` | First **resets** every table the actions being built edit in place to the install's untouched copy (its `.base`), then applies. With `--only`, any other action of the project that edited one of those tables is built again too (a reset table loses all of its edits). The zone editor's Publish / Delete builds this way; `xi event cutscene compile` and `xi event dialogue new` take `--reset` too. |
 | `xi dats build --list` | Builds every project of a **build list** in its order, each on top of the ones before it. |
-| `xi dats build --list --reset` | Resets every table any of the list's projects edits from its `.base` once, then builds them in order: the clean, repeatable build, where projects that share a table layer the same way every time and nothing a project dropped lingers. |
+| `xi dats build --list --reset` | Resets every table any of the list's projects edits once, then builds them in order: the clean, repeatable build, where projects that share a table layer the same way every time and nothing a project dropped lingers. |
 
-A reset table loses everything written to it since its `.base` was taken, whichever project
-or command wrote it: resetting one project's tables takes away another project's edits of the
+A reset table loses everything written to it since the install's untouched copy, whichever
+project or command wrote it: resetting one project's tables takes away another project's edits of the
 same tables until that project is built again. `--list --reset` is the way to rebuild them all
 together.
 
 The build list is `projects/build_list.json` ([`schema/build_list.json`](../../schema/build_list.json));
-`xi dats build NAME --list` builds `projects/NAME.json`, and a path works too:
+`xi dats build NAME --list` builds `projects/NAME.json`, and a path works too. A list file
+says what it is (its `schema`), so `xi dats build content/release_list.json` builds it as a list
+without `--list`:
 
 ```json
 {
@@ -268,28 +270,42 @@ The build list is `projects/build_list.json` ([`schema/build_list.json`](../../s
 ```
 
 A bare name is `projects/<name>.json`; anything else is a path relative to the list file (a
-zone editor project's `dats.json`). `--list` reads and checks every project first and builds
-nothing if one is missing or has an invalid action. Building a list file without `--list` is
-refused, and `--only` doesn't go with it.
+zone editor project's `dats.json`). A list build reads and checks every project first and
+builds nothing if one is missing or has an invalid action; `--only` doesn't go with it.
 
 What `--reset` resets: the tables the actions' recorded results name — the database, dialog,
-NPC-name and event tables, and `114.DAT` with its name tables for spell / command records. For
-`--list` also the tables the list file's `result` recorded, so a table a project no longer
+NPC-name and event tables, and `114.DAT` with its name tables for spell / command records — and
+the tables a `database` or `zone_dialog` action's edits and `grow` name, so a project that was
+never built into the target (a fresh clone) resets them too. For `--list` also the tables the
+list file's `result` recorded, so a table a project no longer
 edits, or a project taken off the list, goes back too. DATs an action places (gear, abilities,
 camera scenes) aren't reset: a build replaces them. An ability's menu record isn't either,
 but when `114.DAT` is reset it goes with it; the build says so, and `--menu-record` places it
 again.
 
-In the install the `.base` is the one every in-place edit keeps. A `--pivot` build keeps what
-the pivot folder held as `.base` too, or an empty `.base` when it had no copy, which a
-`--reset --pivot` takes back out (a pivot copy written before this has no `.base` and is left,
-with a warning). `xi database grow` grows a table's `.base` with it, so a reset keeps the rows.
+What a table resets to is always the install's (`FFXI_DIR`) untouched copy — its `.base`, the
+one every in-place edit keeps, else the file itself — and never the pivot folder's:
+
+| Build | Reads and writes | `--reset` |
+|---|---|---|
+| `xi dats build P` | the install's DATs, in place | each table back to its `.base` in the install |
+| `xi dats build P --pivot` | the pivot folder's copy; a table it doesn't have is read from the install and written into the folder | the install's `.base` (else its file) copied over the pivot folder's copy |
+
+A `--pivot` build keeps no `.base` in the pivot folder, and never writes the install. Without
+`--reset` it applies on top of what the folder holds, so a server's DATs folder keeps its other
+edits; with `--reset` the tables it edits start from the install's again.
+
+A table a client plugin reads to a fixed row count grows on every build with `grow` on the
+[`database` action](../database/README.md#growing-a-table) — after the reset, so a build from
+the install grows it again. `xi database grow` grows the install's table and its `.base` once,
+which a reset keeps.
 
 ```bash
 uv run xi dats build P --reset                   # this project's tables from .base, then build
 uv run xi dats build --list --reset --dry-run    # what would be reset and built
 uv run xi dats build --list --reset              # every project of projects/build_list.json, clean
 uv run xi dats build release --list --pivot      # projects/release.json, on top, into FFXI_PIVOT_DIR
+uv run xi dats build content/release_list.json --reset --pivot   # a list file: the install's tables + its projects
 ```
 
 A dry run holds each step's writes (the reset included) in memory, so later steps and later
