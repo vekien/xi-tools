@@ -150,6 +150,7 @@ xi ui spells search NAME [--abilities]       # id, MP, cast/recast, learnable jo
 ```text
 xi dats prepare edits.json --project P [--merge]   # a list of edits (schema/database.json) -> action database.<name>
 xi dats build P [--dry-run] [--pivot]              # patches the records (EN + JP, legacy or retail DATs), writes P.sql (proposed, never run)
+                                                   #   an edit with "add": whole new items from fields into any item table
 xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
 xi dats undo P                                     # every record back to what it held; its SQL section removed
 xi database grow ROM/181/72.DAT 4096               # a table grown once (d_msg or item), its .base too

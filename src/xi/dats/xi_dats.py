@@ -1884,11 +1884,12 @@ def _build_database(action: dict, manifest_path: Path, manifest: dict, force: bo
                     dry_run: bool = False) -> dict:
     from xi.database import xi_build as DB
     root = _active_build_root()
-    sql_path = DB.sql_path(action, _action_file(action, manifest_path, manifest), manifest_path)
+    action_file = _action_file(action, manifest_path, manifest)
+    sql_path = DB.sql_path(action, action_file, manifest_path)
     try:
         return DB.build(action, root=root, target=_root_target_name(root) or "dir", manifest=manifest,
                         sql_path=sql_path, project=manifest.get("name") or manifest_path.stem,
-                        dry_run=dry_run)
+                        dry_run=dry_run, base_dir=Path(action_file).parent)
     except DB.DbError as e:
         raise click.ClickException(f"{action.get('id')}: {e}")
 

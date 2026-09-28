@@ -188,8 +188,9 @@ class _Files:
     """The DATs one build reads and writes, each loaded once from the copy ``root``
     reads (its own, else the install's — xi.menu.xi_menu_table's rules)."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, base_dir: Path | None = None):
         self.root = root
+        self.base_dir = base_dir
         self.items: dict[str, ItemDat | None] = {}
         self.dmsg: dict[str, D.DmsgTable | None] = {}
         self.menus: dict[str, object] = {}
@@ -335,6 +336,47 @@ def _icon_region(rec) -> bytes:
     return bytes(rec[ICON_OFFSET:len(rec) - 1])
 
 
+ICON_MARK = 0x91                     # the byte before an icon's tag, on every icon seen
+ICON_TAG = "item    custom"           # what a custom icon's 16-character tag says
+
+
+def _icon_blob(files: _Files, icon: dict, fmt: str) -> bytes:
+    """The icon region (its u32 size, then the icon) an edit's ``icon`` names: another item's,
+    or a .bmp file — a 256-colour bitmap stored as the record holds it, after a mark byte and a
+    16-character ``tag`` (default "item    custom")."""
+    if "from" in icon:
+        return _item_icon(files, icon["from"], fmt)
+    path = Path(icon["file"])
+    if not path.is_absolute():
+        path = (files.base_dir or Path.cwd()) / path
+    if not path.is_file():
+        raise DbError(f"icon file {path} is missing")
+    bmp = path.read_bytes()
+    if bmp[:2] != b"BM" or len(bmp) < 14 + 40:
+        raise DbError(f"{path} isn't a BMP file")
+    tag = icon.get("tag", ICON_TAG).encode("ascii").ljust(16, b" ")
+    blob = bytes([ICON_MARK]) + tag + bmp[14:]
+    return struct.pack("<I", len(blob)) + blob
+
+
+def icon_bmp(rec: bytes) -> tuple[bytes, str] | None:
+    """A record's icon as a .bmp file's bytes and its tag, or None when it has none (what
+    ``icon.file`` reads back)."""
+    size = struct.unpack_from("<I", rec, ICON_OFFSET)[0]
+    if size < 17 + 40 or ICON_DATA + size > len(rec) - 1:
+        return None
+    blob = bytes(rec[ICON_DATA:ICON_DATA + size])
+    if blob[0] != ICON_MARK:
+        return None
+    dib = blob[17:]
+    bits, used = struct.unpack_from("<H", dib, 14)[0], struct.unpack_from("<I", dib, 32)[0]
+    colours = used or (1 << bits if bits <= 8 else 0)
+    head = struct.unpack_from("<I", dib, 0)[0]
+    pixels_at = 14 + head + colours * 4
+    bmp = b"BM" + struct.pack("<IHHI", 14 + len(dib), 0, 0, pixels_at) + dib
+    return bmp, blob[1:17].decode("ascii").rstrip(" ")
+
+
 def _item_icon(files: _Files, item_id: int, fmt: str) -> bytes:
     for table in C.ITEM_LAYOUT:
         try:
@@ -395,14 +437,15 @@ def _apply_item(files: _Files, edit: dict, lang: str, rec: bytearray, layout: st
         if touched:
             _write_item_strings(rec, off, subs, end)
     icon = edit.get("icon")
-    if icon and "from" in icon:
-        blob = _item_icon(files, icon["from"], fmt)
+    if icon and ("from" in icon or "file" in icon):
+        blob = _icon_blob(files, icon, fmt)
         before = _icon_region(rec)
         region = blob + bytes(len(before) - len(blob))
         if region != before:
             rec[ICON_OFFSET:len(rec) - 1] = region
             changed["icon"] = {"from": base64.b64encode(before.rstrip(b"\0")).decode("ascii"),
-                               "to": f"item {icon['from']}", "sha1": _sha1(region)}
+                               "to": f"item {icon['from']}" if "from" in icon else icon["file"],
+                               "sha1": _sha1(region)}
     return changed
 
 
@@ -633,6 +676,109 @@ def _item_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
         dat.set_record(idx, bytes(rec))
         if entry["changed"] or entry.get("created"):
             out.append(entry)
+    return out
+
+
+def _new_item(entry: dict, layout: str, fmt: str, stride: int, item_id: int, lang: str,
+              files: _Files) -> bytes:
+    """A whole item record from an ``add`` entry's fields: the id, ``set`` (named and
+    ``unknown_*`` header fields), the ``lang`` strings in the layout's text block, and the icon."""
+    rec = bytearray(stride)
+    rec[-1] = 0xFF
+    struct.pack_into("<I", rec, 0, item_id)
+    for name, value in (entry.get("set") or {}).items():
+        if not write_field(rec, layout, fmt, LAYOUT_NAMES.get(name, name), _field_value(name, value)):
+            raise DbError(f"the {layout} layout has no field {name!r} in {fmt} records")
+    spec = (entry.get("strings") or {}).get(lang) or {}
+    subs = []
+    for key in C.ITEM_STRINGS[lang]:
+        if key in C._NUMERIC_SUBS:
+            subs.append({"flag": 1, "raw": struct.pack("<I", int(spec.get(key, 0)))})
+        else:
+            sub = {"flag": 0, "raw": struct.pack("<I", 1) + bytes(D.META_LEN) + bytes(4)}
+            set_sub(sub, spec.get(key, ""))
+            subs.append(sub)
+    _write_item_strings(rec, text_offset(layout, fmt), subs, 0)
+    if entry.get("icon"):
+        blob = _icon_blob(files, entry["icon"], fmt)
+        rec[ICON_OFFSET:ICON_OFFSET + len(blob)] = blob
+    return bytes(rec)
+
+
+def _add_places(files: _Files, edit: dict):
+    """Where an ``add`` edit's items go: ``[(lang, rel, first id, row count)]`` per part and
+    language, English first."""
+    table = edit["table"]
+    if is_item_table(table):
+        out = []
+        for en, jp, base, lo, hi in ITEM_PARTS[table]:
+            for lang, rel in (("en", en), ("jp", jp)):
+                dat = files.item(rel)
+                if dat is not None:
+                    out.append((lang, rel, base, lo, min(hi, base + dat.count - 1)))
+        return out
+    out = []
+    for lang, key in (("en", "table"), ("jp", "table_jp")):
+        if edit.get(key):
+            rel = _rom(edit[key])
+            dat = files.item(rel)
+            if dat is None:
+                raise DbError(f"{rel} is missing")
+            first = struct.unpack_from("<I", dat.record(0))[0] if dat.count else 0
+            out.append((lang, rel, first, first, first + dat.count - 1))
+    return out
+
+
+def _item_add_edit(files: _Files, edit: dict) -> list[dict]:
+    """``add``: item records made from fields. An entry with an ``id`` replaces that item (in
+    both languages); one without goes into the next empty row, and is skipped when the table
+    already has an item of its English name (case-insensitive)."""
+    places = _add_places(files, edit)
+    en_places = [p for p in places if p[0] == "en"]
+    if not en_places:
+        raise DbError(f"{edit['table']}: no English file to add to")
+    default_layout = edit.get("layout") or C.ITEM_LAYOUT.get(edit["table"])
+    names = set()
+    for _lang, rel, base, lo, hi in en_places:
+        dat = files.item(rel)
+        for row in range(lo - base, hi - base + 1):
+            n = item_name(dat.record(row), default_layout, dat.format)
+            if n and n.strip(".").strip():
+                names.add(n.lower())
+    out = []
+    taken = set()
+    for i, entry in enumerate(edit["add"]):
+        layout = entry.get("layout") or default_layout
+        iid = entry.get("id")
+        if iid is None:
+            name = entry["strings"]["en"]["name"]
+            if name.lower() in names:
+                continue                                  # already in the table
+            iid = next((base + row for _lang, rel, base, lo, hi in en_places
+                        for row in range(lo - base, hi - base + 1)
+                        if base + row not in taken and is_empty_item(files.item(rel).record(row), layout,
+                                                                     files.item(rel).format)), None)
+            if iid is None:
+                raise DbError(f"add[{i}] {name!r}: {edit['table']} has no empty row left")
+        taken.add(iid)
+        name = ((entry.get("strings") or {}).get("en") or {}).get("name")
+        if name:
+            names.add(name.lower())
+        hits = [(lang, rel, base) for lang, rel, base, lo, hi in places if lo <= iid <= hi]
+        if not any(lang == "en" for lang, _r, _b in hits):
+            raise DbError(f"add[{i}]: {edit['table']} has no item {iid}")
+        for lang, rel, base in hits:
+            dat = files.item(rel)
+            idx = iid - base
+            before = bytes(dat.record(idx))
+            new = _new_item(entry, layout, dat.format, dat.stride, iid, lang, files)
+            if new == before:
+                continue
+            dat.set_record(idx, new)
+            out.append({"table": edit["table"], "id": iid, "lang": lang, "dat": rel, "format": dat.format,
+                        "block": idx, "layout": layout, "created": True, "name": item_name(new, layout, dat.format),
+                        "before_block": base64.b64encode(before).decode("ascii"), "sha1": _sha1(new),
+                        "changed": {}})
     return out
 
 
@@ -990,6 +1136,12 @@ def tables(action: dict) -> list[str]:
     rels: set[str] = set()
     for e in action.get("edits") or []:
         table, rid = (e.get("table"), e.get("id")) if isinstance(e, dict) else (None, None)
+        if isinstance(e, dict) and "add" in e:
+            if is_item_table(table):
+                rels.update(r for en, jp, _b, _lo, _hi in ITEM_PARTS[table] for r in (en, jp))
+            else:
+                rels.update(_rom(t) for t in (table, e.get("table_jp")) if C.is_raw(t))
+            continue
         if is_item_table(table):
             # Both languages' records, unless hex names only one.
             langs = [lang for lang in ("en", "jp") if not isinstance(e.get("hex"), dict) or lang in e["hex"]]
@@ -1009,7 +1161,7 @@ def tables(action: dict) -> list[str]:
 
 
 def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_path: Path | None,
-          project: str, dry_run: bool = False) -> dict:
+          project: str, dry_run: bool = False, base_dir: Path | None = None) -> dict:
     """Apply ``action`` to the DATs of ``root`` as they are: what an edit names is written,
     replacing what is there (a record copied into a slot holding one included), and an edit
     already there writes nothing. The build result's ``records`` is what gets recorded for
@@ -1018,12 +1170,14 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_p
     if errs:
         raise DbError("; ".join(errs))
     prev = (((action.get("result") or {}).get("roots") or {}).get(target)) or []
-    files = _Files(Path(root))
+    files = _Files(Path(root), base_dir)
     warnings: list[str] = []
     records: list[dict] = []
     for i, edit in enumerate(action["edits"]):
         try:
-            if is_item_table(edit["table"]):
+            if "add" in edit:
+                records += _item_add_edit(files, edit)
+            elif is_item_table(edit["table"]):
                 records += _item_edit(files, edit, prev)
             elif "layout" in edit:
                 records += _item_path_edit(files, edit, prev)
@@ -1032,7 +1186,7 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_p
             else:
                 records += _dmsg_edit(files, edit, prev)
         except DbError as e:
-            raise DbError(f"edits[{i}] ({edit['table']} {edit['id']}): {e}") from None
+            raise DbError(f"edits[{i}] ({edit['table']} {edit.get('id', 'add')}): {e}") from None
     # The SQL before anything is written: a mod name it can't resolve stops the build clean.
     sql = proposed_sql(action, manifest, records) if (action.get("server") or {}).get("emit", True) else ""
     changed = files.changed()

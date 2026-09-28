@@ -158,6 +158,45 @@ TEXT_OFFSETS: dict[str, dict[str, int]] = {
 }
 
 
+def _unknown_fields(layout: str) -> dict[str, tuple[int, str]]:
+    """The header bytes of a legacy record the named fields don't cover, as u16 fields
+    ``unknown_<offset hex>`` (a u8 for an odd byte): real values the client has (general
+    items hold 0xFFFF at 0x0E, most armor 0x0100 at 0x2A) but nobody has named yet. They make
+    a whole record expressible as fields; they stay out of ``FIELDS`` (and so out of the
+    viewer's exports) until they have names. Legacy only: their retail offsets are unmapped."""
+    named = FIELDS[layout][FORMAT_LEGACY]
+    covered = set()
+    for off, sfmt in named.values():
+        covered.update(range(off, off + struct.calcsize(sfmt)))
+    out: dict[str, tuple[int, str]] = {}
+    off = 0
+    end = TEXT_OFFSETS[layout][FORMAT_LEGACY]
+    while off < end:
+        if off in covered:
+            off += 1
+            continue
+        if off + 1 < end and off + 1 not in covered:
+            out[f'unknown_{off:02x}'] = (off, '<H')
+            off += 2
+        else:
+            out[f'unknown_{off:02x}'] = (off, '<B')
+            off += 1
+    return out
+
+
+UNKNOWN_FIELDS: dict[str, dict[str, dict[str, tuple[int, str]]]] = {
+    layout: {FORMAT_LEGACY: _unknown_fields(layout)}
+    for layout in ('general', 'usable', 'armor', 'weapon', 'maze')
+}
+
+
+def _spec(layout: str, fmt: str, name: str) -> tuple[int, str] | None:
+    spec = fields_for(layout, fmt).get(name)
+    if spec is None:
+        spec = UNKNOWN_FIELDS.get(layout, {}).get(fmt, {}).get(name)
+    return spec
+
+
 def layout_for_type(item_type: int) -> str:
     return TYPE_LAYOUT.get(item_type, 'general')
 
@@ -172,7 +211,7 @@ def text_offset(layout: str, fmt: str) -> int:
 
 
 def read_field(rec: bytes, layout: str, fmt: str, name: str, default: int = 0) -> int:
-    spec = fields_for(layout, fmt).get(name)
+    spec = _spec(layout, fmt, name)
     if spec is None:
         return default
     off, sfmt = spec
@@ -183,7 +222,7 @@ def read_field(rec: bytes, layout: str, fmt: str, name: str, default: int = 0) -
 
 def write_field(rec: bytearray, layout: str, fmt: str, name: str, value: int) -> bool:
     """Store ``value`` into ``name``; False when the layout has no such field."""
-    spec = fields_for(layout, fmt).get(name)
+    spec = _spec(layout, fmt, name)
     if spec is None:
         return False
     off, sfmt = spec

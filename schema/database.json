@@ -41,7 +41,14 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "$ref": "#/$defs/edit"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/edit"
+          },
+          {
+            "$ref": "#/$defs/addEdit"
+          }
+        ]
       }
     },
     "server": {
@@ -288,19 +295,7 @@
           ]
         },
         "icon": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "from"
-          ],
-          "description": "Item tables only: the 32x32 icon, copied from another item.",
-          "properties": {
-            "from": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Item id whose icon to copy."
-            }
-          }
+          "$ref": "#/$defs/icon"
         },
         "server": {
           "description": "Item tables: the item's server rows, or false to leave the server out of this edit (no mirroring either). spellData: false only — its spell_list row is mirrored from mp, cast, recast, element, skill and levels unless the action's server.mirror is off.",
@@ -339,7 +334,7 @@
     "set": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Record header fields, by the viewer's names. Which ones a table has depends on its layout: every item table has flags, stack, type, resourceId and targets; armor and weapons add level, slots, races, jobs, superiorLevel, maxCharges, castTime, useDelay, reuseDelay and itemLevel; armor adds shieldSize; weapons add damage, delay, dps, skill, jugSize and baseItemId; usable has castTime; puppet has puppetSlot and elementCharge; monst1 has level, races and instinctCost.",
+      "description": "Record header fields, by the viewer's names. Which ones a table has depends on its layout: every item table has flags, stack, type, resourceId and targets; armor and weapons add level, slots, races, jobs, superiorLevel, maxCharges, castTime, useDelay, reuseDelay and itemLevel; armor adds shieldSize; weapons add damage, delay, dps, skill, jugSize and baseItemId; usable has castTime; puppet has puppetSlot and elementCharge; monst1 has level, races and instinctCost. Header bytes no one has named yet are unknown_<offset> (legacy records only): general unknown_0e–16, usable unknown_10–1a, armor unknown_24/28/2a, weapon unknown_1a/24/26/34/36, maze unknown_0e–52.",
       "properties": {
         "flags": {
           "$ref": "#/$defs/flags"
@@ -421,6 +416,146 @@
         },
         "instinctCost": {
           "$ref": "#/$defs/u16"
+        },
+        "unknown_0e": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_10": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_12": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_14": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_16": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_18": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_1a": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_1c": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_1e": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_20": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_22": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_24": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_26": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_28": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_2a": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_2c": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_2e": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_30": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_32": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_34": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_36": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_38": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_3a": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_3c": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_3e": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_40": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_42": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_44": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_46": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_48": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_4a": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_4c": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_4e": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_50": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
+        },
+        "unknown_52": {
+          "$ref": "#/$defs/u16",
+          "description": "A header value nobody has named yet (its byte offset in a legacy record, hex)."
         }
       }
     },
@@ -1103,6 +1238,154 @@
     "hexText": {
       "type": "string",
       "pattern": "^[0-9a-fA-F ]+$"
+    },
+    "icon": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Item tables only: the 32x32 icon — copied from another item (from), or a 256-colour .bmp file (file, relative to the file holding the action) stored after a 16-character tag.",
+      "properties": {
+        "from": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Item id whose icon to copy."
+        },
+        "file": {
+          "type": "string",
+          "pattern": "\\.[bB][mM][pP]$",
+          "description": "A .bmp file, relative to the file holding the action."
+        },
+        "tag": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "The icon's 16-character tag (default \"item    custom\")."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "from"
+          ]
+        },
+        {
+          "required": [
+            "file"
+          ]
+        }
+      ]
+    },
+    "addEdit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "table",
+        "add"
+      ],
+      "description": "Whole item records made from fields, into an item table: a named one, or a ROM path with its layout (table_jp: the Japanese file). An item with an id replaces that item; one without goes into the next empty row, and is skipped when the table already has an item of its English name (case-insensitive).",
+      "properties": {
+        "table": {
+          "type": "string",
+          "description": "An item table key (general, armor, …) or an item DAT's ROM path (the English file)."
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "general",
+            "usable",
+            "puppet",
+            "armor",
+            "weapon",
+            "maze",
+            "instinct",
+            "roe"
+          ],
+          "description": "A table by path: the layout of its records."
+        },
+        "table_jp": {
+          "$ref": "common.json#/$defs/romPath",
+          "description": "A table by path: its Japanese file."
+        },
+        "note": {
+          "type": "string"
+        },
+        "add": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "The item id: this item is replaced. Without it the item goes into the next empty row."
+              },
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "general",
+                  "usable",
+                  "puppet",
+                  "armor",
+                  "weapon",
+                  "maze",
+                  "instinct",
+                  "roe"
+                ],
+                "description": "This item's layout, when it isn't the table's."
+              },
+              "set": {
+                "$ref": "#/$defs/set"
+              },
+              "strings": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "en": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "article": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "logName": {
+                        "type": "string"
+                      },
+                      "logPlural": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "jp": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "icon": {
+                "$ref": "#/$defs/icon"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "examples": [

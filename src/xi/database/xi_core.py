@@ -98,7 +98,9 @@ def set_fields(table: str) -> list[str]:
 
 def layout_fields(layout: str) -> list[str]:
     """The header fields ``set`` may name for records of an item layout (the viewer's names)."""
-    return [_FIELD_KEYS.get(n, n) for n in FIELDS[layout][FORMAT_LEGACY] if n != "id"]
+    from xi.ui.items.xi_layout import UNKNOWN_FIELDS
+    names = [*FIELDS[layout][FORMAT_LEGACY], *UNKNOWN_FIELDS.get(layout, {}).get(FORMAT_LEGACY, {})]
+    return [_FIELD_KEYS.get(n, n) for n in names if n != "id"]
 
 
 def string_names(table: str, lang: str) -> list[str]:
@@ -141,6 +143,8 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _MOD_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _ACTION_KEYS = {"id", "type", "enabled", "description", "depends_on", "edits", "server", "result", "outputs"}
 _EDIT_KEYS = {"table", "id", "copy_from", "note", "set", "strings", "icon", "server", "hex", "layout"}
+_ADD_KEYS = {"table", "layout", "table_jp", "add", "note"}
+_ENTRY_KEYS = {"id", "layout", "set", "strings", "icon", "note"}
 _SERVER_KEYS = {"emit", "mirror", "sql"}
 
 # Server columns (catseyexi sql/item_*.sql; item_info is CatsEyeXI's, modules sql/custom).
@@ -293,8 +297,18 @@ def _check_icon(icon, at: str, errs: list) -> None:
     if not isinstance(icon, dict):
         errs.append(f"{at} must be an object")
         return
-    _unknown(icon, {"from"}, at, errs)
-    if not _is_int(icon.get("from")):
+    _unknown(icon, {"from", "file", "tag"}, at, errs)
+    if "file" in icon:
+        if "from" in icon:
+            errs.append(f"{at}: give from or file, not both")
+        if not (isinstance(icon["file"], str) and icon["file"].lower().endswith(".bmp")):
+            errs.append(f"{at}.file must be a .bmp file, relative to the file holding the action")
+        tag = icon.get("tag", "")
+        if not (isinstance(tag, str) and tag.isascii() and len(tag) <= 16):
+            errs.append(f"{at}.tag must be ASCII text of 16 characters or fewer")
+    elif "tag" in icon:
+        errs.append(f"{at}.tag goes with file")
+    elif not _is_int(icon.get("from")):
         errs.append(f"{at}.from must be the item id whose icon to copy")
 
 
@@ -369,9 +383,77 @@ def _check_server(rows, at: str, errs: list) -> None:
                     errs.append(f"{cat} must be an integer")
 
 
+def _check_add_edit(edit: dict, at: str, errs: list) -> None:
+    """``add``: whole item records made from fields, into an item table (a named one, or a
+    ROM path with its layout; ``table_jp`` the Japanese file of a path table). An entry with an
+    ``id`` replaces that item; one without goes into the next empty row, skipped when the table
+    already has an item of its English name (case-insensitive)."""
+    _unknown(edit, _ADD_KEYS, at, errs)
+    table = edit.get("table")
+    path = is_raw(table)
+    if table not in ITEM_LAYOUT and not path:
+        errs.append(f"{at}.table must be an item table ({', '.join(ITEM_LAYOUT)}) or an item DAT's ROM path")
+        return
+    if path and edit.get("layout") not in LAYOUTS:
+        errs.append(f"{at}.layout must be an item layout ({', '.join(LAYOUTS)})")
+    if not path and ("layout" in edit or "table_jp" in edit):
+        errs.append(f"{at}: layout and table_jp go with an item table given by its ROM path")
+    if "table_jp" in edit and not is_raw(edit["table_jp"]):
+        errs.append(f"{at}.table_jp must be the Japanese file's ROM path")
+    entries = edit.get("add")
+    if not isinstance(entries, list) or not entries:
+        errs.append(f"{at}.add must be a non-empty list of items")
+        return
+    ids: dict = {}
+    for i, entry in enumerate(entries):
+        where = f"{at}.add[{i}]"
+        if not isinstance(entry, dict):
+            errs.append(f"{where} must be an object")
+            continue
+        _unknown(entry, _ENTRY_KEYS, where, errs)
+        layout = entry.get("layout") or (edit.get("layout") if path else ITEM_LAYOUT.get(table))
+        if "layout" in entry and entry["layout"] not in LAYOUTS:
+            errs.append(f"{where}.layout must be an item layout ({', '.join(LAYOUTS)})")
+            layout = None
+        if "id" in entry:
+            if not _is_int(entry["id"]):
+                errs.append(f"{where}.id must be an item id")
+            elif entry["id"] in ids:
+                errs.append(f"{where}: id {entry['id']} is already added by add[{ids[entry['id']]}]")
+            else:
+                ids[entry["id"]] = i
+        strings = entry.get("strings", {})
+        if not isinstance(strings, dict) or set(strings) - {"en", "jp"}:
+            errs.append(f"{where}.strings must be {{\"en\": {{…}}, \"jp\": {{…}}}}")
+        else:
+            for lang, spec in strings.items():
+                if not isinstance(spec, dict):
+                    errs.append(f"{where}.strings.{lang} must be an object")
+                    continue
+                for key, v in spec.items():
+                    if key not in ITEM_STRINGS[lang]:
+                        errs.append(f"{where}.strings.{lang}.{key}: an item's {lang} strings are "
+                                    f"{', '.join(ITEM_STRINGS[lang])}")
+                    elif key in _NUMERIC_SUBS and not _is_int(v):
+                        errs.append(f"{where}.strings.{lang}.{key} must be a number")
+                    elif key not in _NUMERIC_SUBS and not isinstance(v, str):
+                        errs.append(f"{where}.strings.{lang}.{key} must be text")
+        if "id" not in entry and not ((strings.get("en") or {}).get("name") if isinstance(strings, dict) else None):
+            errs.append(f"{where}: an item without an id needs strings.en.name (it must be unique in the table)")
+        if "set" in entry and layout:
+            _check_set(table, entry["set"], f"{where}.set", errs, layout)
+        if "icon" in entry:
+            _check_icon(entry["icon"], f"{where}.icon", errs)
+        if "note" in entry and not isinstance(entry["note"], str):
+            errs.append(f"{where}.note must be a string")
+
+
 def _check_edit(edit, at: str, errs: list) -> tuple | None:
     if not isinstance(edit, dict):
         errs.append(f"{at} must be an object")
+        return None
+    if "add" in edit:
+        _check_add_edit(edit, at, errs)
         return None
     if "like" in edit:
         errs.append(f"{at}: like is now copy_from")
