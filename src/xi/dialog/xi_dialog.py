@@ -193,6 +193,69 @@ def decode_event_string(raw: bytes) -> tuple[str, list[Opcode]]:
     return "".join(out), ops
 
 
+def decode_exact(raw: bytes) -> str:
+    """Text that :func:`encode_event_string` turns back into exactly ``raw`` (``decode_event_string``
+    is for reading, and loses bytes): characters as themselves, a line break as a newline, the
+    codes with an authoring token as that token (``{n}``, ``{options}``, ``{index:n}``,
+    ``{plural:n}``, ``\\p``, the game's own quote marks ``{“}`` ``{”}``), and anything else as
+    ``{raw:hh…}`` — a control code without a token, or a glyph that would encode to other
+    bytes."""
+    out: list[str] = []
+    pending = bytearray()
+
+    def flush():
+        if pending:
+            out.append("{raw:" + pending.hex() + "}")
+            pending.clear()
+
+    def emit(token: str, chunk: bytes):
+        if token and token not in "{}\\" and encode_event_string(token) == chunk:
+            flush()
+            out.append(token)
+        else:
+            pending.extend(chunk)
+
+    i, n_raw = 0, len(raw)
+    while i < n_raw:
+        lead = raw[i]
+        n = BYTE_LEN[lead] or 1
+        if n == 2 and i + 1 < n_raw:
+            cval = (lead << 8) | raw[i + 1]
+        else:
+            n, cval = 1, lead
+        sp = SPECIAL.get(cval)
+        if sp is not None:
+            if cval == 0:
+                break
+            _code, extra = sp
+            chunk = bytes(raw[i:i + n + extra])
+            p = chunk[n] if extra >= 1 and len(chunk) > n else None
+            token = {0x07: "\n", 0x0B: "{options}", 0x7F31: "\\p"}.get(cval)
+            if cval == 0x0A and p is not None:
+                token = f"{{{p}}}"
+            elif cval == 0x0C and p is not None:
+                token = f"{{index:{p}}}"
+            elif cval == 0x7F92 and p is not None:
+                token = f"{{plural:{p}}}"
+            emit(token or "", chunk)
+            i += n + extra
+        else:
+            chunk = bytes(raw[i:i + n])
+            if cval in (0x87B2, 0x87B3):             # the game's own quote marks
+                flush()
+                out.append("{“}" if cval == 0x87B2 else "{”}")
+                i += n
+                continue
+            ch = chr(CHAR_OVERRIDE[cval]) if cval in CHAR_OVERRIDE else _decode_char(chunk)
+            try:
+                emit(ch, chunk)
+            except DialogError:
+                pending.extend(chunk)
+            i += n
+    flush()
+    return "".join(out)
+
+
 def parse_event_message(data: bytes) -> tuple[list[Entry], bool]:
     """Parse an event-message DAT into entries. Returns (entries, obfuscated)."""
     if len(data) < 8:
@@ -343,6 +406,9 @@ def encode_event_string(s: str) -> bytes:
                     # {n} -> 0A nn: numeric substitution of event parameter n
                     # (Work_Zone[2 + n]; n >= 8 reads the extended Work_Zone_1700 bank).
                     out += bytes([0x0A, int(tok) & 0xFF]); i = end + 1; continue
+                if tok in ("“", "”"):
+                    # The game's own quote marks, 87 B2 / 87 B3 (a typed “ ” is cp932's 81 67 / 81 68).
+                    out += b"\x87\xb2" if tok == "“" else b"\x87\xb3"; i = end + 1; continue
                 if tok == "options":
                     out.append(0x0B); i = end + 1; continue     # menu rows start here (CodeQUERY case 11)
                 if tok.startswith("raw:"):

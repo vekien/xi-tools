@@ -215,3 +215,13 @@ def test_a_new_line_on_a_line_that_is_there_replaces_it(game):
     from xi.dats.xi_dats import group
     assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
     assert (game / EN).read_bytes() == en0
+
+
+def test_decode_exact_gives_text_that_encodes_back_to_the_same_bytes():
+    from xi.dialog import xi_dialog as XD
+    raw = bytes.fromhex("41 87b2 0c05 5b 61 2f 62 5d 87b3 21 7f31 0a03 07 0b 4e 7f9203 5b 2f 73 5d 0105 0203 0405 06"
+                        .replace(" ", ""))
+    text = XD.decode_exact(raw)
+    assert text.startswith("A{“}{index:5}[a/b]{”}!\p{3}\n{options}N{plural:3}[/s]{raw:")
+    assert XD.encode_event_string(text) == raw
+    assert XD.encode_event_string("{“}x{”}") == b"\x87\xb2x\x87\xb3"          # the game's own quotes
