@@ -44,7 +44,7 @@ line, see the line and type its new text (`old=>new` changes part of it, `new` a
 | Key | What |
 |---|---|
 | `id` | The line's index in the zone's table — `xi event dialogue search <zone> "words"` finds it. |
-| `en` / `jp` | The new text, `{"replace": {old: new}}`, `{"hex": "…"}` for the displayed part's exact bytes (the variants after it kept), or `{"entry_hex": "…"}` for the whole entry exactly — its closing `00` and anything after it included. |
+| `en` / `jp` | The new text, `{"replace": {old: new}}`, `{"hex": "…"}` for the displayed part's exact bytes (the variants after it kept), or `{"entry_hex": "…"}` for the entry's bytes exactly, as the table holds them — nothing is checked or added, so a retail entry ending `00 07` writes as it is. |
 | `new` | Add the line past the end of both tables (lines in between stay empty). Needs `en` (text, `hex` or `entry_hex`); `jp` defaults to it. |
 | `note` | Why. |
 
@@ -79,9 +79,11 @@ names change.
 ## Builds, rebuilds and undo
 
 Each line written is recorded per target with its bytes before and after (and, for a new
-line, the table's line count before and after). A build first puts back what the previous
-build of the action changed, then applies the lines: a rebuild converges, a line taken out of
-the action goes back, and a `replace` always applies to the original text. `xi dats undo`
+line, the table's line count before and after). A build applies the lines to the tables as
+they are: each line is written over what its id holds (a `new` line on an id that has one
+replaces it), the same lines write nothing new, and a `replace` always applies to the original
+text. A line taken out of the action stays until a build with `--reset`, which resets the
+tables from `.base` first ([../dats/README.md](../dats/README.md#applying---reset-and---list)). `xi dats undo`
 restores each line and trims the lines the action added — only while the table still holds
 what the build wrote; anything else is left and named.
 

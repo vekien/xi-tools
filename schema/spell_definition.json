@@ -8,7 +8,7 @@
  "required": [
   "schema",
   "name",
-  "like",
+  "copy_from",
   "text"
  ],
  "properties": {
@@ -24,7 +24,7 @@
   "description": {
    "type": "string"
   },
-  "like": {
+  "copy_from": {
    "type": "integer",
    "minimum": 0,
    "description": "The retail spell id whose record is cloned (icon, targets, flags come from it)."
@@ -178,7 +178,7 @@
   {
    "schema": "xi.spell.v1",
    "name": "testspell",
-   "like": 144,
+   "copy_from": 144,
    "id": "auto",
    "text": {
     "name_en": "Testspell",

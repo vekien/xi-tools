@@ -145,7 +145,6 @@ def test_add_auto_and_rename_then_rebuild_and_undo(game):
 
 @pytest.mark.parametrize("npc, says", [
     ({"id": 0x3A0, "name": "Nobody"}, "has no NPC 0x3a0; mark it \"new\""),
-    ({"id": 2, "new": True, "name": "Clash", "server": {"model": 1}}, "already has NPC 0x2 ('Pherimociel')"),
 ])
 def test_build_errors_name_the_npc(game, npc, says):
     prepare({"zone": ZONE, "npcs": [npc]})
@@ -168,3 +167,28 @@ def test_prepare_list_merge_and_pivot(game, tmp_path: Path, monkeypatch):
     assert build("jeuno", "--pivot").exit_code == 0
     assert (game / NAMES).read_bytes() == before
     assert ("Pheri", sid(2)) in names(pivot) and ("Vekien", sid(0x382)) in names(pivot)
+
+
+def test_on_top_an_npc_it_added_is_renamed_and_undo_takes_it_out(game):
+    before = (game / NAMES).read_bytes()
+    prepare({"zone": ZONE, "npcs": [{"id": "auto", "new": True, "name": "Vekien", "server": {"model": 1}}]})
+    assert build().exit_code == 0
+    prepare({"zone": ZONE, "npcs": [{"id": 0x382, "new": True, "name": "Vekien Two", "server": {"model": 1}}]},
+            "jeuno", "--replace")
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert ("Vekien Two", sid(0x382)) in names(game) and ("Vekien", sid(0x382)) not in names(game)
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / NAMES).read_bytes() == before
+
+
+def test_a_new_npc_on_an_id_that_is_taken_replaces_its_name(game):
+    before = (game / NAMES).read_bytes()
+    prepare({"zone": ZONE, "npcs": [{"id": 2, "new": True, "name": "Clash", "server": {"model": 1}}]})
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert ("Clash", sid(2)) in names(game) and ("Pherimociel", sid(2)) not in names(game)
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / NAMES).read_bytes() == before

@@ -143,6 +143,11 @@ Rules that follow:
     `anim import` unless `--no-base`.
   - Layer on the current file (re-running stacks): `zone import --add-collision` alone,
     `event dialogue edit`, `fx set/copy/delete`, `object import/clone`.
+  - `xi dats build`'s table edits (`database`, `zone_dialog`, `zone_npcs`, `zone_events`)
+    apply on top, replacing what they name (an edit already there is a no-op); `--reset`
+    resets the tables the build edits from `.base` first; `--list` builds the projects of
+    `projects/build_list.json` in order (`--list --reset`: every table they edit reset once,
+    first). `xi database grow` grows a table and its `.base` once.
 - Prefer `--dry-run` where offered (`ftable expand`, `dats build`, `zone import-json`,
   `zone reset`, `mount import`, dialogue edits) before writing.
 - `xi dats build` writes into `FFXI_DIR` and then syncs the custom region of the pivot
@@ -340,6 +345,7 @@ xi ftable expand                                  # once per install
 xi dats new                                       # wizard: place prebuilt DATs at new ids
 xi dats prepare exports/mesh/rom/351/102/102_schema.json --project my_mob --replace
 xi dats build my_mob [--dry-run]                  # writes DATs + patches tables, syncs pivot
+xi dats build --list --reset                      # every project of projects/build_list.json, clean
 xi dats changelog --project my_mob / xi dats package / xi dats release / xi dats undo
 ```
 

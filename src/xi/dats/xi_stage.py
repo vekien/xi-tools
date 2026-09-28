@@ -1,11 +1,9 @@
 """The DATs one ``xi dats build`` reads and writes, as its later steps must see them.
 
-Before it applies them again, a build takes back what the project's zone and database
-actions changed last time, newest first. Two actions that grow one zone's dialog table,
-or put events on one NPC, then rebuild cleanly: each one gets back the table it
-changed. A real build writes each step straight to disk. A dry run can't write, so
-its steps are held here. Reads in the same run see them, which means the plan shows
-what the build would do.
+A real build writes each step straight to disk (a ``--reset`` first puts the tables
+back to their ``.base``). A dry run can't write, so its steps, the reset included, are
+held here. Reads in the same run see them, which means the plan shows what the build
+would do.
 
 Also a build's claims: ids an action took in this run that the next one must not take.
 In a dry run those aren't in any table yet.
@@ -26,8 +24,13 @@ def _key(path) -> str:
 
 @contextmanager
 def session(dry_run: bool):
-    """One build: writes held when ``dry_run``; claims kept either way."""
+    """One build: writes held when ``dry_run``; claims kept either way. Inside another
+    session (each project of ``xi dats build --list``) it is that one's: the later projects
+    see what the earlier ones would write, and don't take the ids they took."""
     global _held, _claims
+    if _claims is not None:
+        yield
+        return
     was = (_held, _claims)
     _held = {} if dry_run else None
     _claims = {}

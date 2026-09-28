@@ -5,7 +5,7 @@
   "description": "A new command menu record for ROM/118/114.DAT (comm: job abilities, pet commands, weapon skills…) and its names/help: a retail command to clone plus the fields and texts that differ. Read by `xi dats prepare --type command` / the `command` action; see docs/menu/records.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "name", "like", "text"],
+  "required": ["schema", "name", "copy_from", "text"],
   "properties": {
     "schema": {"type": "string", "const": "xi.command.v1"},
     "name": {
@@ -14,7 +14,7 @@
       "description": "Slug: the action id (command.<name>), the resource file name and the server row name."
     },
     "description": {"type": "string"},
-    "like": {
+    "copy_from": {
       "type": "integer",
       "minimum": 0,
       "description": "The retail command id whose record is cloned (type, icon, targets, TP come from it)."
@@ -60,7 +60,7 @@
     {
       "schema": "xi.command.v1",
       "name": "war_cry",
-      "like": 547,
+      "copy_from": 547,
       "id": "auto",
       "text": {
         "name_en": "War Cry",

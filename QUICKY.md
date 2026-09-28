@@ -47,6 +47,9 @@ WebSocket at `ws://HOST:PORT/ws`. Used by xi-zone-editor; exits after idle-secs 
 xi dats json
 xi dats prepare
 xi dats build                    # --pivot: into FFXI_PIVOT_DIR instead of FFXI_DIR
+                                 # applies on top; --reset: the tables it edits reset from .base first
+xi dats build --list [--reset]   # the projects of projects/build_list.json (NAME --list: projects/NAME.json)
+                                 #   in order; --reset resets every table they edit once, first
                                  # abilities: --apply-db [--db-row ID] --clone-from X --server-id ID
                                  #   --menu-record [--menu-name T] --lua-stub (docs/dats/README.md)
 xi dats new                      # --pivot: the same for the wizard
@@ -147,8 +150,12 @@ xi dats prepare edits.json --project P [--merge]   # a list of edits (schema/dat
 xi dats build P [--dry-run] [--pivot]              # patches the records (EN + JP, legacy or retail DATs), writes P.sql (proposed, never run)
 xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
 xi dats undo P                                     # every record back to what it held; its SQL section removed
+xi database grow ROM/181/72.DAT 4096               # a table grown once (d_msg or item), its .base too
+                                                   #   --fill-from ROW | --fill-hex HEX, --pivot, --dry-run
 # spellData / abilityData: {"table": "spellData", "id": 1, "set": {"mp": 5, "levels": {"RDM": 1}}}
-# exact bytes: "hex" (a whole record); a d_msg table by path: {"table": "ROM/181/72.DAT", "id": 5, "strings": {"sub0": "…"}}
+# a new record: "copy_from": <id> (was "like"); exact bytes: "hex" (a whole record)
+# by path: {"table": "ROM/181/72.DAT", "id": 5, "strings": {"sub0": "…"}}
+#          {"table": "ROM/288/80.DAT", "layout": "armor", "id": 1030, "set": {"level": 75}}
 ```
 
 ## Zone dialog lines (docs/dialog/zone_dialog.md)
@@ -441,13 +448,13 @@ xi ui items weapon import
 xi ui items weapon inject
 xi ui items weapon new
 
-xi ui items custom
-xi ui items custom search
-xi ui items custom export
-xi ui items custom json
-xi ui items custom import
-xi ui items custom inject
-xi ui items custom new
+xi ui items monstrosity
+xi ui items monstrosity search
+xi ui items monstrosity export
+xi ui items monstrosity json
+xi ui items monstrosity import
+xi ui items monstrosity inject
+xi ui items monstrosity new
 
 xi ui items mount
 xi ui items mount search

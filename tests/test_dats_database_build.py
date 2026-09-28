@@ -197,21 +197,25 @@ def test_dry_run_writes_nothing(game):
     assert "result" not in action()
 
 
-def test_an_edit_taken_out_goes_back_on_the_next_build(game):
+def test_an_edit_taken_out_goes_back_on_a_reset_build(game):
     prepare([{"table": "armor", "id": 10241, "set": {"level": 50}},
              {"table": "armor", "id": 10242, "set": {"level": 75, "jobs": ["WAR", "PLD"]}}])
     pristine = record(game, ARMOR_EN, 2)
     assert build().exit_code == 0
-    assert read_field(record(game, ARMOR_EN, 2), "armor", "legacy", "jobs") == (1 << 1) | (1 << 7)
+    edited = record(game, ARMOR_EN, 2)
+    assert read_field(edited, "armor", "legacy", "jobs") == (1 << 1) | (1 << 7)
     prepare([{"table": "armor", "id": 10241, "set": {"level": 50}}], "tweaks", "--replace")
-    assert build().exit_code == 0
+    assert build().exit_code == 0                                     # applied on top: it stays
+    assert record(game, ARMOR_EN, 2) == edited
+    assert {e["id"] for e in action()["result"]["roots"]["dir"]} == {10241, 10242}
+    assert build("tweaks", "--reset").exit_code == 0                 # taken back, then built
     assert record(game, ARMOR_EN, 2) == pristine
     assert {e["id"] for e in action()["result"]["roots"]["dir"]} == {10241}
 
 
 def test_like_creates_a_record_and_undo_puts_the_slot_back(game):
     en0, jp0 = (game / "ROM/118/109.DAT").read_bytes(), (game / "ROM/0/7.DAT").read_bytes()
-    prepare([{"table": "armor", "id": 10245, "like": 10242,
+    prepare([{"table": "armor", "id": 10245, "copy_from": 10242,
               "set": {"level": 75, "flags": ["RARE", "EX", "CANEQUIP"]},
               "strings": {"en": {"name": "Abyssal Earring", "logName": "abyssal earring",
                                  "logPlural": "abyssal earrings", "description": "Accuracy+5"}},
@@ -293,8 +297,7 @@ def test_pivot_build_leaves_the_install_alone(game, tmp_path: Path, monkeypatch)
 
 
 @pytest.mark.parametrize("edit, says", [
-    ({"table": "armor", "id": 10245, "set": {"level": 5}}, "is an empty slot; give like"),
-    ({"table": "armor", "id": 10241, "like": 10242}, "already holds 'Decennial Coat +1'"),
+    ({"table": "armor", "id": 10245, "set": {"level": 5}}, "is an empty slot; give copy_from"),
     ({"table": "armor", "id": 16000, "set": {"level": 5}}, "holds 8 records; armor 16000 is past its end"),
     ({"table": "armor", "id": 30000, "set": {"level": 5}}, "armor has no id 30000"),
     ({"table": "armor", "id": 10241, "server": {"item_mods": {"HPP": 3}}}, "'HPP' isn't an xi.mod name"),
@@ -317,6 +320,10 @@ def test_prepare_merges_edits_and_keeps_the_result(game):
     assert [(e["id"], e["set"]["level"]) for e in a["edits"]] == [(10241, 55), (10242, 60)]
     assert a["result"]["roots"]["dir"]
     assert build("tw").exit_code == 0
+    lvl = [e["changed"]["level"] for e in action("tw")["result"]["roots"]["dir"]
+           if e["id"] == 10241 and e["lang"] == "en"]
+    assert lvl == [{"from": 1, "to": 50}, {"from": 50, "to": 55}]         # on top: both, undone in turn
+    assert build("tw", "--reset").exit_code == 0
     lvl = next(e for e in action("tw")["result"]["roots"]["dir"] if e["id"] == 10241 and e["lang"] == "en")
     assert lvl["changed"]["level"] == {"from": 1, "to": 55}                # from the original, not 50
 
@@ -336,8 +343,8 @@ def test_a_text_row_past_the_end_needs_like_and_grows_both_languages(game):
     en0, jp0 = (game / TITLES_EN).read_bytes(), (game / TITLES_JP).read_bytes()
     prepare([{"table": "titles", "id": 6, "strings": {"en": {"name": "Abyssea Delver"}}}])
     r = build()
-    assert r.exit_code != 0 and "give like: <row> to add it" in r.output
-    prepare([{"table": "titles", "id": 6, "like": 1, "strings": {"en": {"name": "Abyssea Delver"}}}],
+    assert r.exit_code != 0 and "give copy_from: <row> to add it" in r.output
+    prepare([{"table": "titles", "id": 6, "copy_from": 1, "strings": {"en": {"name": "Abyssea Delver"}}}],
             "tweaks", "--replace")
     r = build()
     assert r.exit_code == 0, r.output
@@ -351,7 +358,118 @@ def test_a_text_row_past_the_end_needs_like_and_grows_both_languages(game):
     assert (game / TITLES_EN).read_bytes() == en0 and (game / TITLES_JP).read_bytes() == jp0
 
 
-def test_like_on_an_existing_text_row_is_refused(game):
-    prepare([{"table": "titles", "id": 1, "like": 0, "strings": {"en": {"name": "x"}}}])
+def test_copy_from_onto_an_existing_text_row_replaces_it(game):
+    titles0 = (game / Path(*TITLES_EN.split("/"))).read_bytes()
+    prepare([{"table": "titles", "id": 1, "copy_from": 0, "strings": {"en": {"name": "x"}}}])
     r = build()
-    assert r.exit_code != 0 and "already has row 1; like only adds a new one" in r.output
+    assert r.exit_code == 0, r.output
+    t = D.parse((game / Path(*TITLES_EN.split("/"))).read_bytes())
+    assert t.num == 3 and DB.sub_value(DB._block_subs(t.blocks[1])[0]) == "x"
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / Path(*TITLES_EN.split("/"))).read_bytes() == titles0
+
+
+def _files(root: Path) -> dict:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*.DAT")}
+
+
+def test_a_second_build_on_top_changes_nothing(game):
+    prepare([{"table": "armor", "id": 10245, "copy_from": 10242, "strings": {"en": {"name": "Abyssal Earring"}}},
+             {"table": "armor", "id": 10241, "set": {"level": 50},
+              "strings": {"en": {"description": {"replace": {"DEF:2": "DEF:3"}}}}},
+             {"table": "titles", "id": 6, "copy_from": 1, "strings": {"en": {"name": "Abyssea Delver"}}},
+             {"table": "keyitems", "id": 9, "copy_from": 1, "strings": {"en": {"name": "A new report"}}}])
+    assert build().exit_code == 0
+    files, recs = _files(game), action()["result"]["roots"]["dir"]
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert _files(game) == files                                     # nothing written twice
+    assert action()["result"]["roots"]["dir"] == recs                # nor recorded twice
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
+    t = D.parse((game / Path(*TITLES_EN.split("/"))).read_bytes())
+    assert t.num == 3 and DB.item_name(record(game, ARMOR_EN, 5), "armor", "legacy") == "."
+
+
+def test_on_top_a_record_it_created_is_rewritten_and_reset_takes_both_back(game):
+    en0 = (game / ARMOR_EN).read_bytes()
+    titles0 = (game / Path(*TITLES_EN.split("/"))).read_bytes()
+    edits = lambda name: [{"table": "armor", "id": 10245, "copy_from": 10242, "strings": {"en": {"name": name}}},
+                          {"table": "titles", "id": 6, "copy_from": 1, "strings": {"en": {"name": name}}}]
+    prepare(edits("First"))
+    assert build().exit_code == 0
+    prepare(edits("Second"), "tweaks", "--replace")
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert DB.item_name(record(game, ARMOR_EN, 5), "armor", "legacy") == "Second"
+    t = D.parse((game / Path(*TITLES_EN.split("/"))).read_bytes())
+    assert t.num == 7 and DB.sub_value(DB._block_subs(t.blocks[6])[0]) == "Second"
+    assert len([e for e in action()["result"]["roots"]["dir"] if e["table"] == "armor" and e["lang"] == "en"]) == 2
+    assert build("tweaks", "--reset").exit_code == 0
+    assert DB.item_name(record(game, ARMOR_EN, 5), "armor", "legacy") == "Second"
+    assert len([e for e in action()["result"]["roots"]["dir"] if e["table"] == "armor" and e["lang"] == "en"]) == 1
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / ARMOR_EN).read_bytes() == en0 and (game / Path(*TITLES_EN.split("/"))).read_bytes() == titles0
+
+
+def test_a_record_already_in_the_slot_is_replaced_and_undo_puts_it_back(game):
+    prepare([{"table": "armor", "id": 10245, "copy_from": 10242, "strings": {"en": {"name": "Mine"}}}], "one")
+    assert build("one").exit_code == 0
+    prepare([{"table": "armor", "id": 10245, "copy_from": 10240, "strings": {"en": {"name": "Theirs"}}}], "two")
+    r = build("two")
+    assert r.exit_code == 0, r.output
+    assert DB.item_name(record(game, ARMOR_EN, 5), "armor", "legacy") == "Theirs"
+    prepare([{"table": "armor", "id": 10241, "copy_from": 10242}], "three")          # a retail record too
+    assert build("three").exit_code == 0
+    assert DB.item_name(record(game, ARMOR_EN, 1), "armor", "legacy") == "Moonshade Earring"
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "two", "--yes"], catch_exceptions=False).exit_code == 0
+    assert DB.item_name(record(game, ARMOR_EN, 5), "armor", "legacy") == "Mine"
+
+
+MONST_EN = "ROM/288/80.DAT"
+
+
+def test_an_item_table_by_path_rows_by_index_in_the_layout_given(game):
+    from xi.database import xi_core as C
+    # A table grown past the ids a named table covers (a server's own item table): rows by index.
+    armor = {29696 + 1030: (b"Server Coat", b"DEF:9", {"level": 10})}
+    write(game, MONST_EN, item_dat("armor", "legacy", 29696, armor, 1032, "en"))
+    assert C.validate_action({"id": "d", "type": "database", "edits": [
+        {"table": MONST_EN, "id": 1031, "copy_from": 1030, "layout": "armour"},
+        {"table": MONST_EN, "id": 1, "layout": "armor", "server": {"item_mods": {"DEF": 1}}},
+        {"table": "armor", "id": 10241, "layout": "armor", "set": {"level": 2}}]}) == [
+        "edits[0].layout must be an item layout (general, usable, puppet, armor, weapon, maze, instinct, roe)",
+        "edits[1].server: a table by path has no server side",
+        "edits[1]: the edit changes nothing (give set, strings, icon, copy_from or hex)",
+        "edits[2].layout: only an item table given by its ROM path takes layout"]
+    before = (game / MONST_EN).read_bytes()
+    prepare([{"table": MONST_EN, "layout": "armor", "id": 1030, "set": {"level": 20}},
+             {"table": MONST_EN, "layout": "armor", "id": 1031, "copy_from": 1030,
+              "strings": {"sub0": "Server Coat +1", "sub4": "DEF:10"}}])
+    r = build()
+    assert r.exit_code == 0, r.output
+    rec = record(game, MONST_EN, 1031)
+    assert struct.unpack_from("<I", rec)[0] == 29696 + 1031                  # the donor's id, one row on
+    assert DB.item_name(rec, "armor", "legacy") == "Server Coat +1"
+    assert read_field(record(game, MONST_EN, 1030), "armor", "legacy", "level") == 20
+    assert read_field(rec, "armor", "legacy", "level") == 20
+    assert not Path("projects/tweaks.sql").exists()                          # no server side
+    assert build().exit_code == 0 and (game / MONST_EN).read_bytes() != before
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / MONST_EN).read_bytes() == before
+
+
+def test_a_table_by_path_says_what_it_is(game):
+    prepare([{"table": KI_EN, "layout": "general", "id": 1, "set": {"stack": 12}}])
+    r = build()
+    assert r.exit_code != 0 and "is a d_msg table, not an item table (drop layout)" in r.output
+    prepare([{"table": ARMOR_EN, "id": 1, "strings": {"sub0": "x"}}], "tweaks", "--replace")
+    r = build()
+    assert r.exit_code != 0 and "an item table given by path needs its layout" in r.output
+    prepare([{"table": ARMOR_EN, "layout": "armor", "id": 99, "set": {"level": 2}}], "tweaks", "--replace")
+    r = build()
+    assert r.exit_code != 0 and "holds 8 records; row 99 is past its end" in r.output

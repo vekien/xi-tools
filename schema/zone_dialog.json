@@ -152,7 +152,7 @@
       }
     },
     "text": {
-      "description": "The line as authored for xi event dialogue edit: \\n a new line in the box, \\v the prompt that waits for a key, {player} {npc} {auto:N} {N} {item:N} {keyitem:N} … and {raw:hex} for control bytes. Or {\"replace\": {old: new}} to change part of the line (control codes the text form can't show are kept), or {\"hex\": \"…\"} for the displayed part's exact bytes (what follows its 00 is kept), or {\"entry_hex\": \"…\"} for the whole entry exactly, its closing 00 and anything after it included. A new line takes text, hex or entry_hex.",
+      "description": "The line as authored for xi event dialogue edit: \\n a new line in the box, \\v the prompt that waits for a key, {player} {npc} {auto:N} {N} {item:N} {keyitem:N} … and {raw:hex} for control bytes. Or {\"replace\": {old: new}} to change part of the line (control codes the text form can't show are kept), or {\"hex\": \"…\"} for the displayed part's exact bytes (what follows its 00 is kept), or {\"entry_hex\": \"…\"} for the entry's bytes exactly, as the table holds them (nothing is checked or added). A new line takes text, hex or entry_hex.",
       "oneOf": [
         {
           "type": "string"

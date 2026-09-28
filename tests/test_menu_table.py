@@ -186,15 +186,20 @@ def test_client_warning_names_the_plugin():
 
 def test_load_definition_rejects_bad_file(tmp_path: Path):
     p = tmp_path / "x.spell.json"
-    p.write_text(json.dumps(dict(SPELL_EXAMPLE, like="four")), encoding="utf-8")
+    p.write_text(json.dumps(dict(SPELL_EXAMPLE, copy_from="four")), encoding="utf-8")
     with pytest.raises(MT.MenuError) as e:
         MT.load_definition(p)
-    assert "spell_definition.json" in str(e.value) and "like" in str(e.value)
+    assert "spell_definition.json" in str(e.value) and "copy_from" in str(e.value)
+
+
+def test_a_definition_with_like_says_it_is_copy_from():
+    d = {k: v for k, v in SPELL_EXAMPLE.items() if k != "copy_from"}
+    assert MT.validate_definition(dict(d, like=144)) == ["like is now copy_from"]
 
 
 def test_build_record_clones_the_donor():
     m = MT.parse(menu_dat())
-    d = dict(SPELL_EXAMPLE, like=3)
+    d = dict(SPELL_EXAMPLE, copy_from=3)
     rec = MT.build_record("spell", m, d, 4095, None)
     f = MT.read_fields("spell", rec)
     assert f["id"] == 4095 and f["mp"] == 12 and f["cast"] == 8 and f["recast"] == 40
@@ -203,13 +208,13 @@ def test_build_record_clones_the_donor():
     assert f["icon"] == 8 and f["skill"] == 36   # kept from the donor
     assert MT.read_fields("spell", MT.build_record("spell", m, d, 4095, 500))["menu_index"] == 500
     with pytest.raises(MT.MenuError):
-        MT.build_record("spell", m, dict(d, like=7000), 4095, None)
-    c = MT.build_record("command", m, dict(COMMAND_EXAMPLE, like=2), 4000, None)
+        MT.build_record("spell", m, dict(d, copy_from=7000), 4095, None)
+    c = MT.build_record("command", m, dict(COMMAND_EXAMPLE, copy_from=2), 4000, None)
     assert MT.read_fields("command", c)["level"] == 30 and MT.read_fields("command", c)["id"] == 4000
 
 
 def test_server_snippet_mentions_ids_and_overrides():
-    sql = MT.server_snippet("spell", dict(SPELL_EXAMPLE, like=144), 1024, 144)
+    sql = MT.server_snippet("spell", dict(SPELL_EXAMPLE, copy_from=144), 1024, 144)
     assert "INSERT INTO `spell_list`" in sql and "SELECT 1024, 'testspell'" in sql
     assert "12, 2000, 10000" in sql and "`spellid` = 144" in sql
     sql = MT.server_snippet("command", COMMAND_EXAMPLE, 2816, 547)
@@ -280,12 +285,14 @@ def test_capture_and_restore_put_back_a_replaced_row(tmp_path: Path, monkeypatch
 def test_pivot_root_is_used_only_when_asked(tmp_path: Path, monkeypatch):
     """Reads and writes go to the root they are given. A configured FFXI_PIVOT_DIR
     changes nothing by itself; given as the root, its own copy is read and written,
-    and a table it lacks reads the install's and is copied in (without .base) on write."""
+    and a table it lacks reads the install's and is copied in on write. The pivot keeps what
+    it held as .base (empty for a table it didn't have); the install gets none from this."""
     import xi.xi_config as cfg
     root = install(tmp_path / "game")
     pivot = tmp_path / "pivot"
     (pivot / "ROM" / "118").mkdir(parents=True)
     (pivot / "ROM" / "118" / "114.DAT").write_bytes(menu_dat(9, 6))     # one more spell than the install
+    pivot_menu = (pivot / "ROM" / "118" / "114.DAT").read_bytes()
     monkeypatch.setattr(cfg, "FFXI_DIR", str(root))
     monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot), raising=False)
     assert MT.menu_path(root) == root / "ROM" / "118" / "114.DAT"
@@ -302,7 +309,9 @@ def test_pivot_root_is_used_only_when_asked(tmp_path: Path, monkeypatch):
     assert written == pivot / "ROM" / "181" / "73.DAT"
     assert MT.read_names("spell", pivot)[4095] == "Testspell"
     assert len(D.parse((root / "ROM" / "181" / "73.DAT").read_bytes()).blocks) == 8
-    assert not list(pivot.rglob("*.base")) and not list(root.rglob("*.base"))
+    assert (pivot / "ROM" / "118" / "114.DAT.base").read_bytes() == pivot_menu
+    assert (pivot / "ROM" / "181" / "73.DAT.base").read_bytes() == b""
+    assert not list(root.rglob("*.base"))
     # undo in a root leaves tables it has no copy of alone instead of copying them in
     MT.restore_record("spell", pivot, 4095)
     assert MT.is_empty(MT.load_menu(pivot).records("spell")[4095])
@@ -371,7 +380,7 @@ def test_row_state(tmp_path: Path, monkeypatch):
 
 def test_place_record_captures_rewrites_and_moves(tmp_path: Path, monkeypatch):
     root = _install_with(tmp_path, monkeypatch, {5: _ph_spell(5), 6: _ph_spell(6)}, {5: ".", 6: "."})
-    d = {"schema": "xi.spell.v1", "name": "love", "like": 3, "text": {"name_en": "Love"}}
+    d = {"schema": "xi.spell.v1", "name": "love", "copy_from": 3, "text": {"name_en": "Love"}}
     first = MT.place_record("spell", root, 6, d, menu_index=50)
     assert first["replaced"]["record"] == _ph_spell(6).hex() and first["moved_from"] is None
     assert MT.row_state("spell", root, 6, first["written"]) == ("own", "Love")

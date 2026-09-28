@@ -93,7 +93,11 @@ def menu_fields(table: str) -> list[str]:
 
 def set_fields(table: str) -> list[str]:
     """The header fields ``set`` may name for an item table (the viewer's names)."""
-    layout = ITEM_LAYOUT[table]
+    return layout_fields(ITEM_LAYOUT[table])
+
+
+def layout_fields(layout: str) -> list[str]:
+    """The header fields ``set`` may name for records of an item layout (the viewer's names)."""
     return [_FIELD_KEYS.get(n, n) for n in FIELDS[layout][FORMAT_LEGACY] if n != "id"]
 
 
@@ -136,7 +140,7 @@ def skill_id(skill) -> int:
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _MOD_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _ACTION_KEYS = {"id", "type", "enabled", "description", "depends_on", "edits", "server", "result", "outputs"}
-_EDIT_KEYS = {"table", "id", "like", "note", "set", "strings", "icon", "server", "hex"}
+_EDIT_KEYS = {"table", "id", "copy_from", "note", "set", "strings", "icon", "server", "hex", "layout"}
 _SERVER_KEYS = {"emit", "mirror", "sql"}
 
 # Server columns (catseyexi sql/item_*.sql; item_info is CatsEyeXI's, modules sql/custom).
@@ -179,15 +183,16 @@ def _names(value, allowed: list[str], what: str, at: str, errs: list, allow_all:
         errs.append(f"{at}: a {what} is listed twice")
 
 
-def _check_set(table: str, values, at: str, errs: list) -> None:
+def _check_set(table: str, values, at: str, errs: list, layout: str | None = None) -> None:
     if not isinstance(values, dict):
         errs.append(f"{at} must be an object")
         return
-    fields = set_fields(table)
+    layout = layout or ITEM_LAYOUT[table]
+    fields = layout_fields(layout)
     for name, v in values.items():
         where = f"{at}.{name}"
         if name not in fields:
-            errs.append(f"{where}: table {table!r} ({ITEM_LAYOUT[table]} layout) has no field {name!r}"
+            errs.append(f"{where}: table {table!r} ({layout} layout) has no field {name!r}"
                         f" — it has {', '.join(fields)}")
         elif name == "flags":
             _names(v, FLAGS, "flag", where, errs)
@@ -368,7 +373,9 @@ def _check_edit(edit, at: str, errs: list) -> tuple | None:
     if not isinstance(edit, dict):
         errs.append(f"{at} must be an object")
         return None
-    _unknown(edit, _EDIT_KEYS, at, errs)
+    if "like" in edit:
+        errs.append(f"{at}: like is now copy_from")
+    _unknown({k: v for k, v in edit.items() if k != "like"}, _EDIT_KEYS, at, errs)
     table = edit.get("table")
     if table not in ITEM_LAYOUT and table not in DMSG_SUBS and table not in MENU_KINDS and not is_raw(table):
         errs.append(f"{at}.table: {table!r} is not a table ({', '.join(tables())}) or a d_msg table's "
@@ -376,16 +383,20 @@ def _check_edit(edit, at: str, errs: list) -> tuple | None:
         return None
     if not _is_int(edit.get("id")):
         errs.append(f"{at}.id must be a record id (an integer >= 0)")
-    if "hex" in edit and ({"set", "strings", "icon", "like"} & edit.keys()):
-        errs.append(f"{at}: hex is the whole record; give it alone (no set, strings, icon or like)")
+    if "hex" in edit and ({"set", "strings", "icon", "copy_from"} & edit.keys()):
+        errs.append(f"{at}: hex is the whole record; give it alone (no set, strings, icon or copy_from)")
+    if is_raw(table) and "layout" in edit:
+        return _check_item_path_edit(table, edit, at, errs)
+    if "layout" in edit:
+        errs.append(f"{at}.layout: only an item table given by its ROM path takes layout")
     if table in MENU_KINDS or is_raw(table):
         return _check_plain_edit(table, edit, at, errs)
     item = table in ITEM_LAYOUT
     for key in ("set", "icon", "server"):
         if key in edit and not item:
             errs.append(f"{at}.{key}: only item tables take {key!r} ({table!r} is a text table)")
-    if "like" in edit and not _is_int(edit["like"]):
-        errs.append(f"{at}.like must be " + ("an item id" if item else "a row (or key item) id to copy"))
+    if "copy_from" in edit and not _is_int(edit["copy_from"]):
+        errs.append(f"{at}.copy_from must be " + ("an item id" if item else "a row (or key item) id to copy"))
     if "note" in edit and not isinstance(edit["note"], str):
         errs.append(f"{at}.note must be a string")
     if item and "set" in edit:
@@ -402,51 +413,82 @@ def _check_edit(edit, at: str, errs: list) -> tuple | None:
         else:
             for lang, v in edit["hex"].items():
                 _check_hex(v, None, f"{at}.hex.{lang}", errs)
-    if not ({"like", "set", "strings", "icon", "hex"} & edit.keys() or edit.get("server")):
-        errs.append(f"{at}: the edit changes nothing (give set, strings, icon, like, hex or server)")
+    if not ({"copy_from", "set", "strings", "icon", "hex", "like"} & edit.keys() or edit.get("server")):
+        errs.append(f"{at}: the edit changes nothing (give set, strings, icon, copy_from, hex or server)")
+    return table, edit.get("id")
+
+
+def _check_sub_strings(strings, at: str, errs: list) -> None:
+    """``strings`` of a table given by path: its sub-strings by position, sub0, sub1, …"""
+    if not isinstance(strings, dict) or not strings:
+        errs.append(f"{at} must name the sub-strings to set (sub0, sub1, …)")
+        return
+    for name, v in strings.items():
+        where = f"{at}.{name}"
+        if not _SUB_RE.match(str(name)):
+            errs.append(f"{where}: a table by path names its sub-strings sub0, sub1, …")
+        elif isinstance(v, dict):
+            rep_ = v.get("replace")
+            if set(v) != {"replace"} or not isinstance(rep_, dict) or not rep_:
+                errs.append(f"{where} must be text, a number or {{\"replace\": {{old: new, …}}}}")
+        elif not (isinstance(v, str) or _is_int(v, 0, 0xFFFFFFFF)):
+            errs.append(f"{where} must be text or a number")
+
+
+def _check_item_path_edit(table: str, edit: dict, at: str, errs: list) -> tuple:
+    """An item table given by its ROM path and the layout of its records: one file, a row by
+    its index, the strings by position."""
+    layout = edit.get("layout")
+    if layout not in LAYOUTS:
+        errs.append(f"{at}.layout must be an item layout ({', '.join(LAYOUTS)})")
+        layout = None
+    if "server" in edit:
+        errs.append(f"{at}.server: a table by path has no server side")
+    if "copy_from" in edit and not _is_int(edit["copy_from"]):
+        errs.append(f"{at}.copy_from must be the row to copy")
+    if "note" in edit and not isinstance(edit["note"], str):
+        errs.append(f"{at}.note must be a string")
+    if "set" in edit and layout:
+        _check_set(table, edit["set"], f"{at}.set", errs, layout)
+    if "strings" in edit:
+        _check_sub_strings(edit["strings"], f"{at}.strings", errs)
+    if "icon" in edit:
+        _check_icon(edit["icon"], f"{at}.icon", errs)
+    if "hex" in edit:
+        _check_hex(edit["hex"], None, f"{at}.hex", errs)
+    if not ({"copy_from", "set", "strings", "icon", "hex", "like"} & edit.keys()):
+        errs.append(f"{at}: the edit changes nothing (give set, strings, icon, copy_from or hex)")
     return table, edit.get("id")
 
 
 def _check_plain_edit(table: str, edit: dict, at: str, errs: list) -> tuple:
     """A spell / command record, or a d_msg table by path: one file for every language."""
     menu = table in MENU_KINDS
-    allowed = {"table", "id", "like", "note", "hex", "server"} | ({"set"} if menu else {"strings"})
-    for key in sorted(edit.keys() - allowed - {"table", "id"}):
+    allowed = {"table", "id", "copy_from", "note", "hex", "server"} | ({"set"} if menu else {"strings"})
+    for key in sorted(edit.keys() - allowed - {"table", "id", "layout"}):
         if key in _EDIT_KEYS:
-            errs.append(f"{at}.{key}: {table!r} takes " + ("set, like, hex or server: false" if menu
-                                                             else "strings, like or hex"))
+            errs.append(f"{at}.{key}: {table!r} takes " + ("set, copy_from, hex or server: false" if menu
+                                                             else "strings, copy_from or hex"))
     if "server" in edit and (not menu or edit["server"] is not False):
         errs.append(f"{at}.server: only false (no proposed SQL for this edit)" if menu
                     else f"{at}.server: a table by path has no server side")
-    if "like" in edit and not _is_int(edit["like"]):
-        errs.append(f"{at}.like must be the id of the record to copy")
+    if "copy_from" in edit and not _is_int(edit["copy_from"]):
+        errs.append(f"{at}.copy_from must be the id of the record to copy")
     if "note" in edit and not isinstance(edit["note"], str):
         errs.append(f"{at}.note must be a string")
     if menu and "set" in edit:
         _check_menu_set(table, edit["set"], f"{at}.set", errs)
     if not menu and "strings" in edit:
-        strings = edit["strings"]
-        if not isinstance(strings, dict) or not strings:
-            errs.append(f"{at}.strings must name the sub-strings to set (sub0, sub1, …)")
-        else:
-            for name, v in strings.items():
-                where = f"{at}.strings.{name}"
-                if not _SUB_RE.match(str(name)):
-                    errs.append(f"{where}: a table by path names its sub-strings sub0, sub1, …")
-                elif isinstance(v, dict):
-                    rep_ = v.get("replace")
-                    if set(v) != {"replace"} or not isinstance(rep_, dict) or not rep_:
-                        errs.append(f"{where} must be text, a number or {{\"replace\": {{old: new, …}}}}")
-                elif not (isinstance(v, str) or _is_int(v, 0, 0xFFFFFFFF)):
-                    errs.append(f"{where} must be text or a number")
+        _check_sub_strings(edit["strings"], f"{at}.strings", errs)
     if "hex" in edit:
         if menu:
             from xi.menu.xi_menu_table import KINDS
             _check_hex(edit["hex"], KINDS[MENU_KINDS[table]].stride, f"{at}.hex", errs)
         else:
             _check_hex(edit["hex"], None, f"{at}.hex", errs)
-    if not ({"like", "set", "strings", "hex"} & edit.keys()):
-        errs.append(f"{at}: the edit changes nothing (give " + ("set, like or hex)" if menu else "strings, like or hex)"))
+    if not ({"copy_from", "set", "strings", "hex", "like"} & edit.keys()):
+        errs.append(f"{at}: the edit changes nothing (give " + ("set, copy_from or hex)" if menu
+                                                                  else "strings, copy_from or hex)"))
     return table, edit.get("id")
 
 

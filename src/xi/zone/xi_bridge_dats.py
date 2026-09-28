@@ -7,7 +7,8 @@ zone's ``zone_npcs`` action. The actions live in ``dats.json`` in the active edi
 project's folder, beside its ``cutscene-defs``, and are committed with the workspace so
 a collaborator can build them into their own install.
 
-Each change rewrites the one action and builds it: into the base install (FFXI_DIR),
+Each change rewrites the one action and builds it with ``--reset`` (its last build taken back
+first, so a republished cutscene replaces itself): into the base install (FFXI_DIR),
 then into CatsEyeXI's DATs folder (FFXI_PIVOT_DIR) when asked and configured. The build's
 own output comes back as ``log`` for the editor to show. The editor's live-database
 conveniences (a custom NPC's ``npc_list`` row, the cast's ``namevis``) stay in the bridge;
@@ -80,7 +81,8 @@ def build(path: Path, action_id: str, *, pivot: bool = True, force: bool = False
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             for to_pivot in targets:
                 with click.Context(build_cmd) as ctx:
-                    ctx.invoke(build_cmd, manifest=path, only=(action_id,), force=force, pivot=to_pivot)
+                    ctx.invoke(build_cmd, manifest=path, only=(action_id,), force=force, pivot=to_pivot,
+                               reset=True)
                 done.append("pivot" if to_pivot else "dir")
     except click.ClickException as e:
         return {"ok": False, "error": e.format_message(), "log": out.getvalue(), "targets": done}

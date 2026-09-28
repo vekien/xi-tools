@@ -48,7 +48,7 @@ def ctx(kind="spell", name="LOVE", anim=1100, prev=None, **kw):
 
 def created_db(i=1023, like=(144, "fire"), anim=1100, table="spell_list", **kw):
     d = {"table": table, "id": i, "name": "love", "created": True, "confirmed": False,
-         "like": {"id": like[0], "name": like[1]}, "group": 2, "animation": anim, "before": None,
+         "copy_from": {"id": like[0], "name": like[1]}, "group": 2, "animation": anim, "before": None,
          "op": "insert", "server": SRV, "at": "2026-09-19T00:00:00Z"}
     d.update(kw)
     return d
@@ -105,7 +105,7 @@ def test_our_created_row_updates_with_a_guarded_statement(srv):
     D.execute(srv.conn, p)
     assert p.executed and srv.row("spell_list", 1023)["animation"] == 1200
     rec = p.result_db("T")
-    assert rec["created"] is True and rec["before"] is None and rec["like"] == {"id": 144, "name": "fire"}
+    assert rec["created"] is True and rec["before"] is None and rec["copy_from"] == {"id": 144, "name": "fire"}
     assert rec["op"] == "update" and rec["server"] == SRV and "password" not in str(rec)
 
 
@@ -173,7 +173,7 @@ def test_no_row_clones_the_default_donor(srv):
     # No row named after the mix and no --clone-from: insert one cloned from the kind's
     # default donor (spell -> cure) so it plays and works; a dev fixes its stats later.
     p = D.plan(srv.conn, ctx(name="double_up", anim=300))
-    assert p.op == "insert" and p.like["id"] == 1 and p.like["name"] == "cure"
+    assert p.op == "insert" and p.copy_from["id"] == 1 and p.copy_from["name"] == "cure"
     assert p.step().line("db") == "db: insert spell_list #1023 'double_up' like #1 'cure' animation 300 (xidb@127.0.0.1:3306)"
 
 
@@ -205,7 +205,7 @@ def test_insert_clones_the_probed_columns(srv):
     assert row["name"] == "love" and row["group"] == 2 and row["animation"] == 1100 and row["content_tag"] is None
     rec = p.result_db("T")
     assert rec == {"table": "spell_list", "id": 1023, "name": "love", "created": True, "confirmed": False,
-                   "like": {"id": 144, "name": "fire"}, "group": 2, "animation": 1100, "before": None,
+                   "copy_from": {"id": 144, "name": "fire"}, "group": 2, "animation": 1100, "before": None,
                    "op": "insert", "server": SRV, "at": "T"}
 
 
@@ -291,12 +291,12 @@ def test_clone_from_differs_from_the_created_rows_donor(srv):
     assert ("#1023 was cloned from #144 'fire'; Clone from 'cure' is ignored (undo, then publish again, "
             "to clone it from 'cure')") in p.warnings
     D.execute(srv.conn, p)
-    assert p.result_db()["like"] == {"id": 144, "name": "fire"}
+    assert p.result_db()["copy_from"] == {"id": 144, "name": "fire"}
 
 
 def test_a_created_row_that_is_gone_is_reinserted_from_its_donor(srv):
     p = D.plan(srv.conn, ctx(prev={"db": created_db()}))            # no --clone-from
-    assert p.op == "insert" and p.id == 1023 and p.like["id"] == 144
+    assert p.op == "insert" and p.id == 1023 and p.copy_from["id"] == 144
     assert ("#1023 'love', which this mix created, was missing (a dbtool re-import?); re-inserted it from "
             "#144 'fire' as before") in p.warnings
     D.execute(srv.conn, p)

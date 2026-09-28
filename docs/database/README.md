@@ -56,11 +56,12 @@ Three ways in:
 
 | Key | What |
 |---|---|
-| `table` | The viewer's table key: `armor`, `weapons`, `general`, `usable`, `puppet`, `maze`, `monst1`, `items7`, `roeObj`, `items6`, `gil`; `keyitems`, `titles`, `q_*` / `m_*`, `spells`, `spellHelp`, `abilities`, `abilityHelp`, …; `spellData`, `abilityData` (below). Or a d_msg table's ROM path (below). |
+| `table` | The viewer's table key: `armor`, `weapons`, `general`, `usable`, `puppet`, `maze`, `monst1`, `items7`, `roeObj`, `items6`, `gil`; `keyitems`, `titles`, `q_*` / `m_*`, `spells`, `spellHelp`, `abilities`, `abilityHelp`, …; `spellData`, `abilityData` (below). Or any table's ROM path: a d_msg table, or an item table with `layout` ([below](#tables-by-path)). |
 | `id` | Item tables: the item id — it picks the DAT (armor 10240–16383 → `ROM/118/109`, 23040–28671 → `ROM/286/73`). Key items and quest / mission logs: the id stored in the row. Other text tables, and spell / ability data: the row index. |
 | `set` | Header fields by the viewer's names: `level`, `itemLevel`, `superiorLevel`, `jobs`, `races`, `slots`, `flags`, `stack`, `type`, `targets`, `resourceId`, `shieldSize`, `maxCharges`, `castTime`, `useDelay`, `reuseDelay`; weapons `damage`, `delay`, `dps`, `skill`, `jugSize`, `baseItemId`. Written to both languages' records. |
 | `strings` | `en` / `jp` sub-strings: items `name`, `article`, `logName`, `logPlural`, `description` (JP: `name`, `description`); text tables their own (`name`, `plural`, `description`, …; the help tables have one, `help`; the Japanese key items keep only `name` and `description`, the Japanese status names only `name`). A value is the text, or `{"replace": {old: new}}` on the record's original text. |
-| `like` | Create the record: copy record `like` of the same table into the empty slot `id`, then apply the edit. The Japanese record takes the English name/description unless `strings.jp` says otherwise. |
+| `copy_from` | Create the record as a copy of another: copy record `copy_from` of the same table into slot `id` (replacing what it holds), then apply the edit. The Japanese record takes the English name/description unless `strings.jp` says otherwise. (It was called `like`; an edit that still says `like` is refused, naming the new key.) |
+| `layout` | Only for an item table given by its ROM path: the layout of its records ([below](#tables-by-path)). |
 | `icon` | `{"from": <item id>}` — copy another item's icon. |
 | `hex` | The whole record, exactly (below). |
 | `server` | The item's server rows (see below), or `false` to leave the server out. |
@@ -97,7 +98,7 @@ may be `{"gear": "<gear action id>"}` for the model a gear action placed), `item
   `stack` (`item_basic`), `level`, `itemLevel` → `ilevel`, `superiorLevel` → `su_level`,
   `jobs`, `slots` → `slot`, `shieldSize` (`item_equipment`), `damage` → `dmg`, `delay`,
   `skill` (`item_weapon`). A column the edit names itself wins.
-- A `like` edit copies the donor's rows (`INSERT … SELECT`) for its kind of item, then applies
+- A `copy_from` edit copies the donor's rows (`INSERT … SELECT`) for its kind of item, then applies
   the changes; with an English name it also sets `name` / `sortname` (`abyssal_earring`).
 
 The SQL goes to `<project>.sql` beside the project file (or `server.sql`, relative to the file
@@ -113,21 +114,24 @@ replaces its own part. It is a proposal: review it and copy it into the server's
   pivot folder with `--pivot` (its own copy, else the install's, copied in on the first
   write) — detects its format (legacy 0xC00 / retail 0x1400) and patches that. A base-install
   build warns when the pivot folder has its own copy: that is the one the client loads.
-  CatsEyeXI's item DATs live in its pivot folder, so its builds use `--pivot`.
+  A server that ships its item DATs in the pivot folder builds with `--pivot`.
 - **What's recorded.** `result.roots.<target>` lists every record written — table, id,
   language, DAT, format, block — with each changed field's value before and after. A record
-  a `like` created keeps the slot's old bytes.
-- **Rebuilds converge.** A build first puts back what the previous build of the action
-  changed, then applies the edits: the same edits give the same bytes, an edit you remove goes
-  back to what it was, and `replace` always applies to the original text.
+  a `copy_from` created keeps the slot's old bytes.
+- **Building again.** A build applies the edits to the records as they are: what an edit names
+  is written, replacing whatever the record or slot holds; the same edits give the same bytes
+  and record nothing new, and `replace` always applies to the original text. An edit you remove
+  stays in the DAT until a build with `--reset`, which resets the tables from `.base` first, or
+  a `xi dats build --list --reset` of the build list
+  ([../dats/README.md](../dats/README.md#applying---reset-and---list)).
 - **Undo** (`xi dats undo P`) puts each record back field by field, removes a created record
   (the slot's old bytes), and drops the action's SQL section. A field something else changed
   since the build is left as it is, and said.
 - `.base`: the first write of a DAT in the base install keeps `<DAT>.base`, as every build does.
 
-Refused, naming the edit: an id outside the table, an empty slot without `like`, a `like`
-into a slot that holds a record (unless `--force`), a `replace` whose text isn't there, text
-that doesn't fit, a mod name the server doesn't have.
+Refused, naming the edit: an id outside the table, an empty slot without `copy_from`, a `replace`
+whose text isn't there, text that doesn't fit, a mod name the server doesn't have. A `copy_from`
+into a slot that holds a record replaces it (undo puts it back).
 
 ## Spell and ability data
 
@@ -140,7 +144,7 @@ One file serves every client language (the names and help live in `spells` / `sp
 ```json
 {"table": "spellData", "id": 1, "set": {"mp": 5, "cast": 4, "levels": {"RDM": 1, "PLD": null}}}
 {"table": "abilityData", "id": 32, "set": {"range": 4}}
-{"table": "spellData", "id": 1030, "like": 1, "set": {"mp": 10}}
+{"table": "spellData", "id": 1030, "copy_from": 1, "set": {"mp": 10}}
 ```
 
 | Field | What |
@@ -149,7 +153,7 @@ One file serves every client language (the names and help live in `spells` / `sp
 | abilities | `type` (1 ability, 3 weapon skill, …), `tp`, `level`, `range`, `radius`, `aoe`, `targets`, `valid_targets`, `tp_modifier`, `charges`, `icon`, `icon2` |
 
 `levels` merges into the spell's: `{"RDM": 1}` adds Red Mage at 1, `null` takes a job off (MON is
-the Monstrosity column). `like` copies a record into an empty slot; an id past the end grows the
+the Monstrosity column). `copy_from` copies a record into a slot; an id past the end grows the
 section (the client reads 1,024 spells and 2,816 commands without a ceiling plugin such as
 cexislots, and the build says so). New spells with their names, help and a menu slot are the
 [`spell` type](../menu/records.md); this edits the records that are there.
@@ -157,7 +161,7 @@ cexislots, and the build says so). New spells with their names, help and a menu 
 **The server.** The client shows these numbers; the server decides them. A spell edit writes its
 `spell_list` row to the proposed SQL — `mpCost`, `castTime` and `recastTime` (quarter seconds × 250
 = milliseconds), `element` (the server counts from 1: fire 1 … dark 8, none 0), `skill`, and `jobs`
-(one byte per job, WAR first, 0 = can't learn) for the fields the edit sets; `like` copies the
+(one byte per job, WAR first, 0 = can't learn) for the fields the edit sets; `copy_from` copies the
 donor's row first. Ability records carry no SQL yet (how a command id maps to the server's
 ability and weapon-skill ids isn't pinned down), and `server: false` leaves a spell's out.
 
@@ -167,32 +171,62 @@ ability and weapon-skill ids isn't pinned down), and `server: false` leaves a sp
 for byte from another install. Item tables: the decrypted record (0xC00 bytes legacy, 0x1400
 retail), per language: `{"hex": {"en": "…", "jp": "…"}}` (a language not given is left alone).
 d_msg tables: the block, per language the same way. Spell / ability data and tables by path: one
-text, the decoded record. It goes alone in its edit — no `set`, `strings`, `icon` or `like` — and
+text, the decoded record. It goes alone in its edit — no `set`, `strings`, `icon` or `copy_from` — and
 undo puts the record back as it was, while it still holds what the build wrote. The model viewer
 shows a record's bytes in its detail card.
 
 ## Tables by path
 
-A d_msg table the viewer doesn't name can be given by its ROM path: `{"table": "ROM/181/72.DAT",
-"id": 5, "strings": {"sub0": "Fast Blade II"}}`. Its sub-strings are then `sub0`, `sub1`, … by
-position (text, `{"replace": …}`, or a number where the sub-string is one); a row is its index,
-`like` adds one past the end as for the named tables, and `hex` writes a block. It is one file,
-whatever the language — a Japanese table is its own path.
+Any table can be given by its ROM path, one file whatever the language (a Japanese table is its
+own path), a row by its index. xi-tools doesn't assume which item ids a server's client plugin
+maps to which file: a table a server grew or added is edited by row.
+
+A **d_msg table**: `{"table": "ROM/181/72.DAT", "id": 5, "strings": {"sub0": "Fast Blade II"}}`.
+Its sub-strings are `sub0`, `sub1`, … by position (text, `{"replace": …}`, or a number where the
+sub-string is one); `copy_from` adds a row past the end as for the named tables, and `hex` writes
+a block.
+
+An **item table** names the `layout` of its records — `general`, `usable`, `puppet`, `armor`,
+`weapon`, `maze`, `instinct` or `roe` — which decides the fields `set` takes and where the
+strings are: `{"table": "ROM/288/80.DAT", "layout": "armor", "id": 1030, "set": {"level": 75},
+"strings": {"sub0": "Server Coat"}}`. Its strings are `sub0`, `sub1`, … by position (an English
+record: name, article, log name, log plural, description; a Japanese one: name, description).
+`copy_from` copies a row of the same file into an empty row, its id field the donor's moved by
+as many rows; `hex` writes the whole decrypted record; `icon.from` takes an item id of the named
+tables. There is no server side (the file says nothing about item ids). A row past the end is
+refused: grow the table first.
+
+## Growing a table (`xi database grow`)
+
+A table a client plugin reads to a fixed count (a text table to 4,096 rows, an item table to
+its full size) is grown once, as `xi ftable expand` is run once for the file tables:
+
+```
+xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows blanked to '.'
+xi database grow ROM/288/80.DAT 8192                       # item: copies of its last placeholder
+xi database grow ROM/288/80.DAT 8192 --fill-from 1023      # each new row a copy of row 1023
+xi database grow ROM/181/72.DAT 4096 --fill-hex "…"        # exact bytes per row
+xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's copy; say only
+```
+
+The kind of table is read from the file. A new item record's id continues the table's numbering
+(row 0's id plus its row). A table already that long is left alone. The table's `.base` grows
+too, so a `--reset` build resets back to the grown table and only takes back what projects
+wrote into its rows. Named text tables are edited in both languages: grow the English and the
+Japanese file.
 
 ## New text rows
 
-A text-table row past the end needs `like`, the row to copy: `{"table": "titles", "id": 1300,
-"like": 1, "strings": {"en": {"name": "Abyssea Delver"}}}` grows the titles table to 1,301
+A text-table row past the end needs `copy_from`, the row to copy: `{"table": "titles", "id": 1300,
+"copy_from": 1, "strings": {"en": {"name": "Abyssea Delver"}}}` grows the titles table to 1,301
 rows — the rows in between hold `.`, as retail's unnamed rows do — in both languages (the
 Japanese row takes the English text unless `strings.jp` gives its own). Key items and the
-quest / mission logs are keyed by the id each record carries, so a new id is appended; `like`
+quest / mission logs are keyed by the id each record carries, so a new id is appended; `copy_from`
 there picks the record to copy. Undo trims the rows back off, only while nothing grew the
 table since. A zone's dialog lines are not here — they are [`zone_dialog`](../dialog/zone_dialog.md).
 
 ## Not yet
 
-- CatsEyeXI's custom item band (`ROM/288/79–80` grown past 30,720) is recognised for the
-  `general`, `usable`, `armor` and `weapons` tables, but not yet tried on their install.
 - An icon from a PNG (the client's palettized icon format needs an encoder).
 - Proposed SQL for ability records (`abilities`, `weapon_skills`); the `mnc2`, `mon_` and `levc`
   sections of `114.DAT`, which aren't decoded yet.

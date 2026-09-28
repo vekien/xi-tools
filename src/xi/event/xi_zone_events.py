@@ -404,8 +404,9 @@ def build(action: dict, *, root: Path, target: str | None, resolve, manifest: di
     """Compile ``action``'s events into the zone's tables in ``root``. The build result:
     ``records`` (what gets recorded for this root), ``cameras`` (scene DATs to place:
     ``{file_id, dat, data}``), ``sql`` / ``lua`` (the server's part), warnings.
-    ``unwound``: the previous build's changes were already put back (``xi dats build``
-    does that for the whole project first)."""
+    Its own events from the last build are taken back out first, so a build replaces them
+    and keeps their event and line ids — unless ``unwound``: the tables were just reset
+    from their ``.base`` (``xi dats build --reset``) and hold none of them."""
     from xi import xi_config
     from xi.dats import xi_stage
     from xi.event import xi_author, xi_compile
@@ -461,6 +462,11 @@ def build(action: dict, *, root: Path, target: str | None, resolve, manifest: di
                 new_dialog, msg_ids = xi_author.append_dialog_lines(en_dat, dlg["lines"], paged=bool(dlg.get("paged")),
                                                                      reuse_ids=slots)
                 actors = core.parse_raw_actors(event_data)
+                if pinned != "auto":
+                    # An id the NPC already has is replaced, as a cutscene's is.
+                    for a in actors:
+                        if a.actor_id == owner:
+                            _take_out(a, int(pinned))
                 try:
                     event_id, _created = xi_author.add_dialogue_event(actors, owner, msg_ids, event_id)
                 except ValueError as e:

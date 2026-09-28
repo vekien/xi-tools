@@ -12,8 +12,8 @@ Item types and DAT ranges:
   armor       10240   - 28671   ROM/118/109.DAT + ROM/286/73.DAT
   weapon      16384   - 23039   ROM/118/108.DAT
   items 7     30720   - 31743   ROM/387/14.DAT   (retail Sept 2026+, placeholders so far)
+  monstrosity 29696   - 30719   ROM/288/80.DAT   (the Monstrosity instinct table)
   mount       model + key item + name strings (separate system)
-  custom      29696   - 30719   ROM/288/80.DAT   (the Monstrosity instinct table's free slots)
 """
 
 import io
@@ -55,7 +55,7 @@ _SPLIT_GROUPS = {
     'puppet':     ['Puppet'],
     'armor':      ['Armor_1', 'Armor_2'],
     'weapon':     ['Weapons'],
-    'custom':     ['Monstrosity_1', 'Monstrosity_2'],
+    'monstrosity': ['Monstrosity_1', 'Monstrosity_2'],
     'misc':       ['Moblin', 'RoE_Objectives', 'RoE_Categories', 'Gil'],
 }
 
@@ -614,8 +614,11 @@ group.add_command(_make_type_group(
     'weapon',     'Weapons (IDs 16384-23039).', type_id=4,
     dats=['Weapons']))
 group.add_command(_make_type_group(
-    'custom',     'Custom server items — free slots of the Monstrosity instinct table (IDs 29696-30719).',
+    'monstrosity', 'The Monstrosity instinct table (IDs 29696-30719).',
     dats=['Monstrosity_1']))
+_custom = _make_type_group('custom', 'Old name of monstrosity.', dats=['Monstrosity_1'])
+_custom.hidden = True
+group.add_command(_custom)
 
 
 # ── Mount subgroup (delegates to xi.mount module) ───────────────────────────

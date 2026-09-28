@@ -171,10 +171,10 @@ def test_no_flags_prints_no_server_lines_and_carries_the_results_over(world):
     assert not any(step(r, k) for k in ("db", "menu", "lua"))
     m = xd._read_manifest(Path("projects/LOVE.json"))
     saved = {"db": {"table": "spell_list", "id": 1023, "name": "love", "created": True, "confirmed": False,
-                    "like": {"id": 144, "name": "fire"}, "group": 2, "animation": 339, "before": None,
+                    "copy_from": {"id": 144, "name": "fire"}, "group": 2, "animation": 339, "before": None,
                     "op": "insert", "server": SRV, "at": "2026-09-19T00:00:00Z"},
              "menu": {"kind": "spell", "record_kind": "spell", "server_id": 1023, "name": "LOVE",
-                      "like": {"server_id": 144, "record_id": 144}, "provisional": False, "roots": {}},
+                      "copy_from": {"server_id": 144, "record_id": 144}, "provisional": False, "roots": {}},
              "lua": {"path": "scripts/actions/spells/black/love.lua", "sha256": "0" * 64, "donor": "black/fire#144",
                      "kind": "spell", "at": "2026-09-19T00:00:00Z"}}
     m["actions"][0]["result"].update(saved, undone="2026-09-19T00:00:00Z")
@@ -203,7 +203,7 @@ def test_menu_only_offline_places_a_provisional_record_then_is_unchanged(world):
     assert names(root, "spell", 1023) == ("LOVE", "LOVE")
     menu = result()["menu"]
     assert menu["server_id"] == 1023 and menu["provisional"] is True and menu["kind"] == "spell"
-    assert menu["like"] == {"server_id": 144, "record_id": 144}
+    assert menu["copy_from"] == {"server_id": 144, "record_id": 144}
     rs = menu["roots"]["dir"]
     assert rs["record_id"] == 1023 and rs["menu_index"] == 900 and rs["written"] == row(root, "spell", 1023).hex()
     assert rs["replaced"]["record"] == world.placeholder[1023].hex()
@@ -397,7 +397,7 @@ def test_insert_and_menu_record_land_on_the_same_id(world, monkeypatch):
     assert "database: 1 row written (spell_list #1023) — restart the map server (xi_map) to load it" in r.output
     res = result()
     assert res["db"]["id"] == res["menu"]["server_id"] == 1023
-    assert res["db"]["created"] is True and res["db"]["like"] == {"id": 144, "name": "fire"} and res["db"]["group"] == 2
+    assert res["db"]["created"] is True and res["db"]["copy_from"] == {"id": 144, "name": "fire"} and res["db"]["group"] == 2
     assert res["menu"]["provisional"] is False
     assert json.loads(json.dumps(res)) == res
     new = srv.row("spell_list", 1023)

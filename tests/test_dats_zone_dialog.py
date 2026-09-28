@@ -137,7 +137,6 @@ def test_new_lines_grow_both_tables_and_undo_trims_them(game):
 
 @pytest.mark.parametrize("line, says", [
     ({"id": 9, "en": "past"}, "line 9 is past the end — mark it \"new\""),
-    ({"id": 1, "new": True, "en": "x"}, "already has line 1"),
     ({"id": 1, "en": {"replace": {"Bastok": "Windurst"}}}, "'Bastok' isn't in"),
 ])
 def test_errors_name_the_line(game, line, says):
@@ -146,12 +145,25 @@ def test_errors_name_the_line(game, line, says):
     assert r.exit_code != 0 and says in r.output
 
 
-def test_a_line_taken_out_goes_back(game):
+def test_entry_hex_writes_the_bytes_as_given(game):
+    # Retail entries don't all end in 00: Chamber of Oracles' end 00 07.
+    assert ZD.validate_action({"id": "d", "type": "zone_dialog", "zone": ZONE,
+                               "lines": [{"id": 0, "en": {"entry_hex": "41 42 00 07"}}]}) == []
+    prepare({"zone": ZONE, "lines": [{"id": 0, "en": {"entry_hex": "41 42 00 07"}},
+                                     {"id": 6, "new": True, "en": {"entry_hex": "43"}}]})
+    assert build().exit_code == 0
+    en = blobs(game, EN)
+    assert en[0] == b"AB\x00\x07" and en[6] == b"C"
+
+
+def test_a_line_taken_out_goes_back_on_a_reset_build(game):
     prepare({"zone": ZONE, "lines": [{"id": 0, "en": "A.\\v"}, {"id": 2, "en": "B.\\v"}]})
     before2 = blobs(game, EN)[2]
     assert build().exit_code == 0
     prepare({"zone": ZONE, "lines": [{"id": 0, "en": "A.\\v"}]}, "jeuno", "--replace")
-    assert build().exit_code == 0
+    assert build().exit_code == 0                                     # applied on top: it stays
+    assert blobs(game, EN)[2] != before2
+    assert build("jeuno", "--reset").exit_code == 0
     assert blobs(game, EN)[2] == before2
     assert [e["id"] for e in action()["result"]["roots"]["dir"]] == [0]
 
@@ -168,3 +180,38 @@ def test_pivot_build_and_prepare_forms(game, tmp_path: Path, monkeypatch):
     assert ZD.line_text(blobs(pivot, EN)[0]).startswith("Pivot only.")
     prepare({"zone": ZONE, "lines": [{"id": 1, "en": "Merged.\\v"}]}, "jeuno", "--id", action()["id"], "--merge")
     assert [l["id"] for l in action()["lines"]] == [0, 1] and action()["result"]["roots"]["pivot"]
+
+
+def test_a_second_build_on_top_changes_nothing(game):
+    prepare({"zone": ZONE, "lines": [
+        {"id": 1, "en": {"replace": {"welcome to Jeuno": "welcome to Lower Jeuno"}}},
+        {"id": 5, "new": True, "en": "A new line.\\v"}]})
+    assert build().exit_code == 0
+    en, recs = (game / EN).read_bytes(), action()["result"]["roots"]["dir"]
+    r = build()
+    assert r.exit_code == 0, r.output                                 # the replace goes on the original
+    assert (game / EN).read_bytes() == en and action()["result"]["roots"]["dir"] == recs
+
+
+def test_on_top_a_line_it_added_is_rewritten(game):
+    en0 = (game / EN).read_bytes()
+    prepare({"zone": ZONE, "lines": [{"id": 5, "new": True, "en": "First.\\v"}]})
+    assert build().exit_code == 0
+    prepare({"zone": ZONE, "lines": [{"id": 5, "new": True, "en": "Second.\\v"}]}, "jeuno", "--replace")
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert ZD.line_text(blobs(game, EN)[5]).startswith("Second.")
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / EN).read_bytes() == en0
+
+
+def test_a_new_line_on_a_line_that_is_there_replaces_it(game):
+    en0 = (game / EN).read_bytes()
+    prepare({"zone": ZONE, "lines": [{"id": 1, "new": True, "en": "Replaced.\\v"}]})
+    r = build()
+    assert r.exit_code == 0, r.output
+    assert ZD.line_text(blobs(game, EN)[1]).startswith("Replaced.") and len(blobs(game, EN)) == 3
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "jeuno", "--yes"], catch_exceptions=False).exit_code == 0
+    assert (game / EN).read_bytes() == en0

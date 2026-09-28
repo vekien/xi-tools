@@ -90,7 +90,7 @@ full per-zone Model/Dialog/NPC/Event table (294 zones) is in
   `survey`, `lint` and `npc list` / `npc add` (the zone entity-name table).
 - **[zone_events.md](zone_events.md)** — the **`zone_events` action of `xi dats`**: cutscenes
   and dialogues compiled into a zone's event and EN/JP dialog tables, camera scene DATs placed,
-  each change recorded so a rebuild converges and `xi dats undo` is exact. `cutscene compile`
+  each change recorded so a rebuild replaces its own events and `xi dats undo` is exact. `cutscene compile`
   and `dialogue new` are its aliases.
 - **[retail-events.md](retail-events.md)** — **decompile any retail event to JSON, edit it,
   recompile it byte-exact**: `explain` → `decompile --check` → `sweep` (whole zones, all

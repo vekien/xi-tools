@@ -160,6 +160,42 @@ def ensure_base(src) -> bool:
     return True
 
 
+def keep_redirect_base(src) -> None:
+    """Before the first write of ``src`` into a DAT root other than the install (the pivot
+    folder, ``xi dats build --pivot``): keep what that root held there as ``<dat>.base``, or
+    an empty ``<dat>.base`` when it held nothing, so ``xi dats build --reset`` can reset it
+    (an empty one: the file is taken back out). The install's own ``.base`` comes from
+    :func:`editable_dat`."""
+    require_ffxi_dir()
+    if _in_place():
+        return
+    out = output_path_for(src)
+    base = out.with_name(out.name + ".base")
+    if base.exists():
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        shutil.copy2(out, base)
+    else:
+        base.write_bytes(b"")
+
+
+def reset_to_base(path) -> str:
+    """Put ``path`` back to its ``.base``: ``'restored'``, ``'removed'`` (an empty ``.base``:
+    the file wasn't there before xi-tools wrote it), or ``'none'`` (no ``.base``: never
+    written through xi-tools, or before it kept one)."""
+    path = Path(path)
+    base = path.with_name(path.name + ".base")
+    if not base.is_file():
+        return "none"
+    if base.stat().st_size == 0:
+        if path.exists():
+            path.unlink()
+        return "removed"
+    shutil.copy2(base, path)
+    return "restored"
+
+
 def output_path_for(src) -> Path:
     """Where edits to ``src`` are written: normally ``src`` itself (edits go in
     place under FFXI_DIR). While a dats-build redirect is active, paths under
