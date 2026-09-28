@@ -88,36 +88,13 @@ def test_an_install_grown_table_keeps_its_rows_through_a_pivot_reset(game, tmp_p
         assert titles(pivot / Path(*TITLES_EN.split("/")))[3:] == [".", ".", "Pivot Title"]
 
 
-def test_grow_on_the_action_is_applied_before_the_edits_on_every_build(game, tmp_path: Path, monkeypatch):
-    import xi.xi_config as cfg
-    from xi.database.xi_core import validate_action
-    from xi.dats.xi_dats import group
-    pivot = tmp_path / "pivot"
-    pivot.mkdir()
-    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot))
-    action = {"id": "database.grown", "type": "database",
-              "grow": [{"table": TITLES_EN, "count": 6}, {"table": ARMOR_EN, "count": 10, "fill_from": 2}],
-              "edits": [{"table": TITLES_EN, "id": 5, "strings": {"sub0": "Grown Title"}}]}
-    assert validate_action(action) == []
-    Path("projects").mkdir(exist_ok=True)
-    Path("projects/g.json").write_text(json.dumps({"schema": "xi.dats.v1", "actions": [action]}))
-    Path("projects/build_list.json").write_text(json.dumps({"schema": BL.LIST_SCHEMA, "projects": ["g"]}))
-    install = (game / Path(*TITLES_EN.split("/"))).read_bytes()
-    for _ in range(2):                  # the reset copies the install's back; the build grows it again
-        r = CliRunner().invoke(group, ["build", "--list", "--reset", "--pivot"], catch_exceptions=False)
-        assert r.exit_code == 0, r.output
-        assert titles(pivot / Path(*TITLES_EN.split("/"))) == [
-            "Fodderchief Flayer", "Worm Wrangler", "Kupo Keeper", ".", ".", "Grown Title"]
-        rec = T.record(pivot, ARMOR_EN, 9)
-        assert struct.unpack_from("<I", rec)[0] == 10249 and DB.item_name(rec, "armor", "legacy") == "Moonshade Earring"
-    assert "Reset 2 tables from the install (FFXI_DIR)" in r.output         # what the grow and edit name
-    assert (game / Path(*TITLES_EN.split("/"))).read_bytes() == install     # the install is left alone
-    assert not list(pivot.rglob("*.base"))
-    assert validate_action({**action, "grow": [{"table": "titles", "count": 0, "fill_from": 1, "fill_hex": "00"},
-                                               {"table": TITLES_EN, "count": 6, "x": 1},
-                                               {"table": TITLES_EN, "count": 7}]}) == [
-        "grow[0].table must be a ROM path (ROM/181/73.DAT)",
-        "grow[0].count must be a whole number of rows, 1 or more",
-        "grow[0]: give fill_from or fill_hex, not both",
-        "grow[1]: unknown key 'x'",
-        f"grow[2]: {TITLES_EN} is already grown by grow[1]"]
+def test_the_filler_can_come_from_a_file(game, tmp_path: Path):
+    path = game / Path(*TITLES_EN.split("/"))
+    block = bytes(D.parse(path.read_bytes()).blocks[1])
+    hexfile = tmp_path / "fill.hex"
+    hexfile.write_text(" ".join(block.hex()[i:i + 64] for i in range(0, len(block.hex()), 64)) + "\n")
+    r = grow(TITLES_EN, "5", "--fill-file", str(hexfile))
+    assert r.exit_code == 0, r.output
+    assert titles(path)[3:] == ["Worm Wrangler", "Worm Wrangler"]
+    r = grow(TITLES_EN, "6", "--fill-file", str(hexfile), "--fill-hex", "00")
+    assert r.exit_code != 0 and "not both" in r.output

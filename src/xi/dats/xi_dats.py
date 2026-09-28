@@ -2963,7 +2963,7 @@ def _edited_tables(manifest: dict, target: str) -> list[str]:
     """ROM paths of the tables a project's builds into ``target`` edited in place — what
     ``--reset`` resets: the database, dialog, NPC-name and event tables its records name, and
     the spell / command table and its name tables for a record action; for a database or
-    zone_dialog action also the tables its definition names, so a project that hasn't been
+    zone_dialog action also the tables its edits name, so a project that hasn't been
     built into ``target`` yet resets them too. The DATs actions place (gear, camera scenes …)
     aren't: a build replaces them. Nor is an ability's menu record, which only a build with
     --menu-record puts back."""

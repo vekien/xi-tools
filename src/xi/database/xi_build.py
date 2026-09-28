@@ -6,8 +6,7 @@ A build applies the edits to the records as they are, replacing what they name; 
 it changes is recorded with its values before and after, which ``xi dats undo`` puts back. A
 ``replace`` text edit always applies to the original text a previous build recorded, so the
 same edits build the same bytes again. ``xi dats build --reset`` resets the tables from their
-``.base`` first. A table the action's ``grow`` names is grown to its row count before the
-edits. A file is written only when its bytes changed.
+``.base`` first. A file is written only when its bytes changed.
 
 Item records: an item DAT holds fixed-size records (0xC00 legacy / 0x1400 retail, detected
 per file), each a typed header, a string block and the icon (xi.ui.items.xi_layout). d_msg
@@ -243,19 +242,6 @@ class _Files:
                     raise DbError(f"{rel}: {e}")
                 self.orig[rel] = data
         return self.menus[rel]
-
-    def seed(self, rel: str, raw: bytes, data: bytes) -> None:
-        """Hold ``data`` as ``rel``'s current bytes, ``raw`` as what the root has (a table the
-        build grew before its edits)."""
-        from xi.menu.xi_menu_table import dat_path
-        from xi.ui.items.xi_parser import _decrypt, detect_stride
-        if data[:5] == b"d_msg":
-            self.dmsg[rel] = D.parse(data)
-            self.orig[rel] = raw
-        else:
-            self.items[rel] = ItemDat(path=dat_path(self.root, rel), data=bytearray(_decrypt(data)),
-                                      stride=detect_stride(data))
-            self.orig[rel] = bytes(_decrypt(raw))
 
     def changed(self) -> list[tuple[str, bytes]]:
         out = []
@@ -998,38 +984,10 @@ def _pivot_shadow(root: Path, target: str | None, rels: list[str]) -> list[str]:
     return [r for r in rels if (Path(FFXI_PIVOT_DIR) / Path(*r.split("/"))).is_file()]
 
 
-def _grow(files: _Files, action: dict) -> list[dict]:
-    """Grow each table the action's ``grow`` names to its row count, before the edits (the
-    rows a client plugin reads up to; the filler as ``xi database grow``'s). A table already
-    that long is left alone. ``[{table, from, to}]``."""
-    from xi.database import xi_grow as G
-    from xi.dats import xi_stage
-    out = []
-    for g in action.get("grow") or []:
-        rel = _rom(g["table"])
-        raw = xi_stage.read(files.root, rel)
-        if raw is None:
-            raise DbError(f"grow: {rel} is missing")
-        try:
-            before = G.rows(raw)
-            if before >= g["count"]:
-                continue
-            data = G.grow(raw, g["count"], G.filler(raw, g.get("fill_from"), g.get("fill_hex")))
-        except G.GrowError as e:
-            raise DbError(f"grow {rel}: {e}") from None
-        except (D.DmsgError, ValueError) as e:
-            raise DbError(f"grow {rel}: not an item or d_msg table ({e})") from None
-        files.seed(rel, raw, data)
-        out.append({"table": rel, "from": before, "to": g["count"]})
-    return out
-
-
 def tables(action: dict) -> list[str]:
-    """ROM paths of the tables ``action``'s ``grow`` and edits name: what ``--reset`` resets
-    for it, recorded result or not. An item id outside its table's ranges names none (the
-    build says why)."""
-    rels = {_rom(g["table"]) for g in action.get("grow") or []
-            if isinstance(g, dict) and C.is_raw(g.get("table"))}
+    """ROM paths of the tables ``action``'s edits name: what ``--reset`` resets for it, recorded
+    result or not. An item id outside its table's ranges names none (the build says why)."""
+    rels: set[str] = set()
     for e in action.get("edits") or []:
         table, rid = (e.get("table"), e.get("id")) if isinstance(e, dict) else (None, None)
         if is_item_table(table):
@@ -1063,7 +1021,6 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_p
     files = _Files(Path(root))
     warnings: list[str] = []
     records: list[dict] = []
-    grew = _grow(files, action)
     for i, edit in enumerate(action["edits"]):
         try:
             if is_item_table(edit["table"]):
@@ -1090,7 +1047,7 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_p
                                                                                        [r for r, _ in changed])]
     if sql and sql_path is not None and not dry_run:
         write_sql_section(sql_path, action["id"], sql, project)
-    return {"id": action["id"], "type": "database", "target": target, "records": records, "grew": grew,
+    return {"id": action["id"], "type": "database", "target": target, "records": records,
             "files": [r for r, _ in changed], "written": written, "warnings": warnings,
             "sql": sql or None, "server": str(sql_path) if sql and sql_path is not None else None}
 

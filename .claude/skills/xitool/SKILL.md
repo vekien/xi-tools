@@ -148,8 +148,8 @@ Rules that follow:
     resets the tables the build edits to the install's untouched copy first (its `.base`;
     with `--pivot` copied over the pivot folder's, which keeps no `.base`); `--list` builds the
     projects of `projects/build_list.json` in order, and a list file needs no `--list`
-    (`--list --reset`: every table they edit reset once, first). `grow` on a database action
-    grows a table on every build; `xi database grow` grows the install's and its `.base` once.
+    (`--list --reset`: every table they edit reset once, first). `xi database grow` grows the
+    install's table and its `.base` once (set-up; the actions only edit rows).
 - Prefer `--dry-run` where offered (`ftable expand`, `dats build`, `zone import-json`,
   `zone reset`, `mount import`, dialogue edits) before writing.
 - `xi dats build` writes into `FFXI_DIR` and then syncs the custom region of the pivot

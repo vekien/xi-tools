@@ -153,8 +153,7 @@ xi dats build P [--dry-run] [--pivot]              # patches the records (EN + J
 xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
 xi dats undo P                                     # every record back to what it held; its SQL section removed
 xi database grow ROM/181/72.DAT 4096               # a table grown once (d_msg or item), its .base too
-                                                   #   ("grow": [{table, count}] on the action: every build)
-                                                   #   --fill-from ROW | --fill-hex HEX, --pivot, --dry-run
+                                                   #   --fill-from ROW | --fill-hex HEX | --fill-file F, --pivot, --dry-run
 # spellData / abilityData: {"table": "spellData", "id": 1, "set": {"mp": 5, "levels": {"RDM": 1}}}
 # a new record: "copy_from": <id> (was "like"); exact bytes: "hex" (a whole record)
 # by path: {"table": "ROM/181/72.DAT", "id": 5, "strings": {"sub0": "…"}}

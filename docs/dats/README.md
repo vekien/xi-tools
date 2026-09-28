@@ -275,7 +275,7 @@ builds nothing if one is missing or has an invalid action; `--only` doesn't go w
 
 What `--reset` resets: the tables the actions' recorded results name — the database, dialog,
 NPC-name and event tables, and `114.DAT` with its name tables for spell / command records — and
-the tables a `database` or `zone_dialog` action's edits and `grow` name, so a project that was
+the tables a `database` or `zone_dialog` action's edits name, so a project that was
 never built into the target (a fresh clone) resets them too. For `--list` also the tables the
 list file's `result` recorded, so a table a project no longer
 edits, or a project taken off the list, goes back too. DATs an action places (gear, abilities,
@@ -295,10 +295,9 @@ A `--pivot` build keeps no `.base` in the pivot folder, and never writes the ins
 `--reset` it applies on top of what the folder holds, so a server's DATs folder keeps its other
 edits; with `--reset` the tables it edits start from the install's again.
 
-A table a client plugin reads to a fixed row count grows on every build with `grow` on the
-[`database` action](../database/README.md#growing-a-table) — after the reset, so a build from
-the install grows it again. `xi database grow` grows the install's table and its `.base` once,
-which a reset keeps.
+A table a client plugin reads to a fixed row count is grown once with
+[`xi database grow`](../database/README.md#growing-a-table-xi-database-grow), in the install:
+its `.base` grows with it, so every reset (`--pivot` too) keeps the rows.
 
 ```bash
 uv run xi dats build P --reset                   # this project's tables from .base, then build

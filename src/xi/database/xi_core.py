@@ -139,8 +139,7 @@ def skill_id(skill) -> int:
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _MOD_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
-_ACTION_KEYS = {"id", "type", "enabled", "description", "depends_on", "grow", "edits", "server", "result", "outputs"}
-_GROW_KEYS = {"table", "count", "fill_from", "fill_hex"}
+_ACTION_KEYS = {"id", "type", "enabled", "description", "depends_on", "edits", "server", "result", "outputs"}
 _EDIT_KEYS = {"table", "id", "copy_from", "note", "set", "strings", "icon", "server", "hex", "layout"}
 _SERVER_KEYS = {"emit", "mirror", "sql"}
 
@@ -493,35 +492,6 @@ def _check_plain_edit(table: str, edit: dict, at: str, errs: list) -> tuple:
     return table, edit.get("id")
 
 
-def _check_grow(grow, errs: list) -> None:
-    """``grow``: the tables the action grows to a row count before its edits."""
-    if not isinstance(grow, list):
-        errs.append("grow must be a list of {table, count}")
-        return
-    seen: dict = {}
-    for i, g in enumerate(grow):
-        at = f"grow[{i}]"
-        if not isinstance(g, dict):
-            errs.append(f"{at} must be an object")
-            continue
-        _unknown(g, _GROW_KEYS, at, errs)
-        table = g.get("table")
-        if not is_raw(table):
-            errs.append(f"{at}.table must be a ROM path (ROM/181/73.DAT)")
-        elif table.upper() in seen:
-            errs.append(f"{at}: {table} is already grown by grow[{seen[table.upper()]}]")
-        else:
-            seen[table.upper()] = i
-        if not _is_int(g.get("count"), 1):
-            errs.append(f"{at}.count must be a whole number of rows, 1 or more")
-        if "fill_from" in g and "fill_hex" in g:
-            errs.append(f"{at}: give fill_from or fill_hex, not both")
-        if "fill_from" in g and not _is_int(g["fill_from"]):
-            errs.append(f"{at}.fill_from must be a row index")
-        if "fill_hex" in g:
-            _check_hex(g["fill_hex"], None, f"{at}.fill_hex", errs)
-
-
 def validate_action(action) -> list[str]:
     """Problems with a ``database`` action, each naming the field; ``[]`` when it is valid.
     Mirrors schema/database.json, plus what the schema can't say: which fields and
@@ -551,7 +521,6 @@ def validate_action(action) -> list[str]:
                 errs.append(f"server.{key} must be true or false")
         if "sql" in server and not (isinstance(server["sql"], str) and server["sql"].lower().endswith(".sql")):
             errs.append("server.sql must be a path ending in .sql")
-    _check_grow(action.get("grow", []), errs)
     edits = action.get("edits")
     if not isinstance(edits, list) or not edits:
         errs.append("edits must be a non-empty list")

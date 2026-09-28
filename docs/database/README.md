@@ -197,30 +197,18 @@ as many rows; `hex` writes the whole decrypted record; `icon.from` takes an item
 tables. There is no server side (the file says nothing about item ids). A row past the end is
 refused: grow the table first ([below](#growing-a-table)).
 
-## Growing a table
+## Growing a table (`xi database grow`)
 
 A table a client plugin reads to a fixed count (a text table to 4,096 rows, an item table to
-its full size) says so with `grow` on the action that edits it, which every build applies
-before the edits (after a `--reset`, so a build from the install's tables grows it again):
-
-```json
-{"id": "database.spell_names", "type": "database",
- "grow": [{"table": "ROM/181/73.DAT", "count": 4096}],
- "edits": [{"table": "ROM/181/73.DAT", "id": 4095, "strings": {"sub0": "Meteor Storm"}}]}
-```
-
-The new rows are a filler: a d_msg row blanked to `.`, or the item table's last placeholder
-record (its id following the table's numbering); `fill_from` copies a row, `fill_hex` gives the
-exact bytes (a d_msg block, or a decrypted item record). A table already that long is left
-alone. `--reset` resets the tables `grow` names with the others.
-
-`xi database grow` does the same once, as `xi ftable expand` is run once for the file tables:
+its full size) is grown once, as set-up, as `xi ftable expand` is run once for the file tables.
+The actions then edit its rows like any other:
 
 ```
 xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows blanked to '.'
 xi database grow ROM/288/80.DAT 8192                       # item: copies of its last placeholder
 xi database grow ROM/288/80.DAT 8192 --fill-from 1023      # each new row a copy of row 1023
 xi database grow ROM/181/72.DAT 4096 --fill-hex "…"        # exact bytes per row
+xi database grow ROM/288/80.DAT 8192 --fill-file fill.hex  # the same, the hex from a file
 xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's copy; say only
 ```
 
@@ -229,7 +217,7 @@ The kind of table is read from the file. A new item record's id continues the ta
 table's `.base` grows too, so a `--reset` build (and a `--reset --pivot` one, which copies the
 install's `.base`) resets back to the grown table and only takes back what projects wrote into
 its rows. With `--pivot` only the pivot folder's copy grows, which a `--reset --pivot` build
-replaces with the install's: say `grow` on the action instead. Named text tables are edited in both languages: grow the English and the
+replaces with the install's: grow the install. Named text tables are edited in both languages: grow the English and the
 Japanese file.
 
 ## New text rows
