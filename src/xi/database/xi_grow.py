@@ -7,8 +7,8 @@ The new rows are a filler:
 
 - a d_msg table: a row blanked to '.' (the last row's shape), as retail's unnamed rows are;
 - an item table: a copy of the table's last placeholder record (named '.' or nothing);
-- ``--fill-from ROW``: a copy of that row; ``--fill-hex`` / ``--fill-file``: exact bytes (a
-  d_msg block, or a decrypted item record), as hex text.
+- ``--fill-from ROW``: a copy of that row; ``--fill-hex``: exact bytes (a d_msg block, or a
+  decrypted item record).
 
 An item record's id continues the table's numbering: row 0's id plus its row.
 
@@ -166,20 +166,17 @@ def grow_table(root: Path, rel: str, count: int, *, row: int | None = None, hexe
 @click.option("--fill-from", "row", type=int, default=None, help="Each new row a copy of this row.")
 @click.option("--fill-hex", "hexed", default=None,
               help="Each new row exactly these bytes (a d_msg block, or a decrypted item record).")
-@click.option("--fill-file", "hex_file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None, help="--fill-hex read from this file (hex text; spaces and newlines ignored).")
 @click.option("--pivot", is_flag=True, default=False,
               help="Grow FFXI_PIVOT_DIR's copy of the table (made from the install's when it has none). "
                    "A --reset --pivot build copies the install's back over it.")
 @click.option("--dry-run", is_flag=True, default=False, help="Say what would change; write nothing.")
-def cmd(table: str, count: int, row: int | None, hexed: str | None, hex_file: Path | None, pivot: bool,
-        dry_run: bool):
+def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool, dry_run: bool):
     """Grow TABLE (a ROM path: an item DAT or a d_msg table) to COUNT rows, once.
 
     
     New rows are a filler: a d_msg row blanked to '.', or the item table's last placeholder
-    record (its id following the table's numbering), unless --fill-from / --fill-hex /
-    --fill-file says otherwise. In the install the table's .base grows too, so `xi dats build
+    record (its id following the table's numbering), unless --fill-from / --fill-hex says
+    otherwise. In the install the table's .base grows too, so `xi dats build
     --reset` (and `--reset --pivot`, which copies the install's .base) keeps the rows. A table
     already COUNT rows long is left alone.
 
@@ -187,14 +184,9 @@ def cmd(table: str, count: int, row: int | None, hexed: str | None, hex_file: Pa
     Examples:
       xi database grow ROM/181/72.DAT 4096
       xi database grow ROM/288/80.DAT 8192 --fill-from 1023 --pivot
-      xi database grow ROM/288/80.DAT 25601 --fill-file placeholder.hex
     """
-    if hex_file is not None:
-        if hexed is not None:
-            raise click.ClickException("give --fill-hex or --fill-file, not both")
-        hexed = "".join(hex_file.read_text(encoding="utf-8").split())
     if row is not None and hexed is not None:
-        raise click.ClickException("give --fill-from or --fill-hex / --fill-file, not both")
+        raise click.ClickException("give --fill-from or --fill-hex, not both")
     from xi.dats.xi_dats import _target_root
     rel = table.replace("\\", "/")
     rel = "ROM" + rel[3:] if rel[:3].upper() == "ROM" else rel

@@ -86,15 +86,3 @@ def test_an_install_grown_table_keeps_its_rows_through_a_pivot_reset(game, tmp_p
         r = CliRunner().invoke(group, ["build", "--list", "--reset", "--pivot"], catch_exceptions=False)
         assert r.exit_code == 0, r.output
         assert titles(pivot / Path(*TITLES_EN.split("/")))[3:] == [".", ".", "Pivot Title"]
-
-
-def test_the_filler_can_come_from_a_file(game, tmp_path: Path):
-    path = game / Path(*TITLES_EN.split("/"))
-    block = bytes(D.parse(path.read_bytes()).blocks[1])
-    hexfile = tmp_path / "fill.hex"
-    hexfile.write_text(" ".join(block.hex()[i:i + 64] for i in range(0, len(block.hex()), 64)) + "\n")
-    r = grow(TITLES_EN, "5", "--fill-file", str(hexfile))
-    assert r.exit_code == 0, r.output
-    assert titles(path)[3:] == ["Worm Wrangler", "Worm Wrangler"]
-    r = grow(TITLES_EN, "6", "--fill-file", str(hexfile), "--fill-hex", "00")
-    assert r.exit_code != 0 and "not both" in r.output

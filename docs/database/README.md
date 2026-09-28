@@ -208,7 +208,6 @@ xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows bla
 xi database grow ROM/288/80.DAT 8192                       # item: copies of its last placeholder
 xi database grow ROM/288/80.DAT 8192 --fill-from 1023      # each new row a copy of row 1023
 xi database grow ROM/181/72.DAT 4096 --fill-hex "…"        # exact bytes per row
-xi database grow ROM/288/80.DAT 8192 --fill-file fill.hex  # the same, the hex from a file
 xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's copy; say only
 ```
 
