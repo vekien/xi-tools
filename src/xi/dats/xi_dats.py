@@ -234,6 +234,10 @@ def _plan_result(action: dict) -> dict:
             res["key_item"] = key_item_for(mid) if has_ki else None
         return res
 
+    if kind == "copy":
+        from xi.dats.xi_copy import rel_path
+        return {"path": rel_path(target.get("path"))}
+
     return {}
 
 
@@ -812,6 +816,19 @@ def _build_mount(action: dict, manifest_path: Path, manifest: dict,
     }
 
 
+def _build_copy(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                dry_run: bool = False) -> dict:
+    """Put a file into the active target verbatim at target.path (xi.dats.xi_copy);
+    nothing is registered. ``dry_run`` plans without writing."""
+    from xi.dats import xi_copy as CP
+    errs = CP.validate_action(action)
+    if errs:
+        raise click.ClickException(f"{action.get('id')}:\n  " + "\n  ".join(errs))
+    src = _resolve_raw_source(action["resources"]["file"], manifest_path, manifest)
+    root = _active_build_root()
+    return CP.place(action, src, root, in_install=_root_target_name(root) == "dir", dry_run=dry_run)
+
+
 def _build_mesh(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
                 dry_run: bool = False) -> dict:
     """Build an entity mesh action: rebuild the donor DAT's geometry from the
@@ -934,6 +951,16 @@ def _resolve_raw_source(value: str, manifest_path: Path, manifest: dict) -> Path
             return cand
     raise click.ClickException(f"source DAT not found: {value} (looked under resources/, "
                                f"{manifest_path.parent}, and CWD).")
+
+
+def _file_ref(source: Path, manifest_path: Path) -> str:
+    """How an action names a file it uses where it is (not copied into resources/): relative
+    to the project file when it can be (so a repo checked out elsewhere still finds it),
+    else absolute. ``_resolve_raw_source`` reads it back."""
+    try:
+        return Path(os.path.relpath(Path(source).resolve(), manifest_path.parent.resolve())).as_posix()
+    except ValueError:                                  # another drive
+        return Path(source).resolve().as_posix()
 
 
 def _place_raw_dat_in_build(src: Path | None, place_rel: str, file_id: int, *, force: bool,
@@ -2223,10 +2250,27 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     manifest_data = _read_manifest(manifest)
     if project:
         manifest_data["name"] = project
-    kind, data = _detect_source_type(source, action_type)
+    # A copy's source is the file itself (any bytes), not a JSON to read.
+    kind, data = ("copy", {}) if action_type == "copy" else _detect_source_type(source, action_type)
     resource_root = _resource_root(manifest, manifest_data)
 
-    if kind == "ability":
+    if kind == "copy":
+        from xi.dats import xi_copy as CP
+        existing = next((a for a in manifest_data.get("actions", [])
+                         if action_id and a.get("id") == action_id), None)
+        path = (CP.rel_path(target) if target else
+                CP.guess_target(source) or CP.rel_path(((existing or {}).get("target") or {}).get("path")))
+        if path is None:
+            raise click.ClickException(
+                f"{source}: pass --target, the path in the game folder to copy it to "
+                "(like ROM/119/51.DAT or sound9/win/music/data/music067.bgw).")
+        action_id = action_id or f"copy.{_slug(path.rsplit('.', 1)[0])}"
+        action = {"id": action_id, "type": "copy", "target": {"path": path},
+                  "resources": {"file": _file_ref(source, manifest)}}
+        errs = CP.validate_action(action)
+        if errs:
+            raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
+    elif kind == "ability":
         action = _ability_action_from_recipe(source, resource_root, action_id=action_id,
                                              kind=ability_kind, animation=animation, subdir=subdir,
                                              animation_from=animation_from)
@@ -2345,6 +2389,10 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     elif kind in RESTORABLE_TYPES:
         # What each build changed (the values undo and the next build put back) survives.
         preserve = ("result",)
+    elif kind == "copy":
+        # Where the last build put the file survives (undo takes it from there); the target
+        # too unless --target moved it.
+        preserve = ("result",) + (() if target else ("target",))
     else:
         preserve = ("model",) + (() if target else ("target",))
     _add_or_replace_action(manifest_data, action, replace, preserve=preserve)
@@ -2414,6 +2462,9 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
         if typ in RECORD_TYPES:
             rid = res.get("record_id", (action.get("target") or {}).get("id", "auto"))
             rows.append((aid, typ, res.get("dat") or "ROM/118/114.DAT", str(rid), "-"))
+            continue
+        if typ == "copy":
+            rows.append((aid, typ, res.get("path") or (action.get("target") or {}).get("path") or "-", "-", "-"))
             continue
         if typ in ("gear", "ability"):
             placements = res.get("placements") or []
@@ -2487,6 +2538,10 @@ def _action_summary(action: dict) -> str:
     if action.get("type") in RECORD_TYPES:
         rid = (action.get("result") or {}).get("record_id", (action.get("target") or {}).get("id", "auto"))
         line += f" - id {rid}: {(action.get('resources') or {}).get('definition', '?')}"
+        return line
+    if action.get("type") == "copy":
+        line += (f": {(action.get('resources') or {}).get('file', '?')} >> "
+                 f"{(action.get('target') or {}).get('path', '?')}")
         return line
     if action.get("type") == "ability":
         anim = (action.get("target") or {}).get("animation", "auto")
@@ -2689,7 +2744,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
 
     # mesh + the verbatim-placement types write DATs + table patches directly into the
     # target (the base install, or FFXI_PIVOT_DIR with --pivot); menu records edit its
-    # 114.DAT and string tables.
+    # 114.DAT and string tables. A copy registers nothing, so it needs no tables here.
     pack_actions = [a for a in active_actions
                     if a.get("type") in ("mesh", "entity", "gear", "mount", "ability")]
     target_roots = [(target, _target_root(target))]
@@ -2749,6 +2804,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_mesh(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "ability":
             return _build_ability(action, manifest, manifest_data, force=force, dry_run=dry_run)
+        if kind == "copy":
+            return _build_copy(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind in RECORD_TYPES:
             return _build_record(action, manifest, manifest_data, force=force, dry_run=dry_run)
         # The restorable types write what their edits name over what is there; a zone_events
@@ -3047,6 +3104,8 @@ def _action_placements(action: dict) -> list[tuple[int, str]]:
                     out.append((int(cam["file_id"]), _rom_rel(cam["dat"])))
     elif action.get("type") in RESTORABLE_TYPES:
         pass
+    elif action.get("type") == "copy":
+        pass        # no file_id: undo takes the file back out itself (xi.dats.xi_copy.undo)
     elif res.get("file_id") is not None and res.get("dat"):
         out.append((int(res["file_id"]), _rom_rel(res["dat"])))
     return out
@@ -3127,6 +3186,9 @@ def _project_dat_rels(manifest_data: dict, target: str | None = None) -> tuple[l
                         rels += [_rom_rel(ln["dat"]) for ln in e.get("lines") or [] if ln.get("dat")]
                         if isinstance(e.get("camera"), dict):
                             rels.append(_rom_rel(e["camera"]["dat"]))
+        elif typ == "copy":
+            if res.get("path"):
+                rels.append(res["path"])
         elif res.get("dat"):
             rels.append(_rom_rel(res["dat"]))
         if typ == "mount":
@@ -3350,7 +3412,8 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
     live = [a for a in actions if not _undone(a)]      # what this run clears
     live_ids = {id(a) for a in live}
     built = _project_built_targets(manifest_data)
-    n_placements = sum(len(_action_placements(a)) for a in live)
+    n_placements = (sum(len(_action_placements(a)) for a in live)
+                    + sum(1 for a in live if a.get("type") == "copy"))
     proj_name = manifest_data.get("name") or manifest_path.stem
     abilities = [a for a in actions if a.get("type") == "ability" and isinstance(a.get("result"), dict)]
     db_acts = [(a, a["result"]["db"]) for a in abilities if SP.db_needs_undo(a["result"].get("db"))]
@@ -3428,6 +3491,16 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
                 if isinstance(mid, int):
                     with _package_config(root, root):
                         M.clear_mount_strings(mid)
+            if action.get("type") == "copy":
+                from xi.dats import xi_copy as CP
+                try:
+                    src = _resolve_raw_source((action.get("resources") or {}).get("file") or "",
+                                              manifest_path, manifest_data)
+                except click.ClickException:
+                    src = None
+                n, warns = CP.undo(action, root, in_install=name == "dir", src=src)
+                removed += n
+                db_left.extend(warns)
             if action.get("type") in RECORD_TYPES:
                 res = action.get("result") or {}
                 if isinstance(res.get("record_id"), int):
@@ -3752,6 +3825,10 @@ def _print_placements(results: list[dict], title: str) -> None:
                                f"{_short(e['to'])}")
             for w in r.get("warnings") or []:
                 click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
+        elif kind == "copy":
+            note = {"unchanged": "  (already the same)",
+                    "source": "  (the source itself: building into the folder it lives in)"}.get(r.get("state"), "")
+            click.echo(f"{head}: {r.get('source')} -> {r.get('path')} ({r.get('bytes'):,} bytes){note}")
         elif kind == "ability":
             files = r.get("placements", [])
             click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "
@@ -4451,6 +4528,28 @@ def _wizard_mount(slug: str, project: str, prev: dict | None = None) -> dict:
     }
 
 
+def _wizard_copy(slug: str, prev: dict | None, manifest_path: Path) -> dict:
+    """A copy action: the file to put in as it is, and where in the game folder it goes."""
+    from xi.dats import xi_copy as CP
+    p = prev or {}
+    prev_file = (p.get("resources") or {}).get("file")
+    if prev_file:
+        try:
+            prev_file = str(_resolve_raw_source(prev_file, manifest_path, _read_manifest(manifest_path)))
+        except click.ClickException:
+            pass
+    src = _prompt_existing_dat("Which file goes in as it is? (a DAT, a .bgw track …)", default=prev_file)
+    default = (p.get("target") or {}).get("path") or CP.guess_target(src)
+    while True:
+        path = CP.rel_path(_ask("Where in the game folder does it go? (e.g. ROM/119/51.DAT)",
+                                "Enter path", default=default))
+        if path:
+            break
+        click.echo("  A path inside the game folder, like ROM/119/51.DAT or sound9/win/music/data/music067.bgw.")
+    return {"id": f"copy.{slug}", "type": "copy", "target": {"path": path},
+            "resources": {"file": _file_ref(src, manifest_path)}}
+
+
 def _wizard_entity(slug: str, prev: dict | None = None) -> dict:
     p = prev or {}
     src = _prompt_existing_dat("Select your .DAT file",
@@ -4945,6 +5044,7 @@ def new_cmd(project: str | None, pivot: bool = False):
         "Zone dialog (edit or add the lines a zone's NPCs say)": "zone_dialog",
         "Zone NPCs (rename or add a zone's NPCs)": "zone_npcs",
         "Zone events (cutscenes and dialogue on a zone's NPCs)": "zone_events",
+        "Copy a file as it is (a redrawn UI sheet, a music track …)": "copy",
     }[_choose("What type of content is being added?",
               ["Gear", "Mounts", "Entity (NPC / Monster / Object)",
                "NPC (costume: race + gear + weapons)",
@@ -4954,12 +5054,13 @@ def new_cmd(project: str | None, pivot: bool = False):
                "Database records (edit or add items, key items, titles, …)",
                "Zone dialog (edit or add the lines a zone's NPCs say)",
                "Zone NPCs (rename or add a zone's NPCs)",
-               "Zone events (cutscenes and dialogue on a zone's NPCs)"])]
+               "Zone events (cutscenes and dialogue on a zone's NPCs)",
+               "Copy a file as it is (a redrawn UI sheet, a music track …)"])]
     # The baked NPC is placed at a custom entity model id, so it needs the entity tables.
     # Abilities take retail-range ids (job-ability / spell bands, weapon-skill dummies),
     # so the tables need no expansion.
     ready_key = "entity" if ctype == "npc" else ctype
-    if ctype not in ("ability", *RESTORABLE_TYPES, *RECORD_TYPES) \
+    if ctype not in ("ability", "copy", *RESTORABLE_TYPES, *RECORD_TYPES) \
             and not ready.get(ready_key, True):
         hint = {"gear": "Run `xi ftable expand gear` (expands the FTABLE and patches "
                         "FFXiMain.dll)",
@@ -5002,6 +5103,8 @@ def new_cmd(project: str | None, pivot: bool = False):
             new_actions = [_wizard_zone_npcs(slug, prev, pivot)]
         elif ctype == "zone_events":
             new_actions = [_wizard_zone_events(slug, prev, pivot)]
+        elif ctype == "copy":
+            new_actions = [_wizard_copy(slug, prev, manifest_path)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 

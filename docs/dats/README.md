@@ -221,6 +221,16 @@ Non-interactive: `xi dats prepare cutscene.json --project P [--zone N] [--camera
 or `xi event cutscene compile` / `xi event dialogue new`, which prepare and build in one go.
 See [../events/zone_events.md](../events/zone_events.md).
 
+### Copy a file as it is (a redrawn UI sheet, a music track …)
+
+For content kept as the finished file, not as edits: a UI sheet redrawn with `xi ui tex
+import`, a replaced `.bgw` track. Pick the file, then where in the game folder it goes
+(guessed from its own path when that ends in `ROM…/n/n.DAT` or `sound…/…`). The action is
+`copy.<project>`; the file is referenced where it is (relative to the project file), not
+copied into resources. Non-interactive: `xi dats prepare rom/ROM/119/51.DAT --project P
+--type copy [--target ROM/119/51.DAT]`. Nothing is registered: the path must be one the
+client already reads. A new DAT that needs a file id goes through mount, entity, gear ….
+
 ## Building (`xi dats build`)
 
 A build writes DATs and patches their file_ids **directly into the base install
@@ -555,7 +565,7 @@ files — gear, record edits, events — without splitting the build:
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder), and the DATs of `--pivot` builds into the release's pivot folder. Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back (an ability's only while the row still holds what the build wrote), then remove the manifest (`--keep-json` keeps it). `--apply-db` also reverts the database row an ability inserted or changed and deletes its unedited Lua stub; without it they are listed (with the revert SQL) and left, and the manifest is **kept** — its cleared actions marked `undone` — until a later `undo --apply-db` removes them (a row already gone or already back at its old animation counts as done). An ability menu record that can't be written back (the game has `114.DAT` open) also keeps the manifest, and the next undo retries it |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`) |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`); `--type copy` takes any file, referenced where it is, with `--target` its game path |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
@@ -589,6 +599,13 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   action, emits a server row template to `projects/server/spells|commands/`. No file
   ids, no table expansion; the client needs a ceiling plugin such as cexislots to show
   the band. A `--force` overwrite keeps the old row on `result.replaced` for `undo`.
+- `copy` ([`schema/copy.json`](../../schema/copy.json), `xi.dats.xi_copy`): writes
+  `resources.file` as it is at `target.path` (any path in the game folder, `ROM/119/51.DAT`
+  or `sound9/win/music/data/music067.bgw`), matching the case of a file already there. No
+  file id, no tables. In the install the file it replaces is kept as `<file>.base` and
+  `undo` puts it back (a file that was new is deleted); in a pivot folder `undo` deletes the
+  copy. A build into the folder the source lives in leaves it (`the source itself`), and
+  `undo` never deletes the source.
 
 Record edits:
 

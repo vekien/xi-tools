@@ -190,6 +190,16 @@ xi event dialogue new 245 --json lines.json --actor 0x010F5022   # a dialogue ev
 xi dats undo P                                      # every block and line back; camera DATs removed
 ```
 
+## Copy a file as it is (docs/dats/README.md)
+
+```text
+xi dats prepare rom/ROM/119/51.DAT --project P --type copy   # target guessed from the path: ROM/119/51.DAT
+xi dats prepare music067.bgw --project P --type copy --target sound9/win/music/data/music067.bgw
+xi dats build P [--dry-run] [--pivot]               # written as it is; the install keeps <file>.base
+xi dats new [--pivot]                               # wizard: "Copy a file as it is"
+xi dats undo P                                      # install: .base back; pivot: the copy deleted
+```
+
 ## Entity
 
 ```text

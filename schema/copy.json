@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/copy.json",
+  "title": "xi dats copy action",
+  "description": "A file put into the target as it is: a UI sheet redrawn with `xi ui tex`, a replaced music track. The build writes resources.file at target.path in the install (keeping the file it replaces as <file>.base) or the pivot folder; nothing is registered, so target.path must be a file the client already reads.",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "target", "resources"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "copy"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "depends_on": {"type": "array", "items": {"$ref": "common.json#/$defs/actionId"}},
+    "outputs": {"$ref": "common.json#/$defs/outputTree"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[^:]+$",
+          "description": "Where the file goes, inside the game folder: ROM/119/51.DAT, sound9/win/music/data/music067.bgw. Forward slashes; no drive, no leading slash, no '..'."
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1, "description": "The file to copy: relative to the project file (what `dats prepare --type copy` writes), projects/resources, or the working folder; or absolute."}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Recorded by dats build: the path the file went to and the targets it went into — what undo takes back out.",
+      "properties": {
+        "path": {"type": "string"},
+        "targets": {"type": "array", "items": {"type": "string", "enum": ["dir", "pivot", "hd"]}}
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "copy.title_screen",
+      "type": "copy",
+      "description": "The title screen, redrawn with xi ui tex import",
+      "target": {"path": "ROM/119/50.DAT"},
+      "resources": {"file": "../../rom/ROM/119/50.DAT"}
+    }
+  ]
+}

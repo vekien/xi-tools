@@ -45,7 +45,8 @@
         {"$ref": "database.json"},
         {"$ref": "zone_dialog.json"},
         {"$ref": "zone_npcs.json"},
-        {"$ref": "zone_events.json"}
+        {"$ref": "zone_events.json"},
+        {"$ref": "copy.json"}
       ]
     }
   },
