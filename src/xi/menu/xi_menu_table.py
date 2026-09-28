@@ -517,7 +517,7 @@ def _table(root, rom_path: str) -> D.DmsgTable:
 def _put_text(t: D.DmsgTable, rom_path: str, idx: int, text: str) -> None:
     template = bytearray(t.blocks[0])
     while len(t.blocks) <= idx:
-        t.blocks.append(bytearray(D.set_text(template, 0, '.')))
+        t.blocks.append(bytearray(D.set_text(template, 0, '')))
     try:
         t.blocks[idx] = bytearray(D.set_text(t.blocks[idx], 0, text))
     except D.DmsgError:
@@ -533,7 +533,7 @@ def _put_text(t: D.DmsgTable, rom_path: str, idx: int, text: str) -> None:
 def set_string(root, rom_path: str, idx: int, text: str, dry_run: bool = False) -> Path:
     """Set block ``idx`` of a fixed-stride name/help table in ``root`` to ``text``,
     growing the table past its retail count by cloning a real block's shape. Blocks in
-    between hold '.' like retail's unnamed rows. Text that does not fit raises
+    between are blank. Text that does not fit raises
     MenuError and nothing is written."""
     t = _table(root, rom_path)
     _put_text(t, rom_path, idx, text)
@@ -544,11 +544,11 @@ def set_string(root, rom_path: str, idx: int, text: str, dry_run: bool = False) 
 
 def set_texts(kind: str, root, idx: int, text: dict, dry_run: bool = False) -> List[Path]:
     """Names and help for a record in every language table (JP falls back to EN,
-    help to '.' so a grown table never shows garbage). Every table is checked before
+    help to blank so a grown table never shows garbage). Every table is checked before
     any is written, so text that does not fit leaves all of them as they were."""
     k = KINDS[kind]
     name_en = text['name_en']
-    help_en = text.get('help_en') or '.'
+    help_en = text.get('help_en') or ''
     edits = []
     for lang in LANGS:
         for rom, value in ((k.names[lang], text.get(f'name_{lang}') or name_en),
@@ -584,7 +584,7 @@ def restore_row(kind: str, menu: MenuDat, idx: int, replaced: Optional[dict] = N
 
 def restore_texts(kind: str, root, idx: int, replaced: Optional[dict] = None,
                   dry_run: bool = False) -> List[Path]:
-    """Put back the name/help blocks ``replaced`` holds at ``idx``, or '.' in each.
+    """Put back the name/help blocks ``replaced`` holds at ``idx``, or a blank in each.
     Tables ``root`` has no copy of, and rows past a table's end, are left alone."""
     blocks = (replaced or {}).get('blocks') or {}
     written = []
@@ -597,7 +597,7 @@ def restore_texts(kind: str, root, idx: int, replaced: Optional[dict] = None,
         if rom in blocks:
             t.blocks[idx] = bytearray.fromhex(blocks[rom])
         else:
-            _put_text(t, rom, idx, '.')
+            _put_text(t, rom, idx, '')
         written.append(target_path(root, rom) if dry_run else _write(root, rom, D.serialize(t)))
     return written
 
@@ -605,7 +605,7 @@ def restore_texts(kind: str, root, idx: int, replaced: Optional[dict] = None,
 def restore_record(kind: str, root, idx: int, replaced: Optional[dict] = None,
                    dry_run: bool = False) -> List[Path]:
     """Undo a record in ``root``: put back what the build replaced (``capture_record``),
-    or empty the row and put '.' back in every name/help table. A root with no copy of
+    or empty the row and blank it in every name/help table. A root with no copy of
     a table is left alone rather than given one."""
     written = []
     if target_path(root, MENU_DAT).exists():

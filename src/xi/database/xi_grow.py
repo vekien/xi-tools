@@ -5,8 +5,9 @@ apart by what the file holds.
 
 The new rows are a filler:
 
-- a d_msg table: a row blanked to '.' (the last row's shape), as retail's unnamed rows are;
-- an item table: a copy of the table's last placeholder record (named '.' or nothing);
+- a d_msg table: a blank row (the last row's shape, its text empty);
+- an item table: a copy of the table's last placeholder record (named '.' or nothing), its
+  text emptied;
 - ``--fill-from ROW``: a copy of that row; ``--fill-hex``: exact bytes (a d_msg block, or a
   decrypted item record).
 
@@ -56,6 +57,25 @@ def _placeholder(rec: bytes) -> bool:
     return bool(subs) and subs[0]["flag"] == 0 and sub_value(subs[0]).strip() in ("", ".")
 
 
+def _blanked(rec: bytes) -> bytes:
+    """An item record with its text sub-strings emptied (a '.' placeholder made blank)."""
+    from xi.database.xi_build import _write_item_strings, parse_subs, set_sub
+    from xi.ui.items.xi_layout import ICON_OFFSET, find_text_offset
+    off = find_text_offset(rec)
+    if off is None:
+        return rec
+    try:
+        subs, end = parse_subs(rec, off, ICON_OFFSET)
+    except ValueError:
+        return rec
+    out = bytearray(rec)
+    for s in subs:
+        if s["flag"] == 0:
+            set_sub(s, "")
+    _write_item_strings(out, off, subs, end)
+    return bytes(out)
+
+
 def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> bytes:
     """The bytes each new row of the table ``data`` gets (an item record before its id)."""
     if _is_dmsg(data):
@@ -72,7 +92,7 @@ def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> byt
         if not t.num:
             raise GrowError("the table has no row to take the shape of a new one from; give --fill-hex")
         from xi.database.xi_build import _blank, _block_subs
-        return D._assemble_block(_blank(_block_subs(t.blocks[-1]), "."), t.stride)
+        return D._assemble_block(_blank(_block_subs(t.blocks[-1]), ""), t.stride)
     from xi.ui.items.xi_layout import detect_stride
     from xi.ui.items.xi_parser import _decrypt
     stride = detect_stride(data)
@@ -90,7 +110,7 @@ def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> byt
     for i in reversed(range(n)):
         rec = dec[i * stride:(i + 1) * stride]
         if _placeholder(rec):
-            return rec
+            return _blanked(rec)
     raise GrowError("the table has no placeholder record (named '.' or nothing) to copy; "
                     "give --fill-from or --fill-hex")
 
@@ -174,8 +194,8 @@ def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool,
     """Grow TABLE (a ROM path: an item DAT or a d_msg table) to COUNT rows, once.
 
     
-    New rows are a filler: a d_msg row blanked to '.', or the item table's last placeholder
-    record (its id following the table's numbering), unless --fill-from / --fill-hex says
+    New rows are a filler: a blank d_msg row, or the item table's last placeholder record
+    with its text emptied (its id following the table's numbering), unless --fill-from / --fill-hex says
     otherwise. In the install the table's .base grows too, so `xi dats build
     --reset` (and `--reset --pivot`, which copies the install's .base) keeps the rows. A table
     already COUNT rows long is left alone.

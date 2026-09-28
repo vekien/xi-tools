@@ -715,15 +715,15 @@ def _copied_block(t: D.DmsgTable, table: str, rid: int, copy_from, lang: str = "
 def _new_row(t: D.DmsgTable, table: str, rid: int, copy_from, lang: str = "en") -> tuple[int, list | None]:
     """Add record ``rid`` to ``t``: ``(index, [rows before, rows after])``. Key items and the
     quest / mission logs append a block carrying the id (a copy of ``copy_from`` when given);
-    a table read by row grows to ``rid`` — the rows in between hold '.', as retail's unnamed
-    rows do — and needs ``copy_from``, the row whose shape and text the new one copies."""
+    a table read by row grows to ``rid`` — the rows in between are blank — and needs
+    ``copy_from``, the row whose shape and text the new one copies."""
     block = _copied_block(t, table, rid, copy_from, lang)
     if table in C.ID_KEYED:
         t.blocks.append(block)
         return t.num - 1, None
     before = t.num
     while t.num < rid:
-        t.blocks.append(bytearray(D._assemble_block(_blank(_block_subs(block), "."), t.stride)))
+        t.blocks.append(bytearray(D._assemble_block(_blank(_block_subs(block), ""), t.stride)))
     t.blocks.append(block)
     return rid, [before, t.num]
 

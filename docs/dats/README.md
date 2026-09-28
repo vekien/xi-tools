@@ -602,7 +602,7 @@ Record edits:
   puts the records back. An item edit may carry its server rows (`item_basic`,
   `item_equipment` with `MId` or a gear action's model, `item_mods`, …), written as proposed
   SQL to `<project>.sql`, never run. No file ids, no table expansion. A text row past the
-  end is added with `copy_from` (the rows in between hold `.`). The spell and ability records of
+  end is added with `copy_from` (the rows in between are blank). The spell and ability records of
   `ROM/118/114.DAT` (`spellData`, `abilityData`: MP, cast, recast, job levels, TP, range …)
   edit the same way, a spell's `spell_list` row going to the SQL; `hex` writes a whole record
   exactly, and any other table may be named by its ROM path (an item table with its `layout`).

@@ -204,8 +204,8 @@ its full size) is grown once, as set-up, as `xi ftable expand` is run once for t
 The actions then edit its rows like any other:
 
 ```
-xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows blanked to '.'
-xi database grow ROM/288/80.DAT 8192                       # item: copies of its last placeholder
+xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows blank
+xi database grow ROM/288/80.DAT 8192                       # item: its last placeholder, text blank
 xi database grow ROM/288/80.DAT 8192 --fill-from 1023      # each new row a copy of row 1023
 xi database grow ROM/181/72.DAT 4096 --fill-hex "…"        # exact bytes per row
 xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's copy; say only
@@ -223,7 +223,7 @@ Japanese file.
 
 A text-table row past the end needs `copy_from`, the row to copy: `{"table": "titles", "id": 1300,
 "copy_from": 1, "strings": {"en": {"name": "Abyssea Delver"}}}` grows the titles table to 1,301
-rows — the rows in between hold `.`, as retail's unnamed rows do — in both languages (the
+rows — the rows in between are blank — in both languages (the
 Japanese row takes the English text unless `strings.jp` gives its own). Key items and the
 quest / mission logs are keyed by the id each record carries, so a new id is appended; `copy_from`
 there picks the record to copy. Undo trims the rows back off, only while nothing grew the

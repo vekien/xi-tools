@@ -119,7 +119,7 @@ def test_build_writes_record_and_names_then_undo(game):
     assert r.exit_code == 0, r.output
     menu = MT.load_menu(root)
     assert MT.is_empty(menu.records("spell")[4095]) and MT.is_empty(menu.records("command")[4095])
-    assert MT.read_names("spell", root)[4095] == "." and MT.read_names("command", root)[4095] == "."
+    assert MT.read_names("spell", root)[4095] == "" and MT.read_names("command", root)[4095] == ""
     assert not Path("projects/fs.json").exists()
 
 
@@ -198,7 +198,7 @@ def test_changed_id_puts_the_old_row_back(game):
     r = runner.invoke(group, ["build", "fs"], catch_exceptions=False)
     assert r.exit_code == 0, r.output
     menu = MT.load_menu(root)
-    assert MT.is_empty(menu.records("spell")[4095]) and MT.read_names("spell", root)[4095] == "."
+    assert MT.is_empty(menu.records("spell")[4095]) and MT.read_names("spell", root)[4095] == ""
     f = MT.read_fields("spell", menu.records("spell")[4000])
     assert f["mp"] == 12 and f["menu_index"] == 8 and MT.read_names("spell", root)[4000] == "Testspell"
     assert _read_manifest(Path("projects/fs.json"))["actions"][0]["result"]["record_id"] == 4000
@@ -270,7 +270,7 @@ def test_pivot_flag_builds_into_the_pivot_folder_only(game, tmp_path: Path, monk
     r = runner.invoke(group, ["undo", "piv", "--yes"], catch_exceptions=False)
     assert r.exit_code == 0, r.output
     assert MT.is_empty(MT.load_menu(pivot).records("spell")[4095])
-    assert MT.read_names("spell", pivot)[4095] == "."
+    assert MT.read_names("spell", pivot)[4095] == ""
     assert MT.read_fields("spell", MT.load_menu(root).records("spell")[4095])["mp"] == 12   # base project's row stays
 
     # --pivot without a configured folder is refused

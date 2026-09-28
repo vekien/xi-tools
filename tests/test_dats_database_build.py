@@ -351,7 +351,7 @@ def test_a_text_row_past_the_end_needs_like_and_grows_both_languages(game):
     for rel, name in ((TITLES_EN, "Abyssea Delver"), (TITLES_JP, "Abyssea Delver")):   # JP takes the EN text
         t = D.parse((game / Path(*rel.split("/"))).read_bytes())
         assert t.num == 7
-        assert [DB.sub_value(DB._block_subs(t.blocks[i])[0]) for i in (3, 4, 5)] == [".", ".", "."]
+        assert [DB.sub_value(DB._block_subs(t.blocks[i])[0]) for i in (3, 4, 5)] == ["", "", ""]
         assert DB.sub_value(DB._block_subs(t.blocks[6])[0]) == name
     from xi.dats.xi_dats import group
     assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0

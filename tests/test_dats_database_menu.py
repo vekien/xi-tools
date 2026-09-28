@@ -140,7 +140,7 @@ def test_a_d_msg_table_by_path(game):
     assert r.exit_code == 0, r.output
     t = D.parse((game / rel).read_bytes())
     texts = [DB.sub_value(DB._block_subs(b)[0]) for b in t.blocks]
-    assert texts[2] == "Freezes the target." and texts[9] == "A new help text." and texts[8] == "."
+    assert texts[2] == "Freezes the target." and texts[9] == "A new help text." and texts[8] == ""
     assert (game / MT.KINDS["spell"].help["jp"]).read_bytes() == before[MT.KINDS["spell"].help["jp"]]
     undo()
     assert snapshot(game) == before
