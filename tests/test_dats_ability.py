@@ -310,9 +310,10 @@ def test_build_places_and_registers_then_undo(game, monkeypatch):
 
 
 def test_build_pivot_places_in_the_pivot_folder(game, tmp_path: Path, monkeypatch):
-    """--pivot places the DAT and registers its file id in FFXI_PIVOT_DIR's ROM10 tables
-    (never its main pair, which the client does not read), leaves the base install alone,
-    skips the base-to-pivot table sync, and undo clears it there."""
+    """--pivot places the DAT and registers its file id in FFXI_PIVOT_DIR's ROM10 tables, and
+    in the main pair the folder carries (the base game's, kept there to ship to the install;
+    the client never reads it from the pivot folder), leaves the base install alone, skips
+    the base-to-pivot table sync, and undo clears it there."""
     import xi.ftable.xi_expand as xe
     import xi.xi_config as cfg
     from xi.dats.xi_dats import _read_manifest, group
@@ -336,7 +337,7 @@ def test_build_pivot_places_in_the_pivot_folder(game, tmp_path: Path, monkeypatc
     assert r.exit_code == 0, r.output
     assert (pivot / "ROM10" / "20" / "0.DAT").read_bytes()[:4] == b"tigr"
     assert _resolve(pivot, 4412 + 339, rom=10)[0] == "ROM10/20/0.DAT"
-    assert _resolve(pivot, 4412 + 339) == (None, None)                          # main pair untouched
+    assert _resolve(pivot, 4412 + 339)[0] == "ROM10/20/0.DAT"                  # the main pair it carries
     assert not (root / "ROM10" / "20" / "0.DAT").exists()
     assert _resolve(root, 4412 + 339) == (None, None) and _resolve(root, 4412 + 339, rom=10) == (None, None)
     assert _read_manifest(Path("projects/tf.json"))["actions"][0]["result"]["targets"] == ["pivot"]
@@ -345,6 +346,7 @@ def test_build_pivot_places_in_the_pivot_folder(game, tmp_path: Path, monkeypatc
     assert r.exit_code == 0, r.output
     assert not (pivot / "ROM10" / "20" / "0.DAT").exists()
     assert _resolve(pivot, 4412 + 339, rom=10) == (None, None)
+    assert _resolve(pivot, 4412 + 339) == (None, None)
 
 
 def test_a_retail_sized_main_table_does_not_stop_a_rom10_build(game, monkeypatch):

@@ -363,9 +363,12 @@ the pivot folder and never sees `FTABLE.DAT` opened.
 So a build registers a `ROM{n}` placement in the target's `ROM{n}` pair. In the base
 install the main pair gets the same entry when it is big enough to hold the id (for the
 tools that read only that pair); a retail-sized main `FTABLE` — a launcher may put one
-back — is left alone instead of failing the build, and a pivot folder's main pair is never
-written. A `ROM/…` placement registers in the main pair, so it needs the base install: with
-`--pivot` the build refuses one that would need a new entry.
+back — is left alone instead of failing the build. A pivot folder that carries its own main
+pair gets the entry there too: the client never reads it from the pivot folder, so that pair
+is the base game's, kept with the pivot folder to ship to the install (CatsEyeXI's dats keeps
+it in `rom/`, started from the retail client's each build). A `ROM/…` placement registers in
+the main pair, so it needs the base install: with `--pivot` the build refuses one that would
+need a new entry.
 
 What this means with a pivot folder that carries its own `ROM10` tables (CatsEyeXI's does):
 

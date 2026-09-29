@@ -413,10 +413,11 @@ def patch_launcher_tables(file_id: int, ftval: int, rom: int) -> None:
 
     A ROM{n} placement registers in the target's ROM{n} pair: the client honours that
     entry over the main FTABLE/VTABLE, and reads a pivot folder's ROM{n} pair in place
-    of the install's. The base install's main pair gets the same entry when it is large
-    enough, for the tools that read only that pair; a retail-sized main FTABLE is left
-    alone instead of failing the build, and a pivot folder's main pair is never touched —
-    the client never reads it.
+    of the install's. The target's main pair gets the same entry when it is large enough
+    (a retail-sized main FTABLE is left alone instead of failing the build): the base
+    install's for the tools that read only that pair, and a pivot folder's when it carries
+    one — the client never reads it from there, so such a pair is the base game's, kept
+    with the pivot folder to ship to the install (CatsEyeXI's dats keeps it in rom/).
 
     A ROM/ placement registers in the main pair, which counts only in the base install;
     ``_check_registrable`` refuses one that would need a new entry anywhere else."""
@@ -433,7 +434,7 @@ def patch_launcher_tables(file_id: int, ftval: int, rom: int) -> None:
             f"{root} has no ROM{rom} tables, so file_id {file_id:,} cannot be registered there. "
             f"Run `xi ftable expand` on it, or build into a folder that has ROM{rom}/FTABLE{rom}.DAT.")
     _patch_raw_table(rom_ft, rom_vt, file_id, ftval, rom)
-    if in_install and _table_holds(main_ft, main_vt, file_id):
+    if _table_holds(main_ft, main_vt, file_id):
         try:
             _patch_raw_table(main_ft, main_vt, file_id, ftval, rom)
         except PermissionError:
@@ -3114,12 +3115,13 @@ def _action_placements(action: dict) -> list[tuple[int, str]]:
 def _unregister_file_id(root: Path, file_id: int, rom: int) -> bool:
     """Clear a file_id's entry (ftval + vtable version -> 0, so it resolves to
     nothing) in the tables a build of ``root`` registers it in
-    (``patch_launcher_tables``): the ROM{rom} pair, and in the base install its main
-    pair when that holds the id. False when ``root`` has none of them."""
+    (``patch_launcher_tables``): the ROM{rom} pair, and its main pair when that holds the
+    id — in a pivot folder only for a ROM{rom} placement (a ROM/ one there registered
+    nothing: the id was already retail's). False when ``root`` has none of them."""
     pairs = []
     if rom != 1:
         pairs.append((root / f"ROM{rom}" / f"FTABLE{rom}.DAT", root / f"ROM{rom}" / f"VTABLE{rom}.DAT"))
-    if _root_target_name(root) == "dir":
+    if rom != 1 or _root_target_name(root) == "dir":
         pairs.append((root / "FTABLE.DAT", root / "VTABLE.DAT"))
     cleared = False
     for ft, vt in pairs:
