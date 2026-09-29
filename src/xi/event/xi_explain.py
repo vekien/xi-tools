@@ -618,7 +618,8 @@ def add_entity_name(data: bytes, sid: int, name: str, replace: bool = False) -> 
         rid = struct.unpack_from("<I", r, 28)[0]
         if rid == sid:
             if not replace:
-                raise ValueError(f"id 0x{sid:08X} already listed as {r[:28].split(b'\x00',1)[0].decode('cp932','replace')!r}")
+                listed = r[:28].split(b"\x00", 1)[0].decode("cp932", "replace")
+                raise ValueError(f"id 0x{sid:08X} already listed as {listed!r}")
             out.append(rec); placed = True; continue
         if not placed and rid > sid and rid != 0:
             out.append(rec); placed = True
