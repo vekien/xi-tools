@@ -44,9 +44,8 @@ folder = id // 1000  -> se{folder:03d}      file = id -> se{id:06d}.spw
 
 xi reuses the generic DAT section walker
 ([`parse_sections`](../../src/xi/entity/anim/xi_export.py): 16-byte header,
-`type = meta & 0x7F`, `size = ((meta >> 7) & 0x7FFFF) * 0x10` on write —
-**19-bit** size field, mask `0x7FFFF`; some readers still use a wider mask under
-the 8 MiB ceiling),
+`type = meta & 0x7F`, `size = ((meta >> 7) & 0x7FFFF) * 0x10` —
+**19-bit** size field, mask `0x7FFFF`, on read and write),
 `data_start = start + 0x10`). See [`xi_section.py`](../../src/xi/common/xi_section.py).
 
 ## Where the sounds are

@@ -45,6 +45,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.xi_config import XI_TOOLS_DIR, output_path_for
 
 # Serialize backend mutations — a single editor client issues commands one at a
@@ -2175,7 +2176,7 @@ def _scan_zone_subarea_params(data: bytes) -> list[int]:
     out, pos, length = [], 0, len(data)
     while pos + 16 <= length:
         meta = _s.unpack_from("<I", data, pos + 4)[0]
-        size = ((meta >> 7) & 0xFFFFF) * 0x10
+        size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if size <= 0:
             break
         if (meta & 0x7F) == 0x36 and data[pos + 0x10:pos + 0x13] == b"RID":

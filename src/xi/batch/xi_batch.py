@@ -16,6 +16,7 @@ from pathlib import Path
 
 import click
 
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.entity.mesh.xi_export import resolve_dat_path, SECTION_TYPE_NAMES
 from xi.xi_config import BLENDER_PATH, XI_TOOLS_DIR, FFXI_DIR
 from xi.zone.xi_list import get_zone_entries
@@ -1066,7 +1067,7 @@ def dat_header_dump(output, rom, type_filter, slot_filter, race_filter, id_range
     """Dump the section-type profile of every FFXI .DAT to one JSON, keyed by ROM-relative path.
 
     Every DAT is a flat sequence of 16-byte-headed sections: 4-char FourCC + a meta
-    u32 where ``type_code = meta & 0x7F`` and ``size = ((meta>>7) & 0xFFFFF) * 0x10``.
+    u32 where ``type_code = meta & 0x7F`` and ``size = ((meta>>7) & 0x7FFFF) * 0x10`` (19 bits).
     Almost every DAT opens with a ``Directory`` (0x01) wrapper, so the *first* header
     tells you nothing — the content type lives in later sections. This walks the whole
     section chain (header reads + seeks only, no bodies) and records, per DAT:
@@ -1155,7 +1156,7 @@ def dat_header_dump(output, rom, type_filter, slot_filter, race_filter, id_range
             if len(hdr) < 16:
                 break
             meta = struct.unpack_from("<I", hdr, 4)[0]
-            size = ((meta >> 7) & 0xFFFFF) * 0x10
+            size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
             if size <= 0:
                 break
             types[meta & 0x7F] += 1
