@@ -350,10 +350,9 @@ def icon_import_cmd(item_id, png_file, dry_run):
 # ── Per-type subgroups ─────────────────────────────────────────────────────────
 
 def _make_type_group(name, description, type_id=None, dats=None):
-    @click.group(name)
+    @click.group(name, help=description)
     def grp():
         pass
-    grp.__doc__ = description
 
     def _dats_for_group():
         for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
@@ -366,12 +365,11 @@ def _make_type_group(name, description, type_id=None, dats=None):
                 continue
             yield cat_name, base_id, item_type, en_rom, jp_rom, en_path
 
-    @grp.command('search')
+    @grp.command('search', help=f"""Search the {name} items by name.""")
     @click.argument('query')
     @click.option('--exact', is_flag=True)
     @click.option('--as-json', is_flag=True)
     def search_cmd(query, exact, as_json):
-        f"""Search for a {name} item by name."""
         results = []
         for cat_name, base_id, item_type, en_rom, jp_rom, en_path in _dats_for_group():
             click.echo(f'Processing {cat_name}: {en_path}', err=True)
@@ -389,15 +387,14 @@ def _make_type_group(name, description, type_id=None, dats=None):
         for item in results:
             click.echo(f'#{item.id:>6}  {item.name}')
 
-    @grp.command('export')
+    @grp.command('export', help=f"""Export all {name} item definitions to JSON.
+
+        Default output: exports/ui/items/{name}.json
+        """)
     @click.option('--output', '-o', default=None,
                   help=f'Output path (default: exports/ui/items/{name}.json).')
     @click.option('--no-icons', is_flag=True)
     def export_cmd(output, no_icons):
-        f"""Export all {name} item definitions to JSON.
-
-        Default output: exports/ui/items/{name}.json
-        """
         results = []
         for cat_name, base_id, item_type, en_rom, jp_rom, en_path in _dats_for_group():
             click.echo(f'Processing {cat_name}: {en_path}', err=True)
@@ -409,16 +406,7 @@ def _make_type_group(name, description, type_id=None, dats=None):
         out_path = Path(output) if output else _export_path(name)
         _write_export(results, out_path, f'{name} items')
 
-    @grp.command('json')
-    @click.option('--output', '-o', default=None,
-                  help=f'Output path (default: {_EXPORT_ROOT}/{name}s/all.json).')
-    @click.option('--icons', is_flag=True,
-                  help='Include the icon bitmap as base64 (omitted by default).')
-    @click.option('--header-bytes', default=0x40, show_default=True,
-                  help='How many raw decrypted record bytes to include as header_hex '
-                       '(0 to omit). Surfaces fields not yet decoded.')
-    def json_cmd(output, icons, header_bytes):
-        f"""Dump every {name} record to a JSON file (always written to disk).
+    @grp.command('json', help=f"""Dump every {name} record to a JSON file (always written to disk).
 
         Includes all parsed fields (name, flags, jobs, dmg/delay/dps/skill, …)
         plus ``dat`` / ``dat_ui`` (source DAT), ``record_index`` (slot in the DAT),
@@ -434,7 +422,15 @@ def _make_type_group(name, description, type_id=None, dats=None):
           xi ui items {name} json
           xi ui items {name} json -o custom/path.json
           xi ui items {name} json --icons
-        """
+        """)
+    @click.option('--output', '-o', default=None,
+                  help=f'Output path (default: {_EXPORT_ROOT}/{name}s/all.json).')
+    @click.option('--icons', is_flag=True,
+                  help='Include the icon bitmap as base64 (omitted by default).')
+    @click.option('--header-bytes', default=0x40, show_default=True,
+                  help='How many raw decrypted record bytes to include as header_hex '
+                       '(0 to omit). Surfaces fields not yet decoded.')
+    def json_cmd(output, icons, header_bytes):
         import base64
         results = []
         for cat_name, base_id, item_type, en_rom, jp_rom, en_path in _dats_for_group():
@@ -455,11 +451,7 @@ def _make_type_group(name, description, type_id=None, dats=None):
         out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding='utf-8')
         click.echo(f'Wrote {len(results)} {name} records -> {out_path}')
 
-    @grp.command('import')
-    @click.argument('json_file', type=click.Path(exists=True))
-    @click.option('--dry-run', is_flag=True)
-    def import_cmd(json_file, dry_run):
-        f"""Patch existing {name} items from a JSON array.
+    @grp.command('import', help=f"""Patch existing {name} items from a JSON array.
 
         Accepts the format produced by ``export``. Only fields present in each
         entry are written; unspecified fields are left untouched.
@@ -470,7 +462,10 @@ def _make_type_group(name, description, type_id=None, dats=None):
         Examples:
           xi ui items {name} import edits.json
           xi ui items {name} import edits.json --dry-run
-        """
+        """)
+    @click.argument('json_file', type=click.Path(exists=True))
+    @click.option('--dry-run', is_flag=True)
+    def import_cmd(json_file, dry_run):
         entries = json.loads(Path(json_file).read_text(encoding='utf-8'))
         if not isinstance(entries, list):
             raise click.ClickException('JSON must be an array of item objects.')
@@ -510,11 +505,7 @@ def _make_type_group(name, description, type_id=None, dats=None):
         msg = f'{"Would patch" if dry_run else "Patched"} {total} item(s).'
         click.echo(msg)
 
-    @grp.command('inject')
-    @click.argument('json_file', type=click.Path(exists=True))
-    @click.option('--dry-run', is_flag=True)
-    def inject_cmd(json_file, dry_run):
-        f"""Inject brand-new {name} items from a JSON array into free DAT slots.
+    @grp.command('inject', help=f"""Inject brand-new {name} items from a JSON array into free DAT slots.
 
         Each entry must include at minimum a ``name``. Numeric fields default to
         zero when absent. ``jobs_list`` / ``flags_decoded`` are accepted and
@@ -533,7 +524,10 @@ def _make_type_group(name, description, type_id=None, dats=None):
         Examples:
           xi ui items {name} inject new_items.json
           xi ui items {name} inject new_items.json --dry-run
-        """
+        """)
+    @click.argument('json_file', type=click.Path(exists=True))
+    @click.option('--dry-run', is_flag=True)
+    def inject_cmd(json_file, dry_run):
         entries = json.loads(Path(json_file).read_text(encoding='utf-8'))
         if not isinstance(entries, list):
             raise click.ClickException('JSON must be an array of item objects.')
@@ -590,9 +584,8 @@ def _make_type_group(name, description, type_id=None, dats=None):
         else:
             click.echo(f'Dry-run: would inject {len(injected)} item(s) at IDs {injected}.')
 
-    @grp.command('new')
+    @grp.command('new', help=f"""Interactive wizard to create a new {name} item.""")
     def new_cmd():
-        f"""Interactive wizard to create a new {name} item."""
         raise click.ClickException(_STUB)
 
     return grp
