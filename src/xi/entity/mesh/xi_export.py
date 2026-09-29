@@ -220,9 +220,12 @@ def decode_dxt3(reader: Reader, width: int, height: int) -> bytes:
     buffer = bytearray(width * height * 4)
     for y1 in range(0, height, 4):
         for x1 in range(0, width, 4):
+            # Standard DXT3 alpha: 64-bit little-endian, texel i (row-major in the
+            # block) is nibble i. xim's (a0 << 32) | a1 swapped rows 0<->1 and
+            # 2<->3, streaking every texture whose alpha carries the image.
             a0 = reader.u32()
             a1 = reader.u32()
-            alpha = (a0 << 32) | a1
+            alpha = a0 | (a1 << 32)
             c0 = reader.u16()
             c1 = reader.u16()
             r = [0, 0, 0, 0]
@@ -240,8 +243,9 @@ def decode_dxt3(reader: Reader, width: int, height: int) -> bytes:
             for y in range(y1, y1 + 4):
                 for x in range(x1 + 3, x1 - 1, -1):
                     idx = (indices >> (2 * count)) & 0x3
-                    pixel_alpha = ((alpha >> (4 * count)) & 0xF) * 255 // 16
                     count -= 1
+                    i = (y - y1) * 4 + (x - x1)
+                    pixel_alpha = ((alpha >> (4 * i)) & 0xF) * 255 // 16
                     if y >= height or x >= width:
                         continue
                     dest = 4 * y * width + 4 * x
