@@ -6,6 +6,31 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
+## v1.15.0 — 2026-09-29
+
+[Compare v1.14.0...v1.15.0](https://github.com/vekien/xi-tools/compare/v1.14.0...v1.15.0)
+
+**Export: texture alpha**
+
+- DXT3 textures came out with their alpha rows swapped in pairs inside every 4×4 block (a bug carried over from xim's decoder). Colour was right, so most textures looked fine, but one whose picture lives in its alpha — water and effect textures such as West Sarutabaruta's `ike2` — was streaked with fine horizontal lines, most visible zoomed out. Fixed for everything that writes textures: zone export (and `--unreal`), mesh, gear and pose, effects, animation and batch. Re-export to pick it up.
+
+**dats**
+
+- New zone action types, each recording what it changed so a rebuild converges and `undo` is exact: `zone_dialog` (lines by id in a zone's English and Japanese dialog tables), `zone_npcs` (renames and new NPCs in the entity-name table, each row as proposed SQL) and `zone_events` (cutscenes and dialogues compiled into the zone's event table, lint-checked first; a camera gets its own scene DAT). `xi event cutscene compile` and `xi event dialogue new` are now prepare + build, and the zone editor's Publish / Delete go through them.
+- A build applies a project's table edits to the tables as they are: whatever an edit names is replaced, and `undo` still puts it back. `--reset` first puts every table the project edited back to its `.base`. `--list` builds a build list (`projects/build_list.json`, [`schema/build_list.json`](schema/build_list.json)): several projects in order, every table they edit reset once first with `--reset`.
+- `like` is now `copy_from`; an action that still says `like` is refused and says so.
+- The CatsEyeXI item band is gone: any item table can be named by its ROM path with the layout of its records. `xi ui items custom` is now `xi ui items monstrosity` (`custom` still works).
+
+**database**
+
+- The spell and ability records of `ROM/118/114.DAT` (`spellData`, `abilityData`: MP, cast and recast, element, skill, job levels; TP, range, AoE), by field, `copy_from` or growth; a spell edit proposes its `spell_list` row. `xi mv database` bakes them for the viewer.
+- `hex` writes a whole record exactly; a d_msg table can be named by its ROM path; the help tables' `help` sub-string and the Japanese key item and status names can be edited. `zone_dialog` takes `entry_hex`, a line's whole entry.
+- `xi database grow TABLE COUNT` grows a d_msg or item table to a fixed size once, as `xi ftable expand` does for the file tables (its `.base` too, so a reset keeps the rows): new d_msg rows blanked to `.`, item rows copies of the last placeholder, or `--fill-from ROW` / `--fill-hex`.
+
+**Events**
+
+- `xi event decompile` lists every NPC an event involves, and an unedited recompile changes only the owner's block (Maat's event had been dropping three NPCs and rewriting 27 lines).
+
 ## v1.14.0 — 2026-09-25
 
 [Compare v1.13.0...v1.14.0](https://github.com/vekien/xi-tools/compare/v1.13.0...v1.14.0)
