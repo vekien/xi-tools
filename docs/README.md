@@ -12,6 +12,9 @@ and a UE5 engine port where they confirm or clarify format details.
 
 > **Note:** Includes documentation on `xi-tools`, which is not yet publicly released — but the format information is accurate and useful for research.
 
+> **Contributing (people or AI):** read [DESIGN.md](../DESIGN.md) first. Every feature is
+> documented here, in the same PR as its code (DESIGN.md §11).
+
 ---
 
 ## Table of Contents
