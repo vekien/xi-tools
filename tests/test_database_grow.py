@@ -23,13 +23,13 @@ def titles(path: Path) -> list[str]:
     return [DB.sub_value(DB._block_subs(b)[0]) for b in t.blocks]
 
 
-def test_a_text_table_grows_with_dot_rows_and_its_base_too(game):
+def test_a_text_table_grows_with_blank_rows_and_its_base_too(game):
     path = game / Path(*TITLES_EN.split("/"))
     r = grow(TITLES_EN, "10", "--dry-run")
     assert r.exit_code == 0 and "would grow 3 -> 10 rows" in r.output and len(titles(path)) == 3
     r = grow(TITLES_EN, "10")
     assert r.exit_code == 0, r.output
-    assert titles(path) == ["Fodderchief Flayer", "Worm Wrangler", "Kupo Keeper"] + ["."] * 7
+    assert titles(path) == ["Fodderchief Flayer", "Worm Wrangler", "Kupo Keeper"] + [""] * 7
     assert titles(path.with_name(path.name + ".base")) == titles(path)
     r = grow(TITLES_EN, "10")
     assert r.exit_code == 0 and "already 10 rows" in r.output
@@ -45,7 +45,7 @@ def test_rows_it_added_are_edited_like_any_and_a_reset_keeps_them(game):
     for _ in range(2):
         r = CliRunner().invoke(group, ["build", "--list", "--reset"], catch_exceptions=False)
         assert r.exit_code == 0, r.output
-        assert titles(path)[7:] == [".", "Abyssea Delver", "Fodderchief Flayer"]
+        assert titles(path)[7:] == ["", "Abyssea Delver", "Fodderchief Flayer"]
 
 
 def test_an_item_table_grows_with_its_placeholder_its_ids_counting_on(game):
@@ -53,7 +53,7 @@ def test_an_item_table_grows_with_its_placeholder_its_ids_counting_on(game):
     assert r.exit_code == 0, r.output
     for i in range(8, 12):
         rec = T.record(game, ARMOR_EN, i)
-        assert struct.unpack_from("<I", rec)[0] == 10240 + i and DB.item_name(rec, "armor", "legacy") == "."
+        assert struct.unpack_from("<I", rec)[0] == 10240 + i and DB.item_name(rec, "armor", "legacy") == ""
     assert grow(ARMOR_EN, "14", "--fill-from", "2").exit_code == 0
     rec = T.record(game, ARMOR_EN, 13)
     assert struct.unpack_from("<I", rec)[0] == 10253 and DB.item_name(rec, "armor", "legacy") == "Moonshade Earring"
@@ -69,5 +69,29 @@ def test_pivot_gets_a_grown_copy_and_the_install_is_left_alone(game, tmp_path: P
     install = (game / Path(*TITLES_EN.split("/"))).read_bytes()
     assert grow(TITLES_EN, "6", "--pivot").exit_code == 0
     copy = pivot / Path(*TITLES_EN.split("/"))
-    assert len(titles(copy)) == 6 and titles(copy.with_name(copy.name + ".base")) == titles(copy)
+    assert len(titles(copy)) == 6 and not copy.with_name(copy.name + ".base").exists()
     assert (game / Path(*TITLES_EN.split("/"))).read_bytes() == install
+
+
+def test_an_install_grown_table_keeps_its_rows_through_a_pivot_reset(game, tmp_path: Path, monkeypatch):
+    import xi.xi_config as cfg
+    pivot = tmp_path / "pivot"
+    pivot.mkdir()
+    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot))
+    assert grow(TITLES_EN, "6").exit_code == 0                          # the install and its .base
+    T.prepare([{"table": TITLES_EN, "id": 5, "strings": {"sub0": "Pivot Title"}}], "a")
+    Path("projects/build_list.json").write_text(json.dumps({"schema": BL.LIST_SCHEMA, "projects": ["a"]}))
+    from xi.dats.xi_dats import group
+    for _ in range(2):
+        r = CliRunner().invoke(group, ["build", "--list", "--reset", "--pivot"], catch_exceptions=False)
+        assert r.exit_code == 0, r.output
+        assert titles(pivot / Path(*TITLES_EN.split("/")))[3:] == ["", "", "Pivot Title"]
+
+
+def test_a_grown_row_keeps_the_last_rows_numbers(game):
+    from test_dats_database_build import KI_EN
+    path = game / Path(*KI_EN.split("/"))
+    assert grow(KI_EN, "4").exit_code == 0
+    last, new = (DB._block_subs(D.parse(path.read_bytes()).blocks[i]) for i in (1, 3))
+    assert [DB.sub_value(x) for x in new] == [2, 1, "", "", "", "", ""]      # numbers as row 1's
+    assert [DB.sub_value(x) for x in last][:2] == [2, 1]

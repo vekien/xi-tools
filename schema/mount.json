@@ -17,6 +17,7 @@
       "required": ["mount_id"],
       "properties": {
         "mount_id": {"$ref": "common.json#/$defs/autoOrInteger"},
+        "dat": {"$ref": "common.json#/$defs/romPath", "description": "Where the model DAT goes, verbatim (ROM10/10/1.DAT), its file id registered there; what the wizard writes and the build reads. Without it the build picks a ROM10/100+ slot."},
         "model_dat": {
           "oneOf": [
             {"$ref": "common.json#/$defs/romPath"},

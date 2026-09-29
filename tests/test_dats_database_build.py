@@ -351,7 +351,7 @@ def test_a_text_row_past_the_end_needs_like_and_grows_both_languages(game):
     for rel, name in ((TITLES_EN, "Abyssea Delver"), (TITLES_JP, "Abyssea Delver")):   # JP takes the EN text
         t = D.parse((game / Path(*rel.split("/"))).read_bytes())
         assert t.num == 7
-        assert [DB.sub_value(DB._block_subs(t.blocks[i])[0]) for i in (3, 4, 5)] == [".", ".", "."]
+        assert [DB.sub_value(DB._block_subs(t.blocks[i])[0]) for i in (3, 4, 5)] == ["", "", ""]
         assert DB.sub_value(DB._block_subs(t.blocks[6])[0]) == name
     from xi.dats.xi_dats import group
     assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
@@ -473,3 +473,55 @@ def test_a_table_by_path_says_what_it_is(game):
     prepare([{"table": ARMOR_EN, "layout": "armor", "id": 99, "set": {"level": 2}}], "tweaks", "--replace")
     r = build()
     assert r.exit_code != 0 and "holds 8 records; row 99 is past its end" in r.output
+
+
+MONST_JP = "ROM/288/79.DAT"
+
+
+def _bmp32() -> bytes:
+    """A 32x32 256-colour BMP file, as the item icons are."""
+    dib = struct.pack("<IiiHHIIiiII", 40, 32, 32, 1, 8, 0, 1024, 0, 0, 0, 0)
+    dib += bytes(range(256)) * 4 + bytes((i * 7) & 0xFF for i in range(1024))
+    return b"BM" + struct.pack("<IHHI", 14 + len(dib), 0, 0, 14 + 40 + 1024) + dib
+
+
+def test_add_makes_whole_items_from_fields(game):
+    write(game, MONST_EN, item_dat("armor", "legacy", 29696, {}, 1032, "en"))
+    write(game, MONST_JP, item_dat("armor", "legacy", 29696, {}, 1032, "jp"))
+    Path("projects/icons").mkdir(parents=True)
+    Path("projects/icons/beret.bmp").write_bytes(_bmp32())
+    beret = {"id": 29696 + 1030,
+             "set": {"level": 75, "slots": ["HEAD"], "jobs": ["WAR"], "flags": ["CANEQUIP"], "unknown_2a": 256},
+             "strings": {"en": {"name": "Renegade Beret", "logName": "renegade beret",
+                                "logPlural": "renegade berets", "description": "DEF:20"},
+                         "jp": {"name": "Renegade Beret JP", "description": "DEF20"}},
+             "icon": {"file": "icons/beret.bmp"}}
+    Path("projects/add.json").write_text(json.dumps({"schema": "xi.dats.v1", "actions": [
+        {"id": "database.add", "type": "database", "server": {"emit": False}, "edits": [
+            {"table": MONST_EN, "table_jp": MONST_JP, "layout": "armor", "add": [
+                beret,
+                {"strings": {"en": {"name": "New Coat"}}, "set": {"level": 5}},
+                {"strings": {"en": {"name": "renegade BERET"}}}]}]}]}), encoding="utf-8")
+    r = build("add")
+    assert r.exit_code == 0, r.output
+    en, jp = record(game, MONST_EN, 1030), record(game, MONST_JP, 1030)
+    assert struct.unpack_from("<I", en)[0] == 29696 + 1030
+    assert DB.item_name(en, "armor", "legacy") == "Renegade Beret"
+    assert DB.item_name(jp, "armor", "legacy") == "Renegade Beret JP"
+    assert read_field(en, "armor", "legacy", "level") == 75 == read_field(jp, "armor", "legacy", "level")
+    assert read_field(en, "armor", "legacy", "unknown_2a") == 256
+    assert DB.icon_bmp(en) == (_bmp32(), "item    custom")                  # the .bmp back, byte for byte
+    assert DB.item_name(record(game, MONST_EN, 0), "armor", "legacy") == "New Coat"   # the first empty row
+    names = [DB.item_name(record(game, MONST_EN, i), "armor", "legacy").lower() for i in range(1032)]
+    assert names.count("renegade beret") == 1                              # the same name is skipped
+    data = (game / MONST_EN).read_bytes()
+    assert build("add").exit_code == 0 and (game / MONST_EN).read_bytes() == data   # nothing new on top
+    from xi.database.xi_core import validate_action
+    assert validate_action({"id": "d", "type": "database", "edits": [
+        {"table": MONST_EN, "layout": "armor", "add": [{"strings": {"en": {"description": "x"}}},
+                                                      {"id": 1, "icon": {"file": "x.png"}}]}]}) == [
+        "edits[0].add[0]: an item without an id needs strings.en.name (it must be unique in the table)",
+        "edits[0].add[1].icon.file must be a .bmp file, relative to the file holding the action"]
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "add", "--yes"], catch_exceptions=False).exit_code == 0
+    assert DB.item_name(record(game, MONST_EN, 1030), "armor", "legacy") == "."

@@ -1,6 +1,6 @@
 """A build list (schema/build_list.json): the projects ``xi dats build --list`` builds, first
-to last. With ``--reset`` every table any of them edits in place is reset from its ``.base``
-once, before the first project.
+to last. With ``--reset`` every table any of them edits in place is reset once, before the
+first project, to the install's untouched copy (its ``.base``, else the file).
 
 Projects that share a table (two that edit ``ROM/118/114.DAT``, a zone editor project and a
 project that edits the same zone's dialog) then layer the same way on every build: each
@@ -112,28 +112,29 @@ def record(doc: dict, target: str, rels) -> None:
 
 
 def reset_tables(root: Path, rels, dry_run: bool) -> dict[str, list[str]]:
-    """Put each table ``rels`` names in ``root`` back to its ``.base``:
-    ``{"restored": [...], "removed": [...], "none": [...]}`` — ``removed`` is a pivot copy a
-    build made, ``none`` has no ``.base`` (never written through xi-tools, or before it kept
-    one in the pivot folder). A dry run holds the reset tables for the builds after it."""
+    """Reset each table ``rels`` names in ``root`` to the install's untouched copy
+    (:func:`xi.xi_config.pristine`: its ``.base``, else the file itself):
+    ``{"restored": [...], "none": [...]}``. In the install that is its ``.base``; ``none``
+    there has no ``.base`` (never written through xi-tools, so already untouched). Into the
+    pivot folder the install's copy is written over the pivot's; ``none`` is a table the
+    install doesn't have. A dry run holds the reset tables for the builds after it."""
     import xi.xi_config as cfg
     from xi.dats import xi_stage
     from xi.menu.xi_menu_table import target_path
-    out: dict[str, list[str]] = {"restored": [], "removed": [], "none": []}
+    out: dict[str, list[str]] = {"restored": [], "none": []}
+    install = Path(cfg.FFXI_DIR)
+    in_place = Path(root).resolve() == install.resolve()
     for rel in rels:
-        p = target_path(root, rel)
-        base = p.with_name(p.name + ".base")
-        if not dry_run:
-            out[cfg.reset_to_base(p)].append(rel)
-        elif not base.is_file():
+        src = install / Path(*rel.split("/"))
+        source = cfg.pristine(src)
+        if source is None or (in_place and source == src):
             out["none"].append(rel)
-        elif base.stat().st_size == 0:
-            # Without the pivot copy a read falls back to the install's.
-            install = Path(cfg.FFXI_DIR) / Path(*rel.split("/"))
-            if install.is_file():
-                xi_stage.write(root, rel, install.read_bytes(), True)
-            out["removed"].append(rel)
+            continue
+        if dry_run:
+            xi_stage.write(root, rel, source.read_bytes(), True)
         else:
-            xi_stage.write(root, rel, base.read_bytes(), True)
-            out["restored"].append(rel)
+            p = target_path(root, rel)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(source.read_bytes())
+        out["restored"].append(rel)
     return out

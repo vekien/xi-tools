@@ -47,9 +47,11 @@ WebSocket at `ws://HOST:PORT/ws`. Used by xi-zone-editor; exits after idle-secs 
 xi dats json
 xi dats prepare
 xi dats build                    # --pivot: into FFXI_PIVOT_DIR instead of FFXI_DIR
-                                 # applies on top; --reset: the tables it edits reset from .base first
+                                 # applies on top; --reset: the tables it edits reset to the install's .base first
+                                 #   (--reset --pivot: the install's .base, else its file, into the pivot folder)
 xi dats build --list [--reset]   # the projects of projects/build_list.json (NAME --list: projects/NAME.json)
                                  #   in order; --reset resets every table they edit once, first
+xi dats build LIST.json          # a build list file is built as one without --list
                                  # abilities: --apply-db [--db-row ID] --clone-from X --server-id ID
                                  #   --menu-record [--menu-name T] --lua-stub (docs/dats/README.md)
 xi dats new                      # --pivot: the same for the wizard
@@ -148,6 +150,7 @@ xi ui spells search NAME [--abilities]       # id, MP, cast/recast, learnable jo
 ```text
 xi dats prepare edits.json --project P [--merge]   # a list of edits (schema/database.json) -> action database.<name>
 xi dats build P [--dry-run] [--pivot]              # patches the records (EN + JP, legacy or retail DATs), writes P.sql (proposed, never run)
+                                                   #   an edit with "add": whole new items from fields into any item table
 xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
 xi dats undo P                                     # every record back to what it held; its SQL section removed
 xi database grow ROM/181/72.DAT 4096               # a table grown once (d_msg or item), its .base too
@@ -185,6 +188,16 @@ xi dats new [--pivot]                               # wizard: "Zone events" — 
 xi event cutscene compile cs.json [--dry-run]       # the same, prepared + built (project: the zone's name)
 xi event dialogue new 245 --json lines.json --actor 0x010F5022   # a dialogue event, prepared + built
 xi dats undo P                                      # every block and line back; camera DATs removed
+```
+
+## Copy a file as it is (docs/dats/README.md)
+
+```text
+xi dats prepare rom/ROM/119/51.DAT --project P --type copy   # target guessed from the path: ROM/119/51.DAT
+xi dats prepare music067.bgw --project P --type copy --target sound9/win/music/data/music067.bgw
+xi dats build P [--dry-run] [--pivot]               # written as it is; the install keeps <file>.base
+xi dats new [--pivot]                               # wizard: "Copy a file as it is"
+xi dats undo P                                      # install: .base back; pivot: the copy deleted
 ```
 
 ## Entity

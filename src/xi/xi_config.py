@@ -160,38 +160,24 @@ def ensure_base(src) -> bool:
     return True
 
 
-def keep_redirect_base(src) -> None:
-    """Before the first write of ``src`` into a DAT root other than the install (the pivot
-    folder, ``xi dats build --pivot``): keep what that root held there as ``<dat>.base``, or
-    an empty ``<dat>.base`` when it held nothing, so ``xi dats build --reset`` can reset it
-    (an empty one: the file is taken back out). The install's own ``.base`` comes from
-    :func:`editable_dat`."""
-    require_ffxi_dir()
-    if _in_place():
-        return
-    out = output_path_for(src)
-    base = out.with_name(out.name + ".base")
-    if base.exists():
-        return
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if out.exists():
-        shutil.copy2(out, base)
-    else:
-        base.write_bytes(b"")
+def pristine(src) -> Path | None:
+    """The install's untouched copy of ``src``: its ``<dat>.base`` when an in-place edit kept
+    one, else the file itself; None when the install has neither. What ``xi dats build
+    --reset`` resets a table to, in the install and in the pivot folder alike."""
+    src = Path(src)
+    base = src.with_name(src.name + ".base")
+    if base.is_file() and base.stat().st_size:
+        return base
+    return src if src.is_file() else None
 
 
 def reset_to_base(path) -> str:
-    """Put ``path`` back to its ``.base``: ``'restored'``, ``'removed'`` (an empty ``.base``:
-    the file wasn't there before xi-tools wrote it), or ``'none'`` (no ``.base``: never
-    written through xi-tools, or before it kept one)."""
+    """Put ``path`` (a DAT in the install) back to its ``.base``: ``'restored'``, or
+    ``'none'`` (no ``.base``: never written through xi-tools)."""
     path = Path(path)
     base = path.with_name(path.name + ".base")
-    if not base.is_file():
+    if not base.is_file() or not base.stat().st_size:
         return "none"
-    if base.stat().st_size == 0:
-        if path.exists():
-            path.unlink()
-        return "removed"
     shutil.copy2(base, path)
     return "restored"
 

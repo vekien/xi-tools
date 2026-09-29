@@ -231,6 +231,18 @@ def _mine(prev: list, lid: int, lang: str, blob: bytes) -> list[dict]:
     return mine if mine and mine[-1].get("to_hex") == blob.hex() else []
 
 
+def tables(action: dict, root) -> list[str]:
+    """ROM paths of the dialog tables ``action`` edits in ``root``: the English one, and the
+    Japanese one when a line has Japanese text or is new (a new line goes in both). What
+    ``--reset`` resets for it, recorded result or not."""
+    zone = action.get("zone")
+    if not isinstance(zone, int) or isinstance(zone, bool):
+        return []
+    lines = [l for l in action.get("lines") or [] if isinstance(l, dict)]
+    langs = ["en"] + (["jp"] if any("jp" in l or l.get("new") for l in lines) else [])
+    return sorted({rel for lang in langs if (rel := dialog_rel(root, zone, lang))})
+
+
 def build(action: dict, *, root: Path, target: str | None, dry_run: bool = False) -> dict:
     """Apply ``action`` to the zone's dialog tables in ``root`` as they are: each line is
     written, replacing what is at its id (a ``new`` line too), and a line already holding it

@@ -74,12 +74,16 @@ def test_projects_layer_in_the_list_order_and_reset_makes_it_repeatable(game):
 def test_a_named_list_and_a_list_given_as_a_project(game):
     T.prepare([{"table": "armor", "id": 10241, "set": {"level": 50}}], "a")
     build_list("a", path="projects/release.json")
-    r = build("release")
-    assert r.exit_code != 0 and "is a build list: build it with --list" in r.output
     r = build("release", "--list")
     assert r.exit_code == 0, r.output
     assert level(game) == 50
+    T.prepare([{"table": "armor", "id": 10241, "set": {"level": 55}}], "a", "--replace")
+    r = build("projects/release.json")                      # a list file says what it is: no --list
+    assert r.exit_code == 0 and "Building the build list" in r.output, r.output
+    assert level(game) == 55
     r = build("release", "--list", "--only", "database.edits")
+    assert r.exit_code != 0 and "--only doesn't go with it" in r.output
+    r = build("projects/release.json", "--only", "database.edits")
     assert r.exit_code != 0 and "--only doesn't go with it" in r.output
 
 
@@ -142,7 +146,7 @@ def test_reset_of_one_action_rebuilds_the_actions_that_share_its_tables(game):
         {"from": 1, "to": 51}]                                          # reset: this build's records only
 
 
-def test_pivot_copies_a_build_made_are_taken_out(game, tmp_path: Path, monkeypatch):
+def test_a_pivot_reset_starts_from_the_install(game, tmp_path: Path, monkeypatch):
     import xi.xi_config as cfg
     pivot = tmp_path / "pivot"
     pivot.mkdir()
@@ -151,10 +155,35 @@ def test_pivot_copies_a_build_made_are_taken_out(game, tmp_path: Path, monkeypat
     build_list("c")
     assert build("--list", "--pivot").exit_code == 0
     copy = pivot / Path(*KI_EN.split("/"))
-    assert key_item(pivot, 2) == "Pivot map" and copy.with_name(copy.name + ".base").read_bytes() == b""
+    assert key_item(pivot, 2) == "Pivot map" and not copy.with_name(copy.name + ".base").exists()
     assert key_item(game, 2) == "Palborough map"                        # the install is left alone
-    Path("projects/empty.json").write_text(json.dumps({"actions": []}))
-    build_list("empty")
+    assert not (pivot / Path(*T.KI_JP.split("/"))).exists()              # nor is the JP table copied
+    # The install edited in place: a pivot reset takes its .base, not the edited file.
+    T.prepare([{"table": "keyitems", "id": 2, "strings": {"en": {"name": "Install map"}}}], "d")
+    assert build("d").exit_code == 0 and key_item(game, 2) == "Install map"
     r = build("--list", "--reset", "--pivot")
     assert r.exit_code == 0, r.output
-    assert "1 pivot copies taken out" in r.output and not copy.exists()
+    assert "Reset 1 table from the install (FFXI_DIR)" in r.output
+    assert key_item(pivot, 2) == "Pivot map" and key_item(game, 2) == "Install map"
+    # A project taken off the list: its table goes back to the install's untouched copy.
+    Path("projects/empty.json").write_text(json.dumps({"actions": []}))
+    build_list("empty")
+    assert build("--list", "--reset", "--pivot").exit_code == 0
+    assert key_item(pivot, 2) == "Palborough map"
+
+
+def test_a_reset_resets_what_a_definition_names_before_its_first_build(game, tmp_path: Path, monkeypatch):
+    import xi.xi_config as cfg
+    pivot = tmp_path / "pivot"
+    pivot.mkdir()
+    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot))
+    # The pivot folder holds an older build of the table, and neither the project nor the
+    # list has a recorded result (a fresh clone): --reset still starts it from the install.
+    T.prepare([{"table": "armor", "id": 10242, "set": {"level": 77}}], "old")
+    assert build("old", "--pivot").exit_code == 0 and level(pivot, 2) == 77
+    T.prepare([{"table": "armor", "id": 10241, "set": {"level": 50}}], "a")
+    build_list("a")
+    r = build("--list", "--reset", "--pivot")
+    assert r.exit_code == 0, r.output
+    assert "Reset 2 tables from the install (FFXI_DIR)" in r.output       # armor, EN and JP
+    assert level(pivot) == 50 and level(pivot, 2) == level(game, 2) == 90

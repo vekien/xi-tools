@@ -93,8 +93,8 @@ flags, the donor's job table) is kept. `fields` are the decoded record fields:
 | `tp` | `+0x0C` u16 | TP cost (0xFFFF = none) |
 | `level`, `range`, `radius`, `aoe`, `tp_modifier` | `+0x0F`–`+0x15` u8 | |
 
-Texts: `name_en` is required; `name_jp` falls back to it, help to `.` (what retail
-puts in unnamed rows), so a grown table never shows garbage in either language. Each
+Texts: `name_en` is required; `name_jp` falls back to it, help to blank, so a grown
+table never shows garbage in either language. Each
 text has to fit its fixed-size block, counted in cp932 bytes (a Japanese character
 takes 2):
 

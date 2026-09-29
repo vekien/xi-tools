@@ -62,7 +62,8 @@ Three ways in:
 | `strings` | `en` / `jp` sub-strings: items `name`, `article`, `logName`, `logPlural`, `description` (JP: `name`, `description`); text tables their own (`name`, `plural`, `description`, …; the help tables have one, `help`; the Japanese key items keep only `name` and `description`, the Japanese status names only `name`). A value is the text, or `{"replace": {old: new}}` on the record's original text. |
 | `copy_from` | Create the record as a copy of another: copy record `copy_from` of the same table into slot `id` (replacing what it holds), then apply the edit. The Japanese record takes the English name/description unless `strings.jp` says otherwise. (It was called `like`; an edit that still says `like` is refused, naming the new key.) |
 | `layout` | Only for an item table given by its ROM path: the layout of its records ([below](#tables-by-path)). |
-| `icon` | `{"from": <item id>}` — copy another item's icon. |
+| `icon` | `{"from": <item id>}` — copy another item's icon; or `{"file": "icons/x.bmp"}` — a 32×32 256-colour `.bmp` file, relative to the file holding the action, with an optional `tag` (the icon's 16-character name, default `item    custom`). |
+| `add` | Whole new items from fields, instead of `id` ([below](#adding-items-add)). |
 | `hex` | The whole record, exactly (below). |
 | `server` | The item's server rows (see below), or `false` to leave the server out. |
 | `note` | Why — shown in the SQL. |
@@ -80,6 +81,44 @@ of the CatsEyeXI install read and write back byte for byte this way, so a record
 is exact in the changelog and in undo. A description must end before the icon (0x280 bytes into the record).
 
 **`dps`** follows `damage` / `delay` (`damage × 6000 / delay`) unless you set it.
+
+**Header bytes nobody has named** are `set` fields too, named by their byte offset in a legacy
+(0xC00) record: `unknown_0e` … `unknown_16` (general), `unknown_10` … `unknown_1a` (usable),
+`unknown_24`, `unknown_28`, `unknown_2a` (armor), `unknown_1a`, `unknown_24`, `unknown_26`,
+`unknown_34`, `unknown_36` (weapons), `unknown_0e` … `unknown_52` (maze). Each is a u16. They
+hold real values (general items have `0xFFFF` at `0x0E`, most armor `0x0100` at `0x2A`); a
+field gets its proper name once someone works out what it is. Legacy records only: where they
+sit in a retail (0x1400) record isn't mapped yet.
+
+## Adding items (`add`)
+
+`add` makes whole item records from fields — no record to copy — in any item table: a named
+one (`armor`, `general`, …), or an item DAT by its ROM path with the `layout` of its records
+(and `table_jp`, the Japanese file):
+
+```json
+{"table": "ROM/288/80.DAT", "table_jp": "ROM/288/79.DAT", "layout": "armor",
+ "add": [
+   {"id": 39012,
+    "set": {"level": 75, "slots": ["HEAD"], "jobs": ["WAR"], "flags": ["CANEQUIP"]},
+    "strings": {"en": {"name": "Renegade Beret", "logName": "renegade beret",
+                       "logPlural": "renegade berets", "description": "DEF:20"},
+                "jp": {"name": "…", "description": "…"}},
+    "icon": {"file": "../icons/renegade_beret.bmp"}},
+   {"strings": {"en": {"name": "Some New Item"}}, "set": {"stack": 12}}
+ ]}
+```
+
+- An item with an `id` (the item id; in a table by path, row 0's id plus the row) **replaces**
+  what is there, in both languages.
+- An item without one goes into the **next empty row** and is **skipped** when the table
+  already has an item of its English name (case-insensitive) — so a rebuild doesn't add it
+  twice. `strings.en.name` is required then.
+- The record is built from what the entry says and nothing else: the id, `set` (named and
+  `unknown_*` fields), the strings in the layout's text block, the icon. A field it doesn't set
+  is 0. An entry's own `layout` overrides the table's (an item whose text sits where another
+  layout puts it).
+- Undo puts each row back as it was.
 
 ---
 
@@ -121,7 +160,8 @@ replaces its own part. It is a proposal: review it and copy it into the server's
 - **Building again.** A build applies the edits to the records as they are: what an edit names
   is written, replacing whatever the record or slot holds; the same edits give the same bytes
   and record nothing new, and `replace` always applies to the original text. An edit you remove
-  stays in the DAT until a build with `--reset`, which resets the tables from `.base` first, or
+  stays in the DAT until a build with `--reset`, which resets the tables to the install's
+  untouched copy (its `.base`) first, or
   a `xi dats build --list --reset` of the build list
   ([../dats/README.md](../dats/README.md#applying---reset-and---list)).
 - **Undo** (`xi dats undo P`) puts each record back field by field, removes a created record
@@ -194,32 +234,35 @@ record: name, article, log name, log plural, description; a Japanese one: name, 
 `copy_from` copies a row of the same file into an empty row, its id field the donor's moved by
 as many rows; `hex` writes the whole decrypted record; `icon.from` takes an item id of the named
 tables. There is no server side (the file says nothing about item ids). A row past the end is
-refused: grow the table first.
+refused: grow the table first ([below](#growing-a-table)).
 
 ## Growing a table (`xi database grow`)
 
 A table a client plugin reads to a fixed count (a text table to 4,096 rows, an item table to
-its full size) is grown once, as `xi ftable expand` is run once for the file tables:
+its full size) is grown once, as set-up, as `xi ftable expand` is run once for the file tables.
+The actions then edit its rows like any other:
 
 ```
-xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows blanked to '.'
-xi database grow ROM/288/80.DAT 8192                       # item: copies of its last placeholder
+xi database grow ROM/181/72.DAT 4096                       # d_msg: new rows blank
+xi database grow ROM/288/80.DAT 8192                       # item: its last placeholder, text blank
 xi database grow ROM/288/80.DAT 8192 --fill-from 1023      # each new row a copy of row 1023
 xi database grow ROM/181/72.DAT 4096 --fill-hex "…"        # exact bytes per row
 xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's copy; say only
 ```
 
 The kind of table is read from the file. A new item record's id continues the table's numbering
-(row 0's id plus its row). A table already that long is left alone. The table's `.base` grows
-too, so a `--reset` build resets back to the grown table and only takes back what projects
-wrote into its rows. Named text tables are edited in both languages: grow the English and the
+(row 0's id plus its row). A table already that long is left alone. In the install the
+table's `.base` grows too, so a `--reset` build (and a `--reset --pivot` one, which copies the
+install's `.base`) resets back to the grown table and only takes back what projects wrote into
+its rows. With `--pivot` only the pivot folder's copy grows, which a `--reset --pivot` build
+replaces with the install's: grow the install. Named text tables are edited in both languages: grow the English and the
 Japanese file.
 
 ## New text rows
 
 A text-table row past the end needs `copy_from`, the row to copy: `{"table": "titles", "id": 1300,
 "copy_from": 1, "strings": {"en": {"name": "Abyssea Delver"}}}` grows the titles table to 1,301
-rows — the rows in between hold `.`, as retail's unnamed rows do — in both languages (the
+rows — the rows in between are blank — in both languages (the
 Japanese row takes the English text unless `strings.jp` gives its own). Key items and the
 quest / mission logs are keyed by the id each record carries, so a new id is appended; `copy_from`
 there picks the record to copy. Undo trims the rows back off, only while nothing grew the
@@ -227,6 +270,7 @@ table since. A zone's dialog lines are not here — they are [`zone_dialog`](../
 
 ## Not yet
 
-- An icon from a PNG (the client's palettized icon format needs an encoder).
+- An icon from a PNG (the client's palettized icon format needs an encoder); a `.bmp` in the
+  client's own 256-colour layout works (`icon.file`).
 - Proposed SQL for ability records (`abilities`, `weapon_skills`); the `mnc2`, `mon_` and `levc`
   sections of `114.DAT`, which aren't decoded yet.

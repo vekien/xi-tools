@@ -233,7 +233,7 @@ def test_a_band_build_grows_the_pivot_rom_pair_only(bands, monkeypatch, tmp_path
     assert vt.stat().st_size == 423_152                # a dry run writes nothing
     xd._make_room_for_band(tmp_path, [432_016, 432_023], dry_run=False)
     assert vt.stat().st_size == 437_488 and ft.stat().st_size == 437_488 * 2
-    assert (tmp_path / "ROM10" / "VTABLE10.DAT.base").stat().st_size == 423_152
+    assert not (tmp_path / "ROM10" / "VTABLE10.DAT.base").exists()   # a pivot folder keeps no .base
     xd._make_room_for_band(tmp_path, [61_464], dry_run=False)      # a stock number: nothing to do
 
 

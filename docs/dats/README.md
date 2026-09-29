@@ -221,6 +221,16 @@ Non-interactive: `xi dats prepare cutscene.json --project P [--zone N] [--camera
 or `xi event cutscene compile` / `xi event dialogue new`, which prepare and build in one go.
 See [../events/zone_events.md](../events/zone_events.md).
 
+### Copy a file as it is (a redrawn UI sheet, a music track …)
+
+For content kept as the finished file, not as edits: a UI sheet redrawn with `xi ui tex
+import`, a replaced `.bgw` track. Pick the file, then where in the game folder it goes
+(guessed from its own path when that ends in `ROM…/n/n.DAT` or `sound…/…`). The action is
+`copy.<project>`; the file is referenced where it is (relative to the project file), not
+copied into resources. Non-interactive: `xi dats prepare rom/ROM/119/51.DAT --project P
+--type copy [--target ROM/119/51.DAT]`. Nothing is registered: the path must be one the
+client already reads. A new DAT that needs a file id goes through mount, entity, gear ….
+
 ## Building (`xi dats build`)
 
 A build writes DATs and patches their file_ids **directly into the base install
@@ -248,17 +258,19 @@ they are; resetting is asked for with `--reset`.
 | Build | What it does |
 |---|---|
 | `xi dats build P` | **Applies** the edits to the tables as they are. What an edit names is written, replacing whatever is there (a record, line or NPC another build or retail put at that id included); an edit already there writes nothing. A `zone_events` action replaces its own events from its last build. An edit taken out of the project stays in the tables. The build's records are kept after the last build's, so `undo` takes both back. |
-| `xi dats build P --reset` | First **resets from `.base`** every table the actions being built edited in place, then applies. With `--only`, any other action of the project that edited one of those tables is built again too (a reset table loses all of its edits). The zone editor's Publish / Delete builds this way; `xi event cutscene compile` and `xi event dialogue new` take `--reset` too. |
+| `xi dats build P --reset` | First **resets** every table the actions being built edit in place to the install's untouched copy (its `.base`), then applies. With `--only`, any other action of the project that edited one of those tables is built again too (a reset table loses all of its edits). The zone editor's Publish / Delete builds this way; `xi event cutscene compile` and `xi event dialogue new` take `--reset` too. |
 | `xi dats build --list` | Builds every project of a **build list** in its order, each on top of the ones before it. |
-| `xi dats build --list --reset` | Resets every table any of the list's projects edits from its `.base` once, then builds them in order: the clean, repeatable build, where projects that share a table layer the same way every time and nothing a project dropped lingers. |
+| `xi dats build --list --reset` | Resets every table any of the list's projects edits once, then builds them in order: the clean, repeatable build, where projects that share a table layer the same way every time and nothing a project dropped lingers. |
 
-A reset table loses everything written to it since its `.base` was taken, whichever project
-or command wrote it: resetting one project's tables takes away another project's edits of the
+A reset table loses everything written to it since the install's untouched copy, whichever
+project or command wrote it: resetting one project's tables takes away another project's edits of the
 same tables until that project is built again. `--list --reset` is the way to rebuild them all
 together.
 
 The build list is `projects/build_list.json` ([`schema/build_list.json`](../../schema/build_list.json));
-`xi dats build NAME --list` builds `projects/NAME.json`, and a path works too:
+`xi dats build NAME --list` builds `projects/NAME.json`, and a path works too. A list file
+says what it is (its `schema`), so `xi dats build content/release_list.json` builds it as a list
+without `--list`:
 
 ```json
 {
@@ -268,28 +280,41 @@ The build list is `projects/build_list.json` ([`schema/build_list.json`](../../s
 ```
 
 A bare name is `projects/<name>.json`; anything else is a path relative to the list file (a
-zone editor project's `dats.json`). `--list` reads and checks every project first and builds
-nothing if one is missing or has an invalid action. Building a list file without `--list` is
-refused, and `--only` doesn't go with it.
+zone editor project's `dats.json`). A list build reads and checks every project first and
+builds nothing if one is missing or has an invalid action; `--only` doesn't go with it.
 
 What `--reset` resets: the tables the actions' recorded results name — the database, dialog,
-NPC-name and event tables, and `114.DAT` with its name tables for spell / command records. For
-`--list` also the tables the list file's `result` recorded, so a table a project no longer
+NPC-name and event tables, and `114.DAT` with its name tables for spell / command records — and
+the tables a `database` or `zone_dialog` action's edits name, so a project that was
+never built into the target (a fresh clone) resets them too. For `--list` also the tables the
+list file's `result` recorded, so a table a project no longer
 edits, or a project taken off the list, goes back too. DATs an action places (gear, abilities,
 camera scenes) aren't reset: a build replaces them. An ability's menu record isn't either,
 but when `114.DAT` is reset it goes with it; the build says so, and `--menu-record` places it
 again.
 
-In the install the `.base` is the one every in-place edit keeps. A `--pivot` build keeps what
-the pivot folder held as `.base` too, or an empty `.base` when it had no copy, which a
-`--reset --pivot` takes back out (a pivot copy written before this has no `.base` and is left,
-with a warning). `xi database grow` grows a table's `.base` with it, so a reset keeps the rows.
+What a table resets to is always the install's (`FFXI_DIR`) untouched copy — its `.base`, the
+one every in-place edit keeps, else the file itself — and never the pivot folder's:
+
+| Build | Reads and writes | `--reset` |
+|---|---|---|
+| `xi dats build P` | the install's DATs, in place | each table back to its `.base` in the install |
+| `xi dats build P --pivot` | the pivot folder's copy; a table it doesn't have is read from the install and written into the folder | the install's `.base` (else its file) copied over the pivot folder's copy |
+
+A `--pivot` build keeps no `.base` in the pivot folder, and never writes the install. Without
+`--reset` it applies on top of what the folder holds, so a server's DATs folder keeps its other
+edits; with `--reset` the tables it edits start from the install's again.
+
+A table a client plugin reads to a fixed row count is grown once with
+[`xi database grow`](../database/README.md#growing-a-table-xi-database-grow), in the install:
+its `.base` grows with it, so every reset (`--pivot` too) keeps the rows.
 
 ```bash
 uv run xi dats build P --reset                   # this project's tables from .base, then build
 uv run xi dats build --list --reset --dry-run    # what would be reset and built
 uv run xi dats build --list --reset              # every project of projects/build_list.json, clean
 uv run xi dats build release --list --pivot      # projects/release.json, on top, into FFXI_PIVOT_DIR
+uv run xi dats build content/release_list.json --reset --pivot   # a list file: the install's tables + its projects
 ```
 
 A dry run holds each step's writes (the reset included) in memory, so later steps and later
@@ -338,9 +363,12 @@ the pivot folder and never sees `FTABLE.DAT` opened.
 So a build registers a `ROM{n}` placement in the target's `ROM{n}` pair. In the base
 install the main pair gets the same entry when it is big enough to hold the id (for the
 tools that read only that pair); a retail-sized main `FTABLE` — a launcher may put one
-back — is left alone instead of failing the build, and a pivot folder's main pair is never
-written. A `ROM/…` placement registers in the main pair, so it needs the base install: with
-`--pivot` the build refuses one that would need a new entry.
+back — is left alone instead of failing the build. A pivot folder that carries its own main
+pair gets the entry there too: the client never reads it from the pivot folder, so that pair
+is the base game's, kept with the pivot folder to ship to the install (CatsEyeXI's dats keeps
+it in `rom/`, started from the retail client's each build). A `ROM/…` placement registers in
+the main pair, so it needs the base install: with `--pivot` the build refuses one that would
+need a new entry.
 
 What this means with a pivot folder that carries its own `ROM10` tables (CatsEyeXI's does):
 
@@ -540,7 +568,7 @@ files — gear, record edits, events — without splitting the build:
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder), and the DATs of `--pivot` builds into the release's pivot folder. Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back (an ability's only while the row still holds what the build wrote), then remove the manifest (`--keep-json` keeps it). `--apply-db` also reverts the database row an ability inserted or changed and deletes its unedited Lua stub; without it they are listed (with the revert SQL) and left, and the manifest is **kept** — its cleared actions marked `undone` — until a later `undo --apply-db` removes them (a row already gone or already back at its old animation counts as done). An ability menu record that can't be written back (the game has `114.DAT` open) also keeps the manifest, and the next undo retries it |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`) |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`); `--type copy` takes any file, referenced where it is, with `--target` its game path |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
@@ -574,6 +602,13 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   action, emits a server row template to `projects/server/spells|commands/`. No file
   ids, no table expansion; the client needs a ceiling plugin such as cexislots to show
   the band. A `--force` overwrite keeps the old row on `result.replaced` for `undo`.
+- `copy` ([`schema/copy.json`](../../schema/copy.json), `xi.dats.xi_copy`): writes
+  `resources.file` as it is at `target.path` (any path in the game folder, `ROM/119/51.DAT`
+  or `sound9/win/music/data/music067.bgw`), matching the case of a file already there. No
+  file id, no tables. In the install the file it replaces is kept as `<file>.base` and
+  `undo` puts it back (a file that was new is deleted); in a pivot folder `undo` deletes the
+  copy. A build into the folder the source lives in leaves it (`the source itself`), and
+  `undo` never deletes the source.
 
 Record edits:
 
@@ -587,7 +622,7 @@ Record edits:
   puts the records back. An item edit may carry its server rows (`item_basic`,
   `item_equipment` with `MId` or a gear action's model, `item_mods`, …), written as proposed
   SQL to `<project>.sql`, never run. No file ids, no table expansion. A text row past the
-  end is added with `copy_from` (the rows in between hold `.`). The spell and ability records of
+  end is added with `copy_from` (the rows in between are blank). The spell and ability records of
   `ROM/118/114.DAT` (`spellData`, `abilityData`: MP, cast, recast, job levels, TP, range …)
   edit the same way, a spell's `spell_list` row going to the SQL; `hex` writes a whole record
   exactly, and any other table may be named by its ROM path (an item table with its `layout`).

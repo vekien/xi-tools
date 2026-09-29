@@ -5,16 +5,19 @@ apart by what the file holds.
 
 The new rows are a filler:
 
-- a d_msg table: a row blanked to '.' (the last row's shape), as retail's unnamed rows are;
-- an item table: a copy of the table's last placeholder record (named '.' or nothing);
+- a d_msg table: a blank row (the last row, its text empty and its numbers kept);
+- an item table: a copy of the table's last placeholder record (named '.' or nothing), its
+  text emptied;
 - ``--fill-from ROW``: a copy of that row; ``--fill-hex``: exact bytes (a d_msg block, or a
   decrypted item record).
 
 An item record's id continues the table's numbering: row 0's id plus its row.
 
-Growing is set-up, not content: the table's ``.base`` grows too (the install's, or the pivot
-folder's with ``--pivot``), so a reset (``xi dats build --reset``) keeps the rows and takes back
-only what the projects wrote into them. A table already that long is left alone.
+Growing is set-up, not content: in the install the table's ``.base`` grows too, so a reset
+(``xi dats build --reset``, and ``--reset --pivot``, which copies the install's ``.base`` into the
+pivot folder) keeps the rows and takes back only what the projects wrote into them. With
+``--pivot`` only the pivot folder's copy grows, which such a reset replaces. A table already
+that long is left alone.
 """
 from __future__ import annotations
 
@@ -54,6 +57,25 @@ def _placeholder(rec: bytes) -> bool:
     return bool(subs) and subs[0]["flag"] == 0 and sub_value(subs[0]).strip() in ("", ".")
 
 
+def _blanked(rec: bytes) -> bytes:
+    """An item record with its text sub-strings emptied (a '.' placeholder made blank)."""
+    from xi.database.xi_build import _write_item_strings, parse_subs, set_sub
+    from xi.ui.items.xi_layout import ICON_OFFSET, find_text_offset
+    off = find_text_offset(rec)
+    if off is None:
+        return rec
+    try:
+        subs, end = parse_subs(rec, off, ICON_OFFSET)
+    except ValueError:
+        return rec
+    out = bytearray(rec)
+    for s in subs:
+        if s["flag"] == 0:
+            set_sub(s, "")
+    _write_item_strings(out, off, subs, end)
+    return bytes(out)
+
+
 def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> bytes:
     """The bytes each new row of the table ``data`` gets (an item record before its id)."""
     if _is_dmsg(data):
@@ -69,8 +91,12 @@ def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> byt
             return bytes(t.blocks[row])
         if not t.num:
             raise GrowError("the table has no row to take the shape of a new one from; give --fill-hex")
-        from xi.database.xi_build import _blank, _block_subs
-        return D._assemble_block(_blank(_block_subs(t.blocks[-1]), "."), t.stride)
+        from xi.database.xi_build import _block_subs, set_sub
+        subs = _block_subs(t.blocks[-1])
+        for s in subs:
+            if s["flag"] == 0:
+                set_sub(s, "")            # the text blank; a number kept as the last row has it
+        return D._assemble_block(subs, t.stride)
     from xi.ui.items.xi_layout import detect_stride
     from xi.ui.items.xi_parser import _decrypt
     stride = detect_stride(data)
@@ -88,7 +114,7 @@ def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> byt
     for i in reversed(range(n)):
         rec = dec[i * stride:(i + 1) * stride]
         if _placeholder(rec):
-            return rec
+            return _blanked(rec)
     raise GrowError("the table has no placeholder record (named '.' or nothing) to copy; "
                     "give --fill-from or --fill-hex")
 
@@ -116,49 +142,44 @@ def grow(data: bytes, count: int, fill: bytes) -> bytes:
     return _encrypt(bytes(dec))
 
 
-def _pristine(path: Path) -> bytes | None:
-    """``path``'s bytes before xi-tools wrote them: its ``.base``, else itself."""
-    base = path.with_name(path.name + ".base")
-    if base.is_file() and base.stat().st_size:
-        return base.read_bytes()
-    return path.read_bytes() if path.is_file() else None
-
-
 def grow_table(root: Path, rel: str, count: int, *, row: int | None = None, hexed: str | None = None,
                dry_run: bool = False) -> dict:
-    """Grow table ``rel`` in ``root`` and its ``.base`` to ``count`` rows. ``{rel, before,
-    after, base_before, written}``."""
+    """Grow table ``rel`` in ``root`` to ``count`` rows. ``{rel, before, after, base_before,
+    written}``. In the install its ``.base`` grows too (``base_before``; a table without one
+    gets one), since ``xi dats build --reset`` resets to it. A pivot copy (made from the
+    install's when the folder has none) grows alone (``base_before`` None): a ``--reset
+    --pivot`` build copies the install's back over it."""
     import xi.xi_config as cfg
     from xi.menu.xi_menu_table import target_path
-    target = target_path(root, rel)
     install = Path(cfg.FFXI_DIR) / Path(*rel.split("/"))
-    base = target.with_name(target.name + ".base")
+    in_place = Path(root).resolve() == Path(cfg.FFXI_DIR).resolve()
+    target = install if in_place else target_path(root, rel)
     if target.is_file():
         current = target.read_bytes()
     elif install.is_file():
         current = install.read_bytes()          # the root has no copy yet: the install's, as a read gets
     else:
         raise GrowError(f"{rel}: no such table in {root} or the install")
-    if base.is_file() and base.stat().st_size:
-        baseline = base.read_bytes()
-    elif base.is_file() or not target.is_file():
-        baseline = _pristine(install)           # a pivot copy a build made: what the folder falls back to
-    else:
-        baseline = current                      # never written through xi-tools
+    base = install.with_name(install.name + ".base")
+    baseline = None
+    if in_place:
+        baseline = base.read_bytes() if base.is_file() and base.stat().st_size else current
     try:
-        fill = filler(baseline, row, hexed)
-        new_current, new_base = grow(current, count, fill), grow(baseline, count, fill)
+        fill = filler(current if baseline is None else baseline, row, hexed)
+        new_current = grow(current, count, fill)
+        new_base = None if baseline is None else grow(baseline, count, fill)
         out = {"rel": rel, "before": rows(current), "after": rows(new_current),
-               "base_before": rows(baseline), "written": False}
+               "base_before": None if baseline is None else rows(baseline), "written": False}
     except (D.DmsgError, ValueError) as e:
         if isinstance(e, GrowError):
             raise
         raise GrowError(f"{rel}: not an item or d_msg table ({e})") from None
-    if dry_run or (new_current == current and new_base == baseline):
+    if dry_run or (new_current == current and (new_base is None or new_base == baseline)):
         return out
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(new_current)
-    base.write_bytes(new_base)
+    if new_base is not None:
+        base.write_bytes(new_base)
     out["written"] = True
     return out
 
@@ -170,18 +191,21 @@ def grow_table(root: Path, rel: str, count: int, *, row: int | None = None, hexe
 @click.option("--fill-hex", "hexed", default=None,
               help="Each new row exactly these bytes (a d_msg block, or a decrypted item record).")
 @click.option("--pivot", is_flag=True, default=False,
-              help="Grow FFXI_PIVOT_DIR's copy of the table (made from the install's when it has none).")
+              help="Grow FFXI_PIVOT_DIR's copy of the table (made from the install's when it has none). "
+                   "A --reset --pivot build copies the install's back over it.")
 @click.option("--dry-run", is_flag=True, default=False, help="Say what would change; write nothing.")
 def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool, dry_run: bool):
     """Grow TABLE (a ROM path: an item DAT or a d_msg table) to COUNT rows, once.
 
-    \b
-    New rows are a filler: a d_msg row blanked to '.', or the item table's last placeholder
-    record (its id following the table's numbering), unless --fill-from / --fill-hex says
-    otherwise. The table's .base grows too, so `xi dats build --reset` resets back to the
-    grown table. A table already COUNT rows long is left alone.
+    
+    New rows are a filler: the last d_msg row with its text blank (its numbers kept), or the
+    item table's last placeholder record
+    with its text emptied (its id following the table's numbering), unless --fill-from / --fill-hex says
+    otherwise. In the install the table's .base grows too, so `xi dats build
+    --reset` (and `--reset --pivot`, which copies the install's .base) keeps the rows. A table
+    already COUNT rows long is left alone.
 
-    \b
+    
     Examples:
       xi database grow ROM/181/72.DAT 4096
       xi database grow ROM/288/80.DAT 8192 --fill-from 1023 --pivot
@@ -198,9 +222,10 @@ def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool,
         r = grow_table(root, rel, count, row=row, hexed=hexed, dry_run=dry_run)
     except GrowError as e:
         raise click.ClickException(str(e))
-    if r["before"] >= count and r["base_before"] >= count:
+    if r["before"] >= count and (r["base_before"] is None or r["base_before"] >= count):
         click.echo(f"{rel}: already {r['before']:,} rows; left as it is")
         return
     verb = "would grow" if dry_run else "grew"
-    click.echo(f"{rel} in {root}: {verb} {r['before']:,} -> {r['after']:,} rows "
-               f"(its .base {r['base_before']:,} -> {max(count, r['base_before']):,})")
+    tail = (f" (its .base {r['base_before']:,} -> {max(count, r['base_before']):,})" if r["base_before"] is not None
+            else " (a --reset --pivot build takes it back to the install's copy)")
+    click.echo(f"{rel} in {root}: {verb} {r['before']:,} -> {r['after']:,} rows{tail}")

@@ -215,6 +215,39 @@ def _put(rec: bytearray, off: int, size: int, value: int) -> None:
         struct.pack_into('<H', rec, off, value)
 
 
+def _unknown_fields(kind: str) -> Dict[str, tuple]:
+    """The record bytes no named field covers (nor, for spells, the job levels), as fields
+    ``unknown_<offset hex>`` (a u16 on an even offset, else a byte): real values nobody has
+    named yet, so a whole record can be written as fields. Not in ``read_fields``."""
+    k = KINDS[kind]
+    covered = set()
+    for off, size in k.fields.values():
+        covered.update(range(off, off + size))
+    if kind == 'spell':
+        covered.update(range(SPELL_LEVELS, SPELL_LEVELS + 48))
+    out: Dict[str, tuple] = {}
+    off = 0
+    while off < k.stride:
+        if off in covered:
+            off += 1
+        elif off % 2 == 0 and off + 1 < k.stride and off + 1 not in covered:
+            out[f'unknown_{off:02x}'] = (off, 2)
+            off += 2
+        else:
+            out[f'unknown_{off:02x}'] = (off, 1)
+            off += 1
+    return out
+
+
+def unknown_fields(kind: str) -> Dict[str, tuple]:
+    if kind not in _UNKNOWN:
+        _UNKNOWN[kind] = _unknown_fields(kind)
+    return _UNKNOWN[kind]
+
+
+_UNKNOWN: Dict[str, Dict[str, tuple]] = {}
+
+
 def read_fields(kind: str, rec: bytes) -> dict:
     """The named fields of a decoded record; spells also carry ``levels``
     ({JOB: level} for the jobs that can learn it)."""
@@ -244,11 +277,12 @@ def write_fields(kind: str, rec: bytes, fields: dict) -> bytes:
                 table[JOBS.index(job)] = lvl
             struct.pack_into('<24H', out, SPELL_LEVELS, *table)
             continue
-        if name not in k.fields:
+        spec = k.fields.get(name) or unknown_fields(kind).get(name)
+        if spec is None:
             raise MenuError(f'{kind} record has no field {name!r}')
         if isinstance(value, str):
             value = _named_value(name, value)
-        off, size = k.fields[name]
+        off, size = spec
         _put(out, off, size, int(value))
     return bytes(out)
 
@@ -467,9 +501,8 @@ def target_path(root, rom_path: str) -> Path:
 
 
 def _write(root, rom_path: str, data: bytes) -> Path:
-    from xi.xi_config import editable_dat, keep_redirect_base
+    from xi.xi_config import editable_dat
     with _into(root):
-        keep_redirect_base(_install_file(rom_path))
         out = editable_dat(_install_file(rom_path), fresh=False)
     out.write_bytes(data)
     return out
@@ -518,7 +551,7 @@ def _table(root, rom_path: str) -> D.DmsgTable:
 def _put_text(t: D.DmsgTable, rom_path: str, idx: int, text: str) -> None:
     template = bytearray(t.blocks[0])
     while len(t.blocks) <= idx:
-        t.blocks.append(bytearray(D.set_text(template, 0, '.')))
+        t.blocks.append(bytearray(D.set_text(template, 0, '')))
     try:
         t.blocks[idx] = bytearray(D.set_text(t.blocks[idx], 0, text))
     except D.DmsgError:
@@ -534,7 +567,7 @@ def _put_text(t: D.DmsgTable, rom_path: str, idx: int, text: str) -> None:
 def set_string(root, rom_path: str, idx: int, text: str, dry_run: bool = False) -> Path:
     """Set block ``idx`` of a fixed-stride name/help table in ``root`` to ``text``,
     growing the table past its retail count by cloning a real block's shape. Blocks in
-    between hold '.' like retail's unnamed rows. Text that does not fit raises
+    between are blank. Text that does not fit raises
     MenuError and nothing is written."""
     t = _table(root, rom_path)
     _put_text(t, rom_path, idx, text)
@@ -545,11 +578,11 @@ def set_string(root, rom_path: str, idx: int, text: str, dry_run: bool = False) 
 
 def set_texts(kind: str, root, idx: int, text: dict, dry_run: bool = False) -> List[Path]:
     """Names and help for a record in every language table (JP falls back to EN,
-    help to '.' so a grown table never shows garbage). Every table is checked before
+    help to blank so a grown table never shows garbage). Every table is checked before
     any is written, so text that does not fit leaves all of them as they were."""
     k = KINDS[kind]
     name_en = text['name_en']
-    help_en = text.get('help_en') or '.'
+    help_en = text.get('help_en') or ''
     edits = []
     for lang in LANGS:
         for rom, value in ((k.names[lang], text.get(f'name_{lang}') or name_en),
@@ -585,7 +618,7 @@ def restore_row(kind: str, menu: MenuDat, idx: int, replaced: Optional[dict] = N
 
 def restore_texts(kind: str, root, idx: int, replaced: Optional[dict] = None,
                   dry_run: bool = False) -> List[Path]:
-    """Put back the name/help blocks ``replaced`` holds at ``idx``, or '.' in each.
+    """Put back the name/help blocks ``replaced`` holds at ``idx``, or a blank in each.
     Tables ``root`` has no copy of, and rows past a table's end, are left alone."""
     blocks = (replaced or {}).get('blocks') or {}
     written = []
@@ -598,7 +631,7 @@ def restore_texts(kind: str, root, idx: int, replaced: Optional[dict] = None,
         if rom in blocks:
             t.blocks[idx] = bytearray.fromhex(blocks[rom])
         else:
-            _put_text(t, rom, idx, '.')
+            _put_text(t, rom, idx, '')
         written.append(target_path(root, rom) if dry_run else _write(root, rom, D.serialize(t)))
     return written
 
@@ -606,7 +639,7 @@ def restore_texts(kind: str, root, idx: int, replaced: Optional[dict] = None,
 def restore_record(kind: str, root, idx: int, replaced: Optional[dict] = None,
                    dry_run: bool = False) -> List[Path]:
     """Undo a record in ``root``: put back what the build replaced (``capture_record``),
-    or empty the row and put '.' back in every name/help table. A root with no copy of
+    or empty the row and blank it in every name/help table. A root with no copy of
     a table is left alone rather than given one."""
     written = []
     if target_path(root, MENU_DAT).exists():
