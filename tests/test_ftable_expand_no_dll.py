@@ -101,3 +101,19 @@ def test_a_pivot_band_tail_does_not_set_the_size(install, tmp_path, monkeypatch)
     assert (install / "FTABLE.DAT").stat().st_size == target * 2
     assert (install / "ROM10" / "FTABLE10.DAT").stat().st_size == target * 2
     assert (pivot / "ROM10" / "FTABLE10.DAT").stat().st_size == 437_488 * 2    # the tail is kept
+
+
+def test_gear_no_pivot_leaves_the_pivot_folder_alone(install, tmp_path, monkeypatch):
+    import xi.ftable.xi_expand as xe
+    import xi.xi_config as cfg
+    pivot = tmp_path / "pivot"
+    pivot.mkdir()
+    (pivot / "FTABLE.DAT").write_bytes(b"\0" * RETAIL * 2)
+    (pivot / "VTABLE.DAT").write_bytes(b"\0" * RETAIL)
+    for mod in (cfg, xe):
+        monkeypatch.setattr(mod, "FFXI_PIVOT_DIR", str(pivot), raising=False)
+    r = run("--no-dll", "--no-pivot")
+    assert r.exit_code == 0, r.output
+    assert "Syncing pivot" not in r.output
+    assert (pivot / "FTABLE.DAT").stat().st_size == RETAIL * 2 and not any(pivot.glob("*.base"))
+    assert (install / "FTABLE.DAT").stat().st_size == gi.gear_ftable_target(gi.MAX_MODELID_CEILING) * 2

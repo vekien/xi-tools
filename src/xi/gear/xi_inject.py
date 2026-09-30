@@ -772,7 +772,10 @@ def inject_model(race: str, slot: str, source_model_id: int,
 @click.option('--no-dll', is_flag=True,
               help="Don't patch FFXiMain.dll's gear groups (for a client that patches them at "
                    "load, such as cexidats); the windows are expanded and linked all the same.")
-def gear_expand_cmd(max_model, dry_run, force, debug, no_dll):
+@click.option('--pivot/--no-pivot', default=True, show_default=True,
+              help='Also sync the pivot/override pack tables (FFXI_PIVOT_DIR), and count them '
+                   'when sizing, as `expand` and `expand entity` do.')
+def gear_expand_cmd(max_model, dry_run, force, debug, no_dll, pivot):
     """Expand FTABLE/VTABLE for custom GEAR models, up to MAX_MODEL per slot.
 
     One-time step. Each (race, slot) gets a window of (MAX_MODEL+1) file_ids and the
@@ -788,11 +791,12 @@ def gear_expand_cmd(max_model, dry_run, force, debug, no_dll):
     """
     _set_debug(debug)
     try:
-        expand_gear_tables(max_model=max_model, dry_run=dry_run, force=force, dll=not no_dll)
+        expand_gear_tables(max_model=max_model, dry_run=dry_run, force=force, dll=not no_dll,
+                           pivot=pivot)
     except click.ClickException:
         raise
     from xi.ftable.xi_expand import sync_pivot_from_base, pivot_root
-    if pivot_root():
+    if pivot and pivot_root():
         click.echo(f'\n[*] Syncing pivot pack tables ({pivot_root()}) ...')
         synced = sync_pivot_from_base(dry_run=dry_run)
         click.echo(f'  synced {len(synced)} pivot table(s)' if synced
