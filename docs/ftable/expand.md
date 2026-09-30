@@ -130,10 +130,10 @@ the tables smaller than the largest one already there; a pivot `ROM10` pair grow
 animation bands counts as the band floor (423,152), since its tail runs past its peers on
 purpose.
 
-**`--pivot` / `--no-pivot` apply only to bare `expand` and `expand entity`.** The gear
-path (`expand gear`, and the gear half of bare `expand`) **always** runs
-`sync_pivot_from_base()` when a pivot root is configured — there is no `--no-pivot` on
-`expand gear`.
+**`--pivot` / `--no-pivot` apply to bare `expand`, `expand entity` and `expand gear`.**
+With `--pivot` (the default) each syncs the pivot folder's tables (`sync_pivot_from_base()`)
+when a pivot root is configured and counts them when sizing; `--no-pivot` leaves the pivot
+folder alone.
 
 Default ceilings (config): **entity modelid 30000** + **gear modelid 4095** per slot
 (`xi ftable expand` → entity 30000 + gear 4095).
