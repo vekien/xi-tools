@@ -18,12 +18,12 @@ DEFAULT_MANIFEST = Path("projects/update.json")
 
 
 def _resolve_manifest_path(manifest: Path | None, project: str | None) -> Path:
-    """Resolve a manifest to a `dats/*.json` path.
+    """Resolve a manifest to a `projects/*.json` path.
 
     A bare **project name** — whether passed positionally (`dats build gyokko_mask`)
-    or via `--project gyokko_mask` — resolves to `dats/<name>.json`, matching the
+    or via `--project gyokko_mask` — resolves to `projects/<name>.json`, matching the
     project semantics of `dats new`. An explicit path (has a directory part or a
-    `.json` suffix) is used verbatim. Falls back to `dats/update.json`."""
+    `.json` suffix) is used verbatim. Falls back to `projects/update.json`."""
     if manifest is not None:
         p = Path(manifest)
         # Bare name (no directory component, no suffix) → treat as a project name.
@@ -2198,11 +2198,11 @@ def json_cmd(manifest: Path, output: Path | None):
 @group.command("prepare")
 @click.argument("source", type=click.Path(exists=True, path_type=Path))
 @click.argument("manifest", type=click.Path(path_type=Path), default=None, required=False)
-@click.option("--project", default=None, help="Manifest name — writes to dats/<project>.json instead of dats/update.json.")
+@click.option("--project", default=None, help="Manifest name — writes to projects/<project>.json instead of projects/update.json.")
 @click.option("--id", "action_id", default=None, help="Stable action id to use in the manifest.")
 @click.option("--type", "action_type", default=None, help="Force the action type instead of inferring it.")
 @click.option("--target", default=None, help="Target ROM DAT path when the source does not contain one.")
-@click.option("--hd/--no-hd", default=True, show_default=True, help="For zone actions, also build dats/ffxi-hd output.")
+@click.option("--hd/--no-hd", default=True, show_default=True, help="For zone actions, also build projects/ffxi-hd output.")
 @click.option("--replace", is_flag=True, help="Replace an existing action with the same id.")
 @click.option("--kind", "ability_kind", type=click.Choice(["auto", "ja", "spell", "ws"]), default=None,
               help="Ability recipes: publish as a job ability, spell or weapon skill (default auto = from the recipe).")
@@ -2317,7 +2317,7 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
             action["type"] = kind
             action.pop("op", None)  # `op` is not used — the builder dispatches on `type`
             # Mesh resources (the .glb) stay referenced in-place in exports/ rather
-            # than being copied into dats/resources/, so a re-export is picked up
+            # than being copied into projects/resources/, so a re-export is picked up
             # by the next build without needing to re-`prepare`.
             action["resources"] = _copy_action_resources(data, source, dest_dir, resource_root, copy=kind != "mesh")
             if target:
@@ -2492,7 +2492,7 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
 
 @group.command("changelog")
 @click.argument("manifest", type=click.Path(path_type=Path), default=None, required=False)
-@click.option("--project", default=None, help="Manifest name — reads dats/<project>.json instead of dats/update.json.")
+@click.option("--project", default=None, help="Manifest name — reads projects/<project>.json instead of projects/update.json.")
 def changelog_cmd(manifest: Path | None, project: str | None):
     """Show each action's recorded result (model_id -> file_id -> DAT) as a table."""
     manifest = _resolve_manifest_path(manifest, project)
@@ -2609,7 +2609,7 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
 
 @group.command("build")
 @click.argument("manifest", type=click.Path(path_type=Path), default=None, required=False)
-@click.option("--project", default=None, help="Manifest name — builds dats/<project>.json instead of dats/update.json.")
+@click.option("--project", default=None, help="Manifest name — builds projects/<project>.json instead of projects/update.json.")
 @click.option("--only", "only", multiple=True, help="Build only these action ids (repeatable).")
 @click.option("--verbose", is_flag=True, default=False, help="Print options/resource/texture detail under each action.")
 @click.option("--force", is_flag=True, default=False,
@@ -2702,7 +2702,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     if not manifest.exists():
         raise click.ClickException(
             f"No manifest at {manifest}. Pass an existing project "
-            f"(e.g. `dats build {manifest.stem}` → dats/{manifest.stem}.json) "
+            f"(e.g. `dats build {manifest.stem}` → projects/{manifest.stem}.json) "
             f"or a path to a manifest .json.")
 
     manifest_data = _read_manifest(manifest)
@@ -2734,7 +2734,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     click.echo()
     verb = "Previewing" if dry_run else "Building"
     click.echo(f"{verb}: {manifest_data.get('name', 'DAT')} build")
-    # standard_root (dats/ffxi) and hd_root (dats/ffxi-hd) are only for
+    # standard_root (projects/ffxi) and hd_root (projects/ffxi-hd) are only for
     # zone actions; skip both entirely when the manifest has no zone action.
     zone_actions = [a for a in active_actions if a.get("type") == "zone"]
     if zone_actions:
@@ -3132,11 +3132,11 @@ def _unregister_file_id(root: Path, file_id: int, rom: int) -> bool:
 
 
 def _pick_project(verb: str) -> str:
-    """List the dats/*.json projects and prompt for one (used when a command's
+    """List the projects/*.json projects and prompt for one (used when a command's
     project argument is omitted)."""
     names = _existing_project_names()
     if not names:
-        raise click.ClickException("No projects found (dats/*.json).")
+        raise click.ClickException("No projects found (projects/*.json).")
     click.echo(f"\n>> Which project to {verb}?")
     for i, n in enumerate(names, 1):
         click.echo(f"  {i}. {n}")
@@ -3205,11 +3205,11 @@ def _project_dat_rels(manifest_data: dict, target: str | None = None) -> tuple[l
                    "('pivot'), or FFXI_HD_DIR ('hd'). Default: where the project was built — "
                    "'pivot' when every build used --pivot, else 'dir'.")
 @click.option("--output", "output", type=click.Path(path_type=Path), default=None,
-              help="Output zip path (default dats/packages/<project>.zip).")
+              help="Output zip path (default projects/packages/<project>.zip).")
 def package_cmd(project: str | None, source: str | None, output: Path | None):
     """Zip a project's built DATs + F/V tables into a distributable overlay pack.
 
-    With no PROJECT, lists the dats/*.json projects to pick from. Reads from where the
+    With no PROJECT, lists the projects/*.json projects to pick from. Reads from where the
     project was built; collects every DAT the actions built there placed (from each
     action's inline result), the mount string DATs for any mount actions, and the full
     FTABLE/VTABLE set — into a single zip laid out ROM-relative.
@@ -3385,14 +3385,14 @@ def release_cmd(project: str | None, release_root: Path | None, no_dll: bool):
 def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = False):
     """Undo a project's build and remove it.
 
-    With no PROJECT, lists the dats/*.json projects to pick from. For every target
+    With no PROJECT, lists the projects/*.json projects to pick from. For every target
     the project was built into (recorded on each action's `result.targets`): delete
     the DAT files it placed, clear their file_id entries from that target's
     FTABLE/VTABLE, (for mounts) blank the name/help/key-item strings, and put back
     the client menu record an ability placed (only while the row still holds what the
     build wrote). With --apply-db, also revert the database row an ability inserted or
     changed and delete the Lua stub it wrote (only while it is unedited). Then delete
-    the `dats/<project>.json` manifest — unless `--keep-json`, or a database row or stub
+    the `projects/<project>.json` manifest — unless `--keep-json`, or a database row or stub
     is still there, or a menu record couldn't be put back (a locked 114.DAT while the game
     runs): then the manifest is kept (the cleared actions marked `undone`), so a later
     undo (`--apply-db` for the server side) can finish the job.
@@ -3911,7 +3911,7 @@ def _ask(header: str, enter_label: str = "Enter value", **prompt_kwargs):
 
 
 def _existing_project_names() -> list[str]:
-    """Names of existing dats projects — the `dats/*.json` manifest stems."""
+    """Names of existing dats projects — the `projects/*.json` manifest stems."""
     d = Path("projects")
     if not d.is_dir():
         return []
@@ -4775,7 +4775,7 @@ def _prompt_look() -> dict | None:
 
 def _wizard_npc(slug: str, prev: dict | None = None) -> dict:
     """Collect an NPC costume (race + gender + face + gear + weapons), BAKE it into a
-    single self-contained entity DAT at ``dats/custom/<slug>.dat``, then fall into the
+    single self-contained entity DAT at ``projects/custom/<slug>.dat``, then fall into the
     entity flow (dest ROM path + model id) with that baked DAT as the source. The build
     step then places it verbatim like any other entity. See [[custom-npc-feature]]."""
     from xi.entity.xi_bake_npc import (
@@ -5013,7 +5013,7 @@ def _check_targets_ready(target: str = "dir") -> dict[str, bool]:
 
 @group.command("new")
 @click.option("--project", default=None,
-              help="Skip the name prompt — writes to dats/<project>.json.")
+              help="Skip the name prompt — writes to projects/<project>.json.")
 @click.option("--pivot", is_flag=True, default=False,
               help="Check and build into FFXI_PIVOT_DIR instead of the base install (FFXI_DIR).")
 def new_cmd(project: str | None, pivot: bool = False):
@@ -5022,7 +5022,7 @@ def new_cmd(project: str | None, pivot: bool = False):
     A wizard for the "I already have the DATs, just place them at new model ids"
     case: no `mesh export` / GLB rebuild. Asks for the content type (gear /
     mount / entity), collects the source DAT(s), destination, and model id(s),
-    writes a `dats/<project>.json` manifest action, then offers to build it.
+    writes a `projects/<project>.json` manifest action, then offers to build it.
     """
     click.echo("\nWelcome to the Dat Modification wizard")
     _rule()

@@ -1,76 +1,52 @@
 # Agent notes — xi-tools
 
-Read `.claude/skills/xitool/SKILL.md` first: how to run `xi`, the FFXI data quirks, and
-where every format is documented. This file is the short list of rules for *changing*
-the library.
+**Stop: read [`DESIGN.md`](DESIGN.md) in full before you plan, answer a question about
+changing xi-tools, or write code.** It is the maintainer's design doc: how xi-tools is
+developed, extended and PR'd. Save its §15 block to your memory, and re-read it whenever
+its revision number is newer than the one you saved. This file is the one-screen
+version; where they differ, DESIGN.md wins.
 
-## New content goes through `xi dats` (hard rule)
+Then `.claude/skills/xitool/SKILL.md`: how to run `xi`, the FFXI data quirks, and where
+every format is documented.
 
-Anything that **puts new content into the game** — a model, gear, a mount, an ability,
-a zone patch, a texture pack, an event — is an **action type of `xi dats`**, not a
-command with its own placement code. `xi dats` is where new content lives because it:
+## Hard rules
 
-- supports bulk pipelines: one manifest can carry gear, an ability and a mount together,
-  and `dats build` places all of them in one pass, in order, with the same table
-  patching and `.base` backups;
-- carries custom logic per type (id allocation, per-race fan-out, companion files,
-  server snippets) behind one interface: `prepare` / `new` / `build` / `changelog` /
-  `undo` / `package` / `release`;
-- **records what it did on the action** (`result`: ids, file ids, DAT paths) so the same
-  JSON, kept in Git, recreates the change exactly on another install or after a client
-  update, and `undo` knows what to clear.
-
-Adding a type means all of these, in `src/xi/dats/xi_dats.py`:
-
-1. `_build_<type>(action, manifest_path, manifest, force, dry_run)` — returns the
-   placement result; `dry_run` must plan without writing (the plan is what the viewer
-   shows before confirming). Reuse `_place_raw_dat_in_build` for any verbatim DAT
-   placement rather than patching tables yourself.
-2. A branch in `build_cmd`'s `_dispatch` and in the `pack_actions` type list; the inline
-   `result` recorded after the build (either `_plan_result` when the allocation is
-   deterministic from the definition, or the build's own result when it is decided
-   against the live tables).
-3. `_action_summary`, `_result_rows`, `_print_placements`, `_action_placements` and
-   `_project_dat_rels` so `changelog`, the build listing, `undo` and `package` all see
-   it.
-4. **Both ways in**: a `_wizard_<type>` branch in `dats new` (interactive, defaults
-   preloaded from a previous action of that type) **and** the non-interactive path —
-   `dats prepare <source> --type <type> [--flags]` with every parameter defaulted, so a
-   script or the model viewer can drive it with arguments alone. `prepare --replace`
-   must preserve a recorded `result` (and the target block unless a flag changed it)
-   so a re-prepare never loses the slot a build took.
-5. The library behind the type lives in its own package (`xi.ability.xi_publish`,
-   `xi.mount.xi_core`, …); the domain command group may keep a convenience command,
-   but it must be a thin alias of `prepare` + `build` (see `xi ability publish`), never
-   a second implementation of placement.
-6. Docs: `docs/dats/README.md` (wizard section + builders table), the domain doc, and
-   `QUICKY.md`.
-
-If an existing command places content on its own today, the right fix is to move it
-into a `dats` action and alias the old command, not to extend it.
-
-## Every JSON format has a schema (hard rule)
-
-Any JSON the tools read or write as an interchange format — a `dats` action, a recipe, a
-manifest, an export — gets a file in `schema/` (JSON Schema 2020-12, `$id`
-`https://xi.tools/schema/<name>.json`, `additionalProperties: false`, an `examples`
-entry that is a real working document). Rules:
-
-- Action types are listed in `schema/package.json`'s `actions.items.oneOf`.
-- Documents carry a `schema` field (`"xi.<area>.v1"`) so a file says what it is.
-- `jsonschema` is not a dependency: the loader validates by hand (see
-  `xi.ability.xi_compose.validate_recipe`) and names the offending field; keep the
-  validator and the schema file in step, and test the schema's `examples` against the
-  validator (`tests/test_dats_ability.py` is the pattern).
-- Shared pieces (`romPath`, `actionId`, `autoOrInteger`, `outputTree`) come from
-  `schema/common.json` — reference them, do not redefine them.
-
-## Model-viewer lists
-
-Anything the viewer needs as a pick list is a target of `xi mv update` writing into
-`mv/lists/` (published through `manifest.json`), never a file each user has to build
-under `exports/`. Targets are append-only or name-preserving: never drop a curated
-name. See `docs/mv/README.md`.
+1. **Don't change the established core**: `.env` loading, path and file-id resolution
+   (ROM-relative args, FTABLE/VTABLE, `resolve_dat_in_root`), in-place writes with
+   `.base` (`editable_dat`), the build redirect, pivot (`FFXI_PIVOT_DIR`, `--pivot`,
+   `sync_pivot_from_base`). Call the helpers listed in DESIGN.md §4.1. If one looks
+   wrong, raise it with evidence; don't edit it in passing.
+2. **New content goes through `xi dats`.** Anything that puts something new into the
+   game (a model, gear, a mount, an ability, a spell, a record, an NPC, a line, an
+   event, a file, a file_id) is an **action type of `xi dats`**, not a command with its
+   own placement code. No `xi spell create`. A type needs a builder, dispatch, a
+   recorded `result`, the changelog/undo/package hooks, a `dats new` wizard branch
+   **and** `dats prepare --type` with every flag defaulted (checklist: DESIGN.md §8).
+   Don't add new convenience aliases; the existing ones (`xi ability publish`,
+   `xi event cutscene compile`, `xi event dialogue new`) stay thin. If an existing
+   command places content on its own, the fix is to move it into a `dats` action and
+   alias the old command, not to extend it.
+3. **Domain commands only export, import, inspect, manipulate what exists, or set an
+   install up once** (`export`, `import`, `json`, `search`, `set`, `edit`, `copy`,
+   `delete`, `reset`, `expand`, `grow`).
+4. **A flat command tree**: `xi <domain> <verb>`, domains at the root (`xi spell`,
+   `xi ability`), never under an umbrella (`xi actions spells`). Variants are options.
+   A renamed command keeps its old name as a hidden alias.
+5. **Simple commands, options for complexity**: positional arguments name the thing
+   acted on; every option has a default; nothing prompts outside `xi dats new`;
+   `--dry-run` wherever the install is written; `--help` works without `FFXI_DIR`. Reuse
+   the flag names in DESIGN.md §7.
+6. **Every JSON format has a schema** in `schema/` (2020-12, `$id`
+   `https://xi.tools/schema/<name>.json`, `additionalProperties: false`, a real
+   `examples` entry, a `"schema": "xi.<area>.v1"` field; action types in
+   `schema/package.json`; shared pieces from `schema/common.json`). `jsonschema` is not
+   a dependency: keep the hand validator in step and test the examples against it
+   (DESIGN.md §9).
+7. **Document everything in `docs/`** in the same PR, plus `QUICKY.md`, `docs/README.md`
+   and the SKILL.md table where they apply (DESIGN.md §11).
+8. **Model-viewer lists** are targets of `xi mv update` writing `mv/lists/`, append-only
+   or name-preserving; never a file each user builds under `exports/`
+   (`docs/mv/README.md`).
 
 ## Conventions worth keeping
 
@@ -79,8 +55,8 @@ name. See `docs/mv/README.md`.
   `src/xi/xi_cli.py` under its own `# ── <area>` section.
 - Outputs go under `exports/<area>/…`; `exports/` is the user's master art, so build
   products only ever land in a folder named for the thing being built.
-- Edits are in place with a `.base` backup — never break that contract (`xi_config`).
-- Every command has `--dry-run` where it writes into the install, and `--help` that
-  works without `FFXI_DIR`.
 - Tests that need the game use the `root` fixture (skip without it); everything else
-  runs on synthetic bytes.
+  runs on synthetic bytes. Run `uv run --with pytest pytest -q` and report the result.
+- Commits and PR titles: `<area>: <what changed, in plain words>`. One topic per PR, no
+  drive-by refactors, no generated output, no version bump or CHANGELOG edit unless
+  asked. Fill in `.github/pull_request_template.md`.

@@ -83,6 +83,9 @@ jobs:
             .env.app \
             README.md \
             QUICKY.md \
+            DESIGN.md \
+            AGENTS.md \
+            CLAUDE.md \
             src \
             web \
             docs \

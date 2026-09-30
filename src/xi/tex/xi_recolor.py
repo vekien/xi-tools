@@ -15,6 +15,8 @@ import colorsys
 import struct
 from pathlib import Path
 
+from xi.common.xi_section import MAX_SECTION_UNITS
+
 
 # ---------------------------------------------------------------------------
 # Colour helpers
@@ -130,7 +132,7 @@ def _parse_sections(data: bytes):
     while pos + 16 <= len(data):
         meta = struct.unpack_from("<I", data, pos + 4)[0]
         type_code = meta & 0x7F
-        size = ((meta >> 7) & 0xFFFFF) * 0x10
+        size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if size <= 0:
             break
         yield type_code, pos, size, pos + 0x10

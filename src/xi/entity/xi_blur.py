@@ -16,7 +16,7 @@ Section format (after 16-byte DAT section header):
 
 import struct
 
-from xi.common.xi_section import encode_section_meta
+from xi.common.xi_section import MAX_SECTION_UNITS, encode_section_meta
 
 
 def build_blur_section(r: int = 200, g: int = 200, b: int = 255,
@@ -76,7 +76,7 @@ def inject_blur_section(data: bytearray, blur_bytes: bytes) -> bytearray:
     while pos + 16 <= len(data):
         meta = struct.unpack_from('<I', data, pos + 4)[0]
         type_code = meta & 0x7F
-        size = ((meta >> 7) & 0xFFFFF) * 0x10
+        size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if size <= 0:
             break
         if type_code == 0x00:

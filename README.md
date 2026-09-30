@@ -4,6 +4,8 @@ CLI toolkit for FFXI DAT modding on private servers — models, animations, zone
 gear, mounts, VFX, audio, UI, events, and packaging.
 
 > **Command reference:** see **[QUICKY.md](QUICKY.md)** for the full public CLI surface and examples.
+>
+> **Contributing (people or AI):** read **[DESIGN.md](DESIGN.md)** before changing anything.
 
 ![cli](ss.png)
 
@@ -248,6 +250,7 @@ Full details: [docs/zone/navmesh.md](docs/zone/navmesh.md) · native lib notes:
 | Doc | |
 |-----|--|
 | **[QUICKY.md](QUICKY.md)** | **Full public CLI surface + examples** |
+| **[DESIGN.md](DESIGN.md)** | **How to develop, extend and PR xi-tools (read before contributing, person or AI)** |
 | [docs/README.md](docs/README.md) | Format docs + command deep-dives |
 | [docs/common_crashes.md](docs/common_crashes.md) | Client crash diagnosis after publishes |
 | [docs/zone/navmesh.md](docs/zone/navmesh.md) | Navmesh bake & server install |
@@ -270,9 +273,23 @@ Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — We
 
 This project is **heavily AI-assisted**. If you are an LLM helping with xi-tools:
 
+> [!IMPORTANT]
+> **AI assistants (Claude, ChatGPT, Codex, Copilot, Cursor, Gemini, Grok, …): stop and
+> read [DESIGN.md](DESIGN.md) in full before you answer a question about changing
+> xi-tools or write any code.** It is the maintainer's design doc: what must not change
+> (file loading, path resolution, pivot), where new content goes (`xi dats`, never a new
+> `create` command), how commands are shaped, and what a PR must contain.
+> **Save its rules to your memory or project instructions** (DESIGN.md §15 has the
+> block to keep), and re-read it whenever its revision number is newer than the one you
+> saved.
+>
+> *Sending an AI here to make a change? Point it at this box first.*
+
 | Path | What it is |
 |------|------------|
-| `.claude/skills/xitool/SKILL.md` | **Start here** — agent skill: FFXI quirks (Y-down, correction node, scale, FTABLE), common commands, and where each doc/module lives |
+| [`DESIGN.md`](DESIGN.md) | **Read first** — the maintainer's design doc: the core not to change, `xi dats` for all new content, a flat command tree, simple commands, schemas, docs, tests, commits and PRs |
+| [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) | The same rules, loaded automatically by coding agents |
+| `.claude/skills/xitool/SKILL.md` | Agent skill: FFXI quirks (Y-down, correction node, scale, FTABLE), common commands, and where each doc/module lives |
 | `src/xi/` | Python package — all CLI tools live here |
 | `src/xi/xi_cli.py` | Top-level Click CLI entry (`xi` command groups) |
 | `docs/` | Format specs + command deep-dives (read these before guessing binary layouts) |
@@ -282,7 +299,7 @@ This project is **heavily AI-assisted**. If you are an LLM helping with xi-tools
 | `schema/` | JSON schemas / descriptors |
 | `exports/` | Default output tree for mesh/zone/anim exports (generated, not source) |
 
-**How to work here**
+**How to work here** (the short version; [DESIGN.md](DESIGN.md) is the full one)
 
 1. Prefer reading `docs/` and existing modules under `src/xi/<area>/` over inventing DAT layouts.
 2. CLI groups map to packages: `xi mesh` → `src/xi/entity/mesh/`, `xi zone` → `src/xi/zone/`, `xi anim` → `src/xi/entity/anim/`, etc.
@@ -291,3 +308,7 @@ This project is **heavily AI-assisted**. If you are an LLM helping with xi-tools
 5. Run via `uv run xi …` (or installed `xi`). Python **3.14** recommended; project requires `>=3.11`.
 6. Do not commit secrets, `.env`, or large binaries under `exports/` / game trees.
 7. Match existing style: Click CLIs, minimal comments, no drive-by refactors outside the task.
+8. Don't change how files are loaded, resolved or written (`xi_config`, FTABLE/VTABLE lookup, `.base`, pivot).
+9. New content goes through `xi dats` (an action type with a `dats new` wizard and `dats prepare --type`), never a new `create`/`add` command on a domain group.
+10. Keep the command tree flat (`xi spell`, `xi ability` at the root) and commands simple, with options for complexity.
+11. Document everything in `docs/`, with a schema in `schema/` for every JSON format, in the same PR.

@@ -64,10 +64,11 @@ byte offset.
 0x04  4   meta         type = meta & 0x7F ; size = ((meta >> 7) & size_mask) * 0x10
 0x08  8   padding      (zeros) — data starts at section + 0x10
 ```
-**Size field is 19 bits** (`size_mask = 0x7FFFF` on write — bits 7–25). Writers must
-use that mask (`xi.common.xi_section`); overflowing into bit 26 corrupts `is_shadow`
-and the client reads the section 8 MiB short. Some readers still accept a wider mask
-under the 8 MiB ceiling. `dataStart = sectionStart + 0x10`; next section at
+**Size field is 19 bits** (`size_mask = 0x7FFFF`, bits 7–25), as the client reads it.
+Readers and writers use that mask (`xi.common.xi_section`); overflowing into bit 26
+corrupts `is_shadow` and the client reads the section 8 MiB short, and a reader with a
+wider mask (xim's 20 bits) reads a section with `is_shadow` set as 8 MiB too long.
+`dataStart = sectionStart + 0x10`; next section at
 `sectionStart + size` (no gaps). xim: `DatParser.kt:128-160`.
 
 ### Section types

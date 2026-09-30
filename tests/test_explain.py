@@ -47,8 +47,8 @@ def test_entity_records():
     try:
         X.add_entity_name(out2, base + 3, "Dup")
         raise AssertionError("duplicate id accepted")
-    except ValueError:
-        pass
+    except ValueError as e:
+        assert str(e) == f"id 0x{base + 3:08X} already listed as 'Mid'", e
     assert X.entity_records(X.add_entity_name(out2, base + 3, "New", replace=True))[3] == (base + 3, "New")
     print("entity records OK")
 

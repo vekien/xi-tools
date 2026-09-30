@@ -5,6 +5,8 @@ import struct
 from dataclasses import dataclass, field
 from typing import Optional
 
+from xi.common.xi_section import MAX_SECTION_UNITS
+
 
 # ---------------------------------------------------------------------------
 # Opcode size table — ported verbatim from the client's EventDisassembler.cpp
@@ -1076,11 +1078,12 @@ def _datid_helper(p: int) -> int:
 
 def _scene_sections(data: bytes):
     """Walk a section-headered DAT → list of (offset, fourcc, typeCode, size). 16-byte
-    headers; ``size = (meta>>7 & 0xFFFFF) * 16``, ``typeCode = meta & 0x7F`` (xim's model)."""
+    headers; ``size = (meta>>7 & 0x7FFFF) * 16`` (the client's 19 bits, not xim's 20),
+    ``typeCode = meta & 0x7F``."""
     pos, out, n = 0, [], len(data)
     while pos + 16 <= n:
         meta = struct.unpack_from("<I", data, pos + 4)[0]
-        size = ((meta >> 7) & 0xFFFFF) * 0x10
+        size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if size <= 0:
             break
         tag = data[pos:pos + 4].split(b"\x00", 1)[0].decode("ascii", "replace")

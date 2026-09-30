@@ -4,7 +4,7 @@ Two facts do all the work here:
 
 1. **Every DAT is a flat list of 16-byte-headed sections.** The header is
    ``char name[4]`` then a ``u32`` where ``type & 0x7F`` is the section type and
-   ``(meta >> 7) & 0xFFFFF`` is the size in 16-byte units (same layout
+   ``(meta >> 7) & 0x7FFFF`` (19 bits) is the size in 16-byte units (same layout
    ``entity.anim.xi_export.parse_sections`` uses). Walking just the headers —
    seek, read 16 bytes, skip — classifies the whole ROM tree in ~20s without
    reading a single section body.
@@ -26,6 +26,7 @@ import struct
 from functools import lru_cache
 from pathlib import Path
 
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.xi_config import FFXI_DIR
 
 # Section type codes (subset of entity.mesh.xi_export.SECTION_TYPE_NAMES).
@@ -82,7 +83,7 @@ def _walk_types(path: Path) -> tuple[str | None, frozenset[int], frozenset[str]]
                 if len(hdr) < 16:
                     break
                 meta = struct.unpack_from("<I", hdr, 4)[0]
-                sec_size = ((meta >> 7) & 0xFFFFF) * 0x10
+                sec_size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
                 if sec_size <= 0:
                     break
                 if first is None:
@@ -342,7 +343,7 @@ def anim_clip_ids(dat: str) -> list[str]:
                 if len(hdr) < 16:
                     break
                 meta = struct.unpack_from("<I", hdr, 4)[0]
-                sec_size = ((meta >> 7) & 0xFFFFF) * 0x10
+                sec_size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
                 if sec_size <= 0:
                     break
                 if (meta & 0x7F) == T_SKELETON_ANIM:
@@ -385,7 +386,7 @@ def _section_bytes(path: Path) -> dict[int, int]:
                 if len(hdr) < 16:
                     break
                 meta = struct.unpack_from("<I", hdr, 4)[0]
-                sec_size = ((meta >> 7) & 0xFFFFF) * 0x10
+                sec_size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
                 if sec_size <= 0:
                     break
                 kind = meta & 0x7F

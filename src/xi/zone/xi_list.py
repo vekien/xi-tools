@@ -4,6 +4,7 @@ from pathlib import Path
 
 import click
 
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.ftable.xi_core import load_all_tables, scan_file_ids
 from xi.xi_config import FFXI_DIR
 
@@ -37,7 +38,7 @@ def probe_zone_mesh_name(path: Path) -> str | None:
                     break
                 meta = struct.unpack_from('<I', hdr, 4)[0]
                 type_code = meta & 0x7F
-                size = ((meta >> 7) & 0xFFFFF) * 0x10
+                size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
                 if size <= 0:
                     break
                 section_count += 1

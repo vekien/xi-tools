@@ -9,6 +9,7 @@ remapping joint arrays so gear weapons (joint 5) work on mobs.
 import struct
 from pathlib import Path
 
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.tex.xi_recolor import recolour_zone_dat
 
 
@@ -22,7 +23,7 @@ def _parse_blocks(data: bytes) -> list:
         name = data[pos:pos + 4].decode('ascii', errors='replace')
         meta = struct.unpack_from('<I', data, pos + 4)[0]
         tc = meta & 0x7F
-        sz = ((meta >> 7) & 0xFFFFF) * 0x10
+        sz = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if sz <= 0:
             break
         sections.append({'name': name.strip(), 'type': tc, 'pos': pos, 'size': sz})
@@ -80,7 +81,7 @@ def _remap_weapon_joint(block_bytes: bytearray, target_joint: int):
     while pos < len(block_bytes) - 16:
         meta = struct.unpack_from('<I', block_bytes, pos + 4)[0]
         tc = meta & 0x7F
-        sz = ((meta >> 7) & 0xFFFFF) * 0x10
+        sz = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if sz <= 0:
             break
         if tc == 0x2A:

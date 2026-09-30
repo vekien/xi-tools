@@ -42,6 +42,7 @@ from typing import Optional
 
 import click
 
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.entity.anim.xi_export import parse_sections
 from xi.xi_config import FFXI_DIR, FFXI_PIVOT_DIR, editable_dat
 from xi.zone.xi_decrypt import (
@@ -1627,7 +1628,7 @@ def strip_zone_interactions(data: bytes, kinds: set) -> tuple[bytes, dict]:
     pos, length = 0, len(buf)
     while pos + 16 <= length:
         meta = struct.unpack_from("<I", buf, pos + 4)[0]
-        size = ((meta >> 7) & 0xFFFFF) * 0x10
+        size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if size <= 0:
             break
         if (meta & 0x7F) == 0x36 and buf[pos + 0x10:pos + 0x13] == b"RID":

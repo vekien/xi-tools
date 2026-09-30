@@ -27,6 +27,8 @@ import colorsys
 import base64
 import io
 
+from xi.common.xi_section import MAX_SECTION_UNITS
+
 
 def _align16(v):
     return (v + 0xF) & ~0xF
@@ -39,7 +41,7 @@ def _parse_sections(data: bytes) -> list:
     while pos + 16 <= len(data):
         meta = struct.unpack_from('<I', data, pos + 4)[0]
         tc = meta & 0x7F
-        sz = ((meta >> 7) & 0xFFFFF) * 0x10
+        sz = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if sz <= 0:
             break
         sec_id = data[pos:pos + 4].decode('ascii', errors='replace').strip()

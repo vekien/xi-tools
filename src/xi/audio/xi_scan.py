@@ -39,6 +39,7 @@ import click
 from xi.audio import xi_core as core
 from xi.audio import xi_names as names
 from xi.audio.xi_refs import SECTION_SOUND_POINTER, _MAGIC
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.mv.dat_index import DatEntry
 from xi.xi_config import FFXI_DIR
 
@@ -112,7 +113,7 @@ def walk_sound_refs(path: Path):
                 if len(hdr) < 16:
                     break
                 meta = struct.unpack_from("<I", hdr, 4)[0]
-                sec_size = ((meta >> 7) & 0xFFFFF) * 0x10
+                sec_size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
                 if sec_size <= 0:
                     break
                 if first is None:

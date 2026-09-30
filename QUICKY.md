@@ -68,10 +68,10 @@ xi dats undo                     # --apply-db: also revert an ability's DB row a
 # 1. Export source DAT to editable GLB (+ split textures + FBX)
 xi mesh export ROM/351/102 --split-tex --fbx
 
-# 2. Prepare a project manifest — writes dats/battle_worn_byakko.json
+# 2. Prepare a project manifest — writes projects/battle_worn_byakko.json
 xi dats prepare exports/mesh/rom/351/102/102_schema.json --project battle_worn_byakko --replace
 
-# 3. Build (auto-resolves dats/battle_worn_byakko.json) — writes DAT + patches FTABLE
+# 3. Build (auto-resolves projects/battle_worn_byakko.json) — writes DAT + patches FTABLE
 xi dats build battle_worn_byakko
 ```
 

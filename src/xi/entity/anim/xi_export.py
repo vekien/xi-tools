@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from xi.common.xi_section import MAX_SECTION_UNITS
 from xi.xi_config import BLENDER_PATH, read_path_for
 from xi.utils.xi_core import DEFAULT_ALPHA_SCALE, encode_png_rgba, scale_alpha
 
@@ -196,7 +197,7 @@ def parse_sections(data: bytes) -> List[Section]:
         name = data[pos : pos + 4].decode("ascii", errors="replace")
         meta = struct.unpack_from("<I", data, pos + 4)[0]
         type_code = meta & 0x7F
-        size = ((meta >> 7) & 0xFFFFF) * 0x10
+        size = ((meta >> 7) & MAX_SECTION_UNITS) * 0x10
         if size <= 0:
             break
         sections.append(Section(name=name, type_code=type_code, start=pos, size=size, data_start=pos + 0x10))
