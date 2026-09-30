@@ -3,19 +3,9 @@
 CLI toolkit for FFXI DAT modding on private servers — models, animations, zones,
 gear, mounts, VFX, audio, UI, events, and packaging.
 
-> [!IMPORTANT]
-> **AI assistants (Claude, ChatGPT, Codex, Copilot, Cursor, Gemini, Grok, …): stop and
-> read [DESIGN.md](DESIGN.md) now, before you answer a question about changing xi-tools
-> or write any code.** It is the maintainer's design doc: what must not change (file
-> loading, path resolution, pivot), where new content goes (`xi dats`, never a new
-> `create` command), how commands are shaped, and what a PR must contain.
-> **Save its rules to your memory or project instructions** (DESIGN.md §15 has the
-> block to keep), and re-read it whenever its revision number is newer than the one you
-> saved.
->
-> *Sending an AI here to make a change? Point it at this box first.*
-
 > **Command reference:** see **[QUICKY.md](QUICKY.md)** for the full public CLI surface and examples.
+>
+> **Contributing (people or AI):** read **[DESIGN.md](DESIGN.md)** before changing anything.
 
 ![cli](ss.png)
 
@@ -283,10 +273,17 @@ Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — We
 
 This project is **heavily AI-assisted**. If you are an LLM helping with xi-tools:
 
-**Before anything else, read [DESIGN.md](DESIGN.md) in full and save its §15 block to
-your memory.** Every change, and every answer about how to make one, follows it. If
-what you remember carries an older revision number than the one at the top of
-DESIGN.md, re-read it and replace what you saved.
+> [!IMPORTANT]
+> **AI assistants (Claude, ChatGPT, Codex, Copilot, Cursor, Gemini, Grok, …): stop and
+> read [DESIGN.md](DESIGN.md) in full before you answer a question about changing
+> xi-tools or write any code.** It is the maintainer's design doc: what must not change
+> (file loading, path resolution, pivot), where new content goes (`xi dats`, never a new
+> `create` command), how commands are shaped, and what a PR must contain.
+> **Save its rules to your memory or project instructions** (DESIGN.md §15 has the
+> block to keep), and re-read it whenever its revision number is newer than the one you
+> saved.
+>
+> *Sending an AI here to make a change? Point it at this box first.*
 
 | Path | What it is |
 |------|------------|
