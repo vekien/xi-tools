@@ -121,3 +121,36 @@ def test_a_music_track_and_a_re_prepare_that_keeps_the_result(game, tmp_path):
     assert json.loads(Path("projects/ui.json").read_text())["actions"][0]["result"]["targets"] == ["dir"]
     assert run("undo", "ui", "--yes").exit_code == 0
     assert not (game / Path(*target.split("/"))).exists()                  # it was new: deleted
+
+
+def _resolve(root: Path, file_id: int, rom: int = 1):
+    from xi.ftable.xi_core import resolve_dat, root_table_pair
+    ft, vt = (Path(p) for p in root_table_pair(root, rom))
+    return resolve_dat(ft.read_bytes(), vt.read_bytes(), file_id)
+
+
+def test_a_file_id_registers_the_copy_and_undo_clears_it(game, tmp_path, monkeypatch):
+    import xi.xi_config as cfg
+    entries, fid = 2000, 1612
+    pivot = tmp_path / "pivot"
+    (pivot / "ROM10").mkdir(parents=True)
+    for rel, n in (("FTABLE.DAT", 2), ("VTABLE.DAT", 1), ("ROM10/FTABLE10.DAT", 2), ("ROM10/VTABLE10.DAT", 1)):
+        (pivot / rel).write_bytes(b"\0" * entries * n)
+    monkeypatch.setattr(cfg, "FFXI_PIVOT_DIR", str(pivot))
+    effect = tmp_path / "effect.DAT"
+    effect.write_bytes(b"retail effect")
+    assert "needs a ROM DAT path" in run("prepare", str(effect), "--project", "fx", "--type", "copy",
+                                          "--target", "sound9/x.bgw", "--file-id", "5").output
+    r = run("prepare", str(effect), "--project", "fx", "--type", "copy", "--target", "ROM10/20/0.DAT",
+            "--file-id", str(fid), "--id", "copy.meteor_storm")
+    assert r.exit_code == 0, r.output
+    assert action("fx")["target"] == {"path": "ROM10/20/0.DAT", "file_id": fid}
+    r = run("build", "fx", "--pivot")
+    assert r.exit_code == 0, r.output
+    assert (pivot / "ROM10" / "20" / "0.DAT").read_bytes() == b"retail effect"
+    assert _resolve(pivot, fid, rom=10)[0] == "ROM10/20/0.DAT"
+    assert _resolve(pivot, fid)[0] == "ROM10/20/0.DAT"                 # the main pair it carries
+    assert action("fx")["result"] == {"path": "ROM10/20/0.DAT", "file_id": fid, "targets": ["pivot"]}
+    assert run("undo", "fx", "--yes").exit_code == 0
+    assert not (pivot / "ROM10" / "20" / "0.DAT").exists()
+    assert _resolve(pivot, fid, rom=10) == (None, None) and _resolve(pivot, fid) == (None, None)

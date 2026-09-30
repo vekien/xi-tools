@@ -236,7 +236,10 @@ def _plan_result(action: dict) -> dict:
 
     if kind == "copy":
         from xi.dats.xi_copy import rel_path
-        return {"path": rel_path(target.get("path"))}
+        res = {"path": rel_path(target.get("path"))}
+        if target.get("file_id") is not None:
+            res["file_id"] = target["file_id"]
+        return res
 
     return {}
 
@@ -819,15 +822,34 @@ def _build_mount(action: dict, manifest_path: Path, manifest: dict,
 
 def _build_copy(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
                 dry_run: bool = False) -> dict:
-    """Put a file into the active target verbatim at target.path (xi.dats.xi_copy);
-    nothing is registered. ``dry_run`` plans without writing."""
+    """Put a file into the active target verbatim at target.path (xi.dats.xi_copy), and with
+    target.file_id register that id at the path in the target's tables (as a mount's model
+    is). ``dry_run`` plans without writing."""
     from xi.dats import xi_copy as CP
     errs = CP.validate_action(action)
     if errs:
         raise click.ClickException(f"{action.get('id')}:\n  " + "\n  ".join(errs))
     src = _resolve_raw_source(action["resources"]["file"], manifest_path, manifest)
     root = _active_build_root()
-    return CP.place(action, src, root, in_install=_root_target_name(root) == "dir", dry_run=dry_run)
+    result = CP.place(action, src, root, in_install=_root_target_name(root) == "dir", dry_run=dry_run)
+    file_id = action["target"].get("file_id")
+    if file_id is None:
+        return result
+    rel = result["path"]
+    rom, subdir, file_idx = _parse_rom_placement(rel)
+    _check_registrable(file_id, rel, rom, action["id"])
+    existing = _active_placement(file_id)
+    collision = existing is not None and existing.upper() != rel.upper()
+    if collision and not force and not dry_run:
+        raise click.ClickException(
+            f"{action['id']}: file_id {file_id} is already registered to {existing} in the target — "
+            f"this build would repoint it to {rel}. Pass --force if that's intentional.")
+    if not dry_run:
+        _patch_active_tables(file_id, (subdir << 7) | (file_idx & 0x7F), rom)
+    result.update(file_id=file_id, registered=f"file_id {file_id} -> {rel} (rom={rom})")
+    if collision:
+        result["occupied_by"] = existing
+    return result
 
 
 def _build_mesh(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
@@ -2226,12 +2248,14 @@ def json_cmd(manifest: Path, output: Path | None):
               help="A cutscene with a camera: where its camera scene DAT goes (like ROM10/490/55.DAT).")
 @click.option("--event-name", default=None,
               help="A cutscene: the name its event is recorded by (default: the file's name).")
+@click.option("--file-id", type=int, default=None,
+              help="A copy (--type copy) to a ROM DAT path: the file id to register there.")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
                 record_id: int | None = None, menu_index: int | None = None,
                 animation_from: int | None = None, merge: bool = False, zone_id: int | None = None,
-                camera: str | None = None, event_name: str | None = None):
+                camera: str | None = None, event_name: str | None = None, file_id: int | None = None):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -2268,6 +2292,8 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         action_id = action_id or f"copy.{_slug(path.rsplit('.', 1)[0])}"
         action = {"id": action_id, "type": "copy", "target": {"path": path},
                   "resources": {"file": _file_ref(source, manifest)}}
+        if file_id is not None:
+            action["target"]["file_id"] = file_id
         errs = CP.validate_action(action)
         if errs:
             raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
@@ -2392,8 +2418,8 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         preserve = ("result",)
     elif kind == "copy":
         # Where the last build put the file survives (undo takes it from there); the target
-        # too unless --target moved it.
-        preserve = ("result",) + (() if target else ("target",))
+        # too unless --target or --file-id changed it.
+        preserve = ("result",) + (() if target or file_id is not None else ("target",))
     else:
         preserve = ("model",) + (() if target else ("target",))
     _add_or_replace_action(manifest_data, action, replace, preserve=preserve)
@@ -2465,7 +2491,9 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
             rows.append((aid, typ, res.get("dat") or "ROM/118/114.DAT", str(rid), "-"))
             continue
         if typ == "copy":
-            rows.append((aid, typ, res.get("path") or (action.get("target") or {}).get("path") or "-", "-", "-"))
+            fid = res.get("file_id", (action.get("target") or {}).get("file_id"))
+            rows.append((aid, typ, res.get("path") or (action.get("target") or {}).get("path") or "-", "-",
+                         str(fid) if fid is not None else "-"))
             continue
         if typ in ("gear", "ability"):
             placements = res.get("placements") or []
@@ -3106,7 +3134,7 @@ def _action_placements(action: dict) -> list[tuple[int, str]]:
     elif action.get("type") in RESTORABLE_TYPES:
         pass
     elif action.get("type") == "copy":
-        pass        # no file_id: undo takes the file back out itself (xi.dats.xi_copy.undo)
+        pass        # undo takes the file back out itself (xi.dats.xi_copy.undo), and clears its file_id
     elif res.get("file_id") is not None and res.get("dat"):
         out.append((int(res["file_id"]), _rom_rel(res["dat"])))
     return out
@@ -3503,6 +3531,11 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
                 n, warns = CP.undo(action, root, in_install=name == "dir", src=src)
                 removed += n
                 db_left.extend(warns)
+                res = action.get("result") or {}
+                fid = res.get("file_id", (action.get("target") or {}).get("file_id"))
+                rel = res.get("path") or CP.rel_path((action.get("target") or {}).get("path"))
+                if fid is not None and rel and _unregister_file_id(root, int(fid), _parse_rom_placement(rel)[0]):
+                    cleared += 1
             if action.get("type") in RECORD_TYPES:
                 res = action.get("result") or {}
                 if isinstance(res.get("record_id"), int):
@@ -3831,6 +3864,11 @@ def _print_placements(results: list[dict], title: str) -> None:
             note = {"unchanged": "  (already the same)",
                     "source": "  (the source itself: building into the folder it lives in)"}.get(r.get("state"), "")
             click.echo(f"{head}: {r.get('source')} -> {r.get('path')} ({r.get('bytes'):,} bytes){note}")
+            if r.get("file_id") is not None:
+                occ = f"   (occupied by {r['occupied_by']})" if r.get("occupied_by") else ""
+                click.echo(f"     - file_id {r['file_id']} -> {r['path']}{occ}")
+                if occ:
+                    collisions += 1
         elif kind == "ability":
             files = r.get("placements", [])
             click.echo(f"{head}: {r.get('kind')} animation {r.get('animation')} "
@@ -4548,7 +4586,14 @@ def _wizard_copy(slug: str, prev: dict | None, manifest_path: Path) -> dict:
         if path:
             break
         click.echo("  A path inside the game folder, like ROM/119/51.DAT or sound9/win/music/data/music067.bgw.")
-    return {"id": f"copy.{slug}", "type": "copy", "target": {"path": path},
+    target: dict = {"path": path}
+    if re.match(r"^ROM[0-9]*/[0-9]+/[0-9]+\.DAT$", path, re.I):
+        prev_fid = (p.get("target") or {}).get("file_id")
+        raw = _ask("File id to register at that path? (blank: none — the client already reads the path)",
+                   "Enter file id", default=str(prev_fid) if prev_fid is not None else "", show_default=False)
+        if str(raw).strip():
+            target["file_id"] = int(raw)
+    return {"id": f"copy.{slug}", "type": "copy", "target": target,
             "resources": {"file": _file_ref(src, manifest_path)}}
 
 

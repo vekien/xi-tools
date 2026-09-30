@@ -23,6 +23,11 @@
           "type": "string",
           "pattern": "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[^:]+$",
           "description": "Where the file goes, inside the game folder: ROM/119/51.DAT, sound9/win/music/data/music067.bgw. Forward slashes; no drive, no leading slash, no '..'."
+        },
+        "file_id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Register this file id at target.path (a ROM DAT path) in the target's tables, as a mount's or entity's model is: for a new DAT the client doesn't read yet, such as a retail effect cloned to a custom animation number. Without it nothing is registered."
         }
       }
     },
@@ -37,9 +42,10 @@
     "result": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Recorded by dats build: the path the file went to and the targets it went into — what undo takes back out.",
+      "description": "Recorded by dats build: the path the file went to, the file id registered there, and the targets it went into — what undo takes back out.",
       "properties": {
         "path": {"type": "string"},
+        "file_id": {"type": "integer"},
         "targets": {"type": "array", "items": {"type": "string", "enum": ["dir", "pivot", "hd"]}}
       }
     }
@@ -51,6 +57,13 @@
       "description": "The title screen, redrawn with xi ui tex import",
       "target": {"path": "ROM/119/50.DAT"},
       "resources": {"file": "../../rom/ROM/119/50.DAT"}
+    },
+    {
+      "id": "copy.meteor_storm",
+      "type": "copy",
+      "description": "Spell animation 1612: retail spell animation 206's effect, registered at the custom band's file id (423,152 + 1612)",
+      "target": {"path": "ROM10/20/0.DAT", "file_id": 424764},
+      "resources": {"file": "../../rom/ROM10/20/0.DAT"}
     }
   ]
 }

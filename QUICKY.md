@@ -195,6 +195,7 @@ xi dats undo P                                      # every block and line back;
 ```text
 xi dats prepare rom/ROM/119/51.DAT --project P --type copy   # target guessed from the path: ROM/119/51.DAT
 xi dats prepare music067.bgw --project P --type copy --target sound9/win/music/data/music067.bgw
+xi dats prepare 206.DAT --project P --type copy --target ROM10/20/0.DAT --file-id 424764   # a new DAT: register its file id
 xi dats build P [--dry-run] [--pivot]               # written as it is; the install keeps <file>.base
 xi dats new [--pivot]                               # wizard: "Copy a file as it is"
 xi dats undo P                                      # install: .base back; pivot: the copy deleted
