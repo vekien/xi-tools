@@ -20,6 +20,7 @@ uv run xi gear import <race> <slot> <model_id> <glb_path> [OPTIONS]
 | `<slot>` | Equipment slot: `face head body hands legs feet main sub ranged` |
 | `<model_id>` | Integer model index within that race/slot |
 | `<glb_path>` | Path to the edited `.glb` file (GLB only) |
+| `--source-dir DIR` | With no `<glb_path>`, look for the exported GLB (`<stem>.glb`/`.gltf`/`.fbx`) in this folder instead of the export folder |
 | `--mesh-name NAME` | Override the target mesh section name |
 | `--double-sided` / `--single-sided` | Face culling (default: double-sided) |
 | `--scale FLOAT` | Uniform scale factor applied to the imported geometry |

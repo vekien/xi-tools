@@ -830,16 +830,18 @@ def _bone(index: int) -> str:
     return f"bone{index:04d}"
 
 
-def _find_layer_gltf(value: str, dat: Path) -> Tuple[List[Path], List[Path]]:
+def _find_layer_gltf(value: str, dat: Path,
+                     source_dir: Optional[Path] = None) -> Tuple[List[Path], List[Path]]:
     """Resolve a ``--layer`` value that isn't an existing path by name-searching the
     DAT's animation export folders. Returns ``(matches, roots_searched)``; ``matches``
     is de-duplicated in discovery order (direct hit in a root first, then any nested
-    hit). A missing ``.gltf`` suffix is tried too, so ``--layer yap`` finds ``yap.gltf``."""
+    hit). A missing ``.gltf`` suffix is tried too, so ``--layer yap`` finds ``yap.gltf``.
+    ``source_dir`` (--source-dir) is searched instead of the export folders."""
     from xi.entity.anim.xi_export import default_anim_output_dir, legacy_anim_output_dir
 
     names = [value] + ([value + ".gltf"] if not value.lower().endswith(".gltf") else [])
     roots: List[Path] = []
-    for root in (default_anim_output_dir(dat), legacy_anim_output_dir(dat)):
+    for root in ((source_dir,) if source_dir else (default_anim_output_dir(dat), legacy_anim_output_dir(dat))):
         if root not in roots:
             roots.append(root)
 
@@ -1048,6 +1050,9 @@ import click as _click  # noqa: E402
 @_click.argument('dat_path')
 @_click.argument('anim_name', required=False, default=None)
 @_click.argument('gltf_path', required=False, type=_click.Path(path_type=Path))
+@_click.option('--source-dir', type=_click.Path(exists=True, file_okay=False, path_type=Path), default=None,
+               help='Look for the clip (<stem>_<anim>/…) and --layer glTFs in this folder instead of '
+                    'exports/anim/<rom>/.')
 @_click.option('--anim', 'anim_opt', default=None,
                help='Base animation name (alternative to the positional ANIM_NAME). '
                     'In --layer mode this is the clip that is copied and overlaid.')
@@ -1122,7 +1127,7 @@ import click as _click  # noqa: E402
                help='--add-schedule: crossfade in+out of the clip, in frames (30/s) — the '
                     'routine\'s transIn/transOut blending. 0 = hard snap. For asymmetric '
                     'blends re-run `anim schedule add` with --trans-in/--trans-out.')
-def cmd(dat_path: str, anim_name: str, gltf_path, anim_opt, add_name, layer_gltf,
+def cmd(dat_path: str, anim_name: str, gltf_path, source_dir, anim_opt, add_name, layer_gltf,
         frame_spec, bone_spec, verbose: bool, template_anim: str, no_base: bool,
         race: str, skeleton_dat, keep_routine_duration: bool, fps, static_base: bool,
         trans_bone_spec, add_schedule: bool, schedule_tag, loop: bool, max_loops, blend: int):
@@ -1131,7 +1136,7 @@ def cmd(dat_path: str, anim_name: str, gltf_path, anim_opt, add_name, layer_gltf
     DAT_PATH may be a ROM-relative spec like ROM/217/32. ANIM_NAME is the target
     track; a name with no trailing digit defaults to slot 0 (idl -> idl0).
     GLTF_PATH is optional — if omitted, the exported clip for this anim is found
-    automatically under exports/anim/<rom>/<stem>_<anim>/.
+    automatically under exports/anim/<rom>/<stem>_<anim>/ (or in --source-dir).
 
     LAYER MODE (--layer): build a NEW animation by overlaying part of one clip onto
     another. Take the whole base clip (--anim / positional ANIM_NAME), overlay the
@@ -1191,7 +1196,7 @@ def cmd(dat_path: str, anim_name: str, gltf_path, anim_opt, add_name, layer_gltf
                 "ANIM_NAME) — the clip that is copied and overlaid.")
         layer_path = Path(layer_gltf)
         if not layer_path.is_file():
-            matches, roots = _find_layer_gltf(str(layer_gltf), dat)
+            matches, roots = _find_layer_gltf(str(layer_gltf), dat, source_dir)
             if not matches:
                 where = "; ".join(str(r) for r in roots)
                 raise _click.ClickException(
@@ -1233,7 +1238,7 @@ def cmd(dat_path: str, anim_name: str, gltf_path, anim_opt, add_name, layer_gltf
     # A glTF given by a bare name (not an existing path) is looked up under the DAT's
     # export folder, same as --layer; None falls through to the auto-find below.
     if gltf_path is not None and not Path(gltf_path).is_file():
-        matches, roots = _find_layer_gltf(str(gltf_path), dat)
+        matches, roots = _find_layer_gltf(str(gltf_path), dat, source_dir)
         if not matches:
             where = "; ".join(str(r) for r in roots)
             raise _click.ClickException(
@@ -1253,10 +1258,10 @@ def cmd(dat_path: str, anim_name: str, gltf_path, anim_opt, add_name, layer_gltf
 
     slot_gltfs = None
     if gltf_path is None:
-        base = default_anim_output_dir(dat)
+        base = source_dir or default_anim_output_dir(dat)
         bases = [base]
         legacy_base = legacy_anim_output_dir(dat)
-        if legacy_base != base:
+        if not source_dir and legacy_base != base:
             bases.append(legacy_base)
         if digitless:
             tried = []

@@ -253,6 +253,7 @@ xi audio refs ROM/1/41                # which sounds a DAT references
 xi mesh export ROM/351/102 --split-tex --fbx      # → exports/mesh/rom/351/102/102.glb (+fbx, pngs)
 xi mesh export ROM/5/3 --anim idl --frame 0       # posed export
 xi mesh import ROM/351/102                        # auto-finds the export; rebuilds from .base
+xi mesh import ROM/351/102 --source-dir art/102   # the model from another folder (any import)
 xi mesh import ROM/351/102 model.glb --rotate-y -90 --scale 1.0
 ```
 

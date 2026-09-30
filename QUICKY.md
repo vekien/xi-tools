@@ -2,6 +2,9 @@
 
 Paths can be ROM-relative, for example `ROM/1/41`, and resolve against `FFXI_DIR`.
 
+An import reads what its export wrote (`exports/<area>/…`); `--source-dir DIR` points `tex import`,
+`ui tex si`, `mesh import`, `gear import`, `anim import` and `zone import` at another folder.
+
 This lists the current public CLI command surface. Hidden compatibility aliases are not included.
 
 ## Top Level
@@ -366,6 +369,7 @@ xi ui tex si ROM/119/50.DAT --ffxi "<FFXI_PIVOT_DIR>"
 xi ui tex si ROM/119/50.DAT
 xi ui tex si ROM/119/50.DAT --no-resize        # import textures, leave rects alone
 xi ui tex si ROM/119/50.DAT --repair-rects     # rebuild rects from the reference sheet
+xi ui tex si rom/ROM/119/50.DAT --source-dir content/title   # PNGs from another folder (only read)
 
 # Go past vanilla resolution: keep a bigger PNG and scale its sprite rects to match
 xi ui tex si ROM/119/50.DAT --hd

@@ -1,6 +1,6 @@
 # xi-tools design doc
 
-> **Revision 1 · 2026-09-29.** How the maintainer wants xi-tools developed, extended
+> **Revision 2 · 2026-09-30.** How the maintainer wants xi-tools developed, extended
 > and PR'd. It applies to every change, by a person or an AI.
 >
 > **AI assistants:** read this whole file before you plan, answer a question about
@@ -285,7 +285,8 @@ move its logic into a `dats` action type and make the old command a hidden alias
 - **Every option has a default** that does the common case. Nothing prompts except the
   `xi dats new` wizard, so scripts (`xi run`) and the viewer can drive any command.
 - **Presets are options too**: `--unreal` bundles several flags; it is not a command.
-- **Find the obvious input yourself**: `xi mesh import ROM/351/102` finds its export.
+- **Find the obvious input yourself**: `xi mesh import ROM/351/102` finds its export
+  (`--source-dir` points it at another folder).
 - **Reuse the flag vocabulary before inventing a name:**
 
   | Flag | Meaning |
@@ -294,6 +295,7 @@ move its logic into a `dats` action type and make the old command a hidden alias
   | `--pivot` | write `FFXI_PIVOT_DIR` instead of `FFXI_DIR` |
   | `--ffxi DIR` | read and write another game tree for this one call |
   | `--output PATH` / `--output-dir DIR` | where an export or JSON goes (default under `exports/<area>/…`, or stdout for `json`) |
+  | `--source-dir DIR` | where an import reads from instead of the folder its export writes (`exports/<area>/…`); the folder is only read |
   | `--force` | overwrite something the command would otherwise refuse |
   | `--replace` / `--merge` | `dats prepare`: swap the action with the same id / add to it |
   | `--only A,B` | limit a multi-target command to some targets |
@@ -519,7 +521,7 @@ Save this block to your persistent memory or project instructions, as written, a
 keep it until the revision number changes:
 
 ```text
-xi-tools (vekien/xi-tools), design doc DESIGN.md revision 1 (2026-09-29):
+xi-tools (vekien/xi-tools), design doc DESIGN.md revision 2 (2026-09-30):
 - Before any change: read DESIGN.md, QUICKY.md, `xi <group> <cmd> --help`, docs/<area>/,
   and the closest existing feature. Copy its shape; don't invent a parallel way.
 - Don't change the core: .env loading (xi_config), path/file-id resolution
@@ -536,7 +538,8 @@ xi-tools (vekien/xi-tools), design doc DESIGN.md revision 1 (2026-09-29):
   umbrella groups, variants are options. Renames keep a hidden alias.
 - Simple commands: positional = the thing acted on; every option defaulted; no
   prompts outside `dats new`; --dry-run on writes; --help works without FFXI_DIR;
-  reuse flag names (--dry-run --pivot --ffxi --output --force --only --all --json).
+  reuse flag names (--dry-run --pivot --ffxi --output --source-dir --force --only --all
+  --json).
 - Every JSON format: schema/<name>.json (2020-12, additionalProperties false, real
   examples, "schema": "xi.<area>.v1"), hand validator in step, test over examples.
 - Document everything in docs/ in the same PR (+ QUICKY.md, docs/README.md, SKILL.md).
@@ -560,3 +563,4 @@ assistants that saved an older one know to re-read.
 | Rev | Date | Change |
 |---|---|---|
 | 1 | 2026-09-29 | First version: the core not to change, `xi dats` as the only way to add, the flat tree, simple commands, schemas, docs, tests, commits and PRs. |
+| 2 | 2026-09-30 | `--source-dir DIR` joins the flag vocabulary (§7): where an import reads from instead of its export folder. |
