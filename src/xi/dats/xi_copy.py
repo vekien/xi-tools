@@ -1,10 +1,11 @@
 """The ``copy`` action (schema/copy.json): a file put into the target verbatim.
 
 For content that is kept as the finished file itself, not as edits: a UI sheet redrawn
-with ``xi ui tex``, a replaced music track. The build writes the file at ``target.path``
-in the install or the pivot folder; nothing is registered, so the path must be one the
-client already reads (a DAT the FTABLE already points at, a ``sound*/…`` track). A new
-DAT that needs a file id goes through a type that registers one (mount, entity, gear …).
+with ``xi ui tex``, a replaced music track, a retail effect cloned to a new animation
+number. The build writes the file at ``target.path`` in the install or the pivot folder.
+Without ``target.file_id`` nothing is registered, so the path must be one the client
+already reads (a DAT the FTABLE already points at, a ``sound*/…`` track); with it, that
+file id is registered at the path in the target's tables, as a mount's or entity's is.
 
 In the install the file it replaces is kept as ``<file>.base`` first (the in-place
 contract), and ``undo`` puts that back; in a pivot folder ``undo`` deletes the copy, so
@@ -18,6 +19,7 @@ ACTION_KEYS = {"id", "type", "enabled", "description", "depends_on", "outputs",
                "target", "resources", "result"}
 _ID = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _ROM = re.compile(r"^ROM([0-9]*)$", re.I)
+_ROM_DAT = re.compile(r"^ROM[0-9]*/[0-9]+/[0-9]+\.DAT$", re.I)
 _SOUND = re.compile(r"^sound[0-9]*$", re.I)
 
 
@@ -59,11 +61,17 @@ def validate_action(action: dict) -> list[str]:
     if action.get("type") != "copy":
         errs.append("type must be 'copy'")
     target = action.get("target")
-    if not isinstance(target, dict) or set(target) - {"path"}:
-        errs.append("target must be {\"path\": <path in the game folder>}")
+    if not isinstance(target, dict) or set(target) - {"path", "file_id"}:
+        errs.append("target must be {\"path\": <path in the game folder>} (and optionally \"file_id\")")
     elif rel_path(target.get("path")) is None:
         errs.append(f"target.path {target.get('path')!r} must be a path inside the game folder "
                     "(like ROM/119/51.DAT or sound9/win/music/data/music067.bgw)")
+    elif "file_id" in target:
+        fid = target["file_id"]
+        if not isinstance(fid, int) or isinstance(fid, bool) or fid < 0:
+            errs.append("target.file_id must be a whole number (the file id to register the file at)")
+        elif not _ROM_DAT.match(rel_path(target["path"])):
+            errs.append(f"target.file_id needs a ROM DAT path (like ROM10/20/0.DAT), not {target['path']!r}")
     res = action.get("resources")
     if not isinstance(res, dict) or set(res) - {"file"}:
         errs.append("resources must be {\"file\": <the file to copy>}")

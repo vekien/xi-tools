@@ -228,8 +228,10 @@ import`, a replaced `.bgw` track. Pick the file, then where in the game folder i
 (guessed from its own path when that ends in `ROM…/n/n.DAT` or `sound…/…`). The action is
 `copy.<project>`; the file is referenced where it is (relative to the project file), not
 copied into resources. Non-interactive: `xi dats prepare rom/ROM/119/51.DAT --project P
---type copy [--target ROM/119/51.DAT]`. Nothing is registered: the path must be one the
-client already reads. A new DAT that needs a file id goes through mount, entity, gear ….
+--type copy [--target ROM/119/51.DAT]`. Nothing is registered unless a file id is given
+(the wizard asks for a ROM DAT path; `--file-id N`): then N is registered at that path, for a
+new DAT the client doesn't read yet, such as a retail effect cloned to a custom animation
+number (`--target ROM10/20/0.DAT --file-id 424764`).
 
 ## Building (`xi dats build`)
 
@@ -604,8 +606,10 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   the band. A `--force` overwrite keeps the old row on `result.replaced` for `undo`.
 - `copy` ([`schema/copy.json`](../../schema/copy.json), `xi.dats.xi_copy`): writes
   `resources.file` as it is at `target.path` (any path in the game folder, `ROM/119/51.DAT`
-  or `sound9/win/music/data/music067.bgw`), matching the case of a file already there. No
-  file id, no tables. In the install the file it replaces is kept as `<file>.base` and
+  or `sound9/win/music/data/music067.bgw`), matching the case of a file already there. With
+  `target.file_id` (a ROM DAT path only) it registers that id at the path in the target's
+  tables, as a mount's model is, and `undo` clears it; without it no tables are touched.
+  In the install the file it replaces is kept as `<file>.base` and
   `undo` puts it back (a file that was new is deleted); in a pivot folder `undo` deletes the
   copy. A build into the folder the source lives in leaves it (`the source itself`), and
   `undo` never deletes the source.
