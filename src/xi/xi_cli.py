@@ -190,8 +190,11 @@ def ftable():
 @click.option('--pivot/--no-pivot', default=True, show_default=True,
               help='Also grow the pivot/override pack tables (FFXI_PIVOT_DIR) to the same size — the '
                    'client merges them with the base install, so a size mismatch crashes it.')
+@click.option('--no-dll', is_flag=True,
+              help="Don't patch FFXiMain.dll's gear groups (for a client that patches them at load, "
+                   "such as cexidats); the gear windows are expanded and linked all the same.")
 @click.pass_context
-def ftable_expand(ctx, no_gear, no_backup, dry_run, debug, force, pivot):
+def ftable_expand(ctx, no_gear, no_backup, dry_run, debug, force, pivot, no_dll):
     """Expand FTABLE/VTABLE buffers for custom entity AND gear models.
 
     \b
@@ -203,6 +206,7 @@ def ftable_expand(ctx, no_gear, no_backup, dry_run, debug, force, pivot):
     Examples:
       xi ftable expand              # both, config defaults (entity 30000 + gear 4095)
       xi ftable expand --no-gear    # entity buffer only (skips the gear DLL check)
+      xi ftable expand --no-dll     # both, but leave FFXiMain.dll alone (cexidats patches it)
       xi ftable expand --dry-run -v # preview the unified plan with timings
       xi ftable expand entity 30000 # entity only, explicit modelid ceiling
       xi ftable expand gear 4000    # gear only, explicit per-slot max
@@ -210,7 +214,7 @@ def ftable_expand(ctx, no_gear, no_backup, dry_run, debug, force, pivot):
     if ctx.invoked_subcommand is not None:
         return
     gear_inject.expand_all(do_gear=not no_gear, do_backup=not no_backup,
-                           dry_run=dry_run, debug=debug, force=force, pivot=pivot)
+                           dry_run=dry_run, debug=debug, force=force, pivot=pivot, dll=not no_dll)
 
 ftable_expand.add_command(expand.entity_cmd,            'entity')
 ftable_expand.add_command(gear_inject.gear_expand_cmd,  'gear')

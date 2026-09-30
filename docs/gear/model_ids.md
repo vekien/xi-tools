@@ -106,8 +106,9 @@ against.
 - Don't load the legacy `gearpatch` addon (`Ashita/addons/gearpatch`). It writes the old
   cexi layout into the same 56 entries.
 - `xi dats build` currently looks for the patch in the `FFXiMain.dll` file
-  (`dll_expand_max`), and `xi ftable expand` writes it there. Both still assume the file
-  patch.
+  (`dll_expand_max`), and `xi ftable expand` writes it there unless given `--no-dll` (tables
+  and armour links only, for a client whose gear groups cexidats patches). The build check
+  still assumes the file patch.
 
 ---
 

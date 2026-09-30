@@ -386,11 +386,63 @@ def gear_dll_patched(dll_path: Path | None = None) -> bool:
     return base >= CUSTOM_GEAR_BASE
 
 
+def _retail_group_tables(dll_path: Path, dll: bool) -> bytes:
+    """The 8 races' retail gear group tables (8 × 432 bytes), which say where each armour
+    slot's G5 originals live. Read from FFXiMain.dll while it still holds retail's; once
+    it is patched (its G5 now points into the windows), or with ``dll=False`` and no DLL
+    there, the ported retail tables (xi_core.RACE_TABLES) stand in."""
+    from xi.gear.xi_core import RACE_TABLES
+    if dll_path.exists() and not gear_dll_patched(dll_path):
+        with open(dll_path, 'rb') as f:
+            f.seek(DLL_TABLES_FILE_OFFSET)
+            data = f.read(8 * BYTES_PER_TABLE)
+        if data[:8] != bytes([0xA8, 0x1B, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00]):
+            raise click.ClickException('FFXiMain.dll gear table signature mismatch.')
+        return data
+    if dll and not dll_path.exists():
+        raise click.ClickException(f'FFXiMain.dll not found at {dll_path}. Set FFXI_DIR.')
+    return b''.join(RACE_TABLES[race] for race in RACES)
+
+
+def _armor_links(group_tables: bytes, ftbase: bytes, vtbase: bytes, max_model: int) -> list:
+    """(file_id, ft_val, vt_val) for every retail armour G5 original, pointed into its
+    (race, slot) window at the same model id: the entries that keep existing armour
+    working once the G5 group moves (by the DLL patch or cexidats)."""
+    pointers = []
+    for ri, race in enumerate(RACES):
+        for slot in ARMOR_SLOTS:
+            si = SLOTS.index(slot)
+            g5_off = ri * BYTES_PER_TABLE + si * GROUPS_PER_SLOT * 8 + 5 * 8
+            orig_base = struct.unpack_from('<I', group_tables, g5_off)[0]
+            orig_count = struct.unpack_from('<I', group_tables, g5_off + 4)[0]
+            g5_base_model = CUSTOM_MODEL_START[slot] - orig_count
+            for i in range(orig_count):
+                src = orig_base + i
+                if src < len(vtbase) and vtbase[src] != 0:
+                    ft_val = struct.unpack_from('<H', ftbase, src * 2)[0]
+                    pointers.append((custom_fid(race, slot, g5_base_model + i, max_model),
+                                     ft_val, vtbase[src]))
+    return pointers
+
+
+def _links_present(pointers: list, ftbase: bytes, vtbase: bytes) -> bool:
+    return bool(pointers) and all(
+        fid < len(vtbase) and vtbase[fid] == vt and struct.unpack_from('<H', ftbase, fid * 2)[0] == ft
+        for fid, ft, vt in pointers)
+
+
 def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
-                       dry_run: bool = False, force: bool = False):
+                       dry_run: bool = False, force: bool = False,
+                       dll: bool = True, pivot: bool = True):
     """Expand the FTABLEs so every (race, slot) has a window of (max_model + 1)
     file_ids, and point each armor slot's G5 originals into its window. No DAT
     files are copied — the new file_ids duplicate the originals' table entries.
+    Then patch FFXiMain.dll's gear groups — unless ``dll`` is False, for a client
+    that gets them another way (cexidats rewrites them in memory at load); the DLL
+    is still read for where the originals are, never written.
+
+    Like every expand, the tables never end smaller than the largest one already
+    there (the pivot folder's too, with ``pivot``), so they all stay one size.
 
     One-time: the window size is fixed once set. To change `max_model` later,
     restore the FTABLEs from backup and re-run.
@@ -401,6 +453,15 @@ def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
     state = _load_state()
     actual_max = current_expand_max()
     dll_path = Path(FFXI_DIR) / 'FFXiMain.dll'
+    group_tables = _retail_group_tables(dll_path, dll)
+    if actual_max is not None and not force:
+        # Big enough is not the same as set up: something else (an entity expand, a
+        # table another tool grew) can make the tables this size without the links.
+        ftbase, vtbase = load_tables(1)
+        if not _links_present(_armor_links(group_tables, ftbase, vtbase, max_model), ftbase, vtbase):
+            click.echo(f"The tables are big enough (model_id max {actual_max}) but the armour "
+                       "links aren't in the windows yet — writing them.")
+            actual_max = None
 
     # FTABLE already expanded (a launcher update won't touch it). The only thing
     # that may still be missing is the FFXiMain.dll gear-patch — client/launcher
@@ -409,6 +470,10 @@ def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
     # expanded".
     if actual_max is not None and not force:
         from xi.ffximain.xi_gear_patch import patch_gear_groups
+        if not dll:
+            click.echo(f"Already set up: FTABLE expanded (model_id max {actual_max}) and the "
+                       "armour links in place. FFXiMain.dll left alone (--no-dll).")
+            return state
         if gear_dll_patched(dll_path):
             click.echo(f"Already set up: FTABLE expanded (model_id max {actual_max}) and "
                        "FFXiMain.dll gear-patch in place. Nothing to do.")
@@ -438,18 +503,8 @@ def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
     _dbg(f'expand_gear_tables start: max_model={max_model}, dry_run={dry_run}, force={force}')
     _dbg(f'FFXI_DIR={FFXI_DIR}  (edits in place, .base backups)')
 
-    dll_path = Path(FFXI_DIR) / 'FFXiMain.dll'
-    if not dll_path.exists():
-        raise click.ClickException(f'FFXiMain.dll not found at {dll_path}. Set FFXI_DIR.')
-    t = time.perf_counter()
-    with open(dll_path, 'rb') as f:
-        f.seek(DLL_TABLES_FILE_OFFSET)
-        dll_data = f.read(8 * BYTES_PER_TABLE)
-    if dll_data[:8] != bytes([0xA8, 0x1B, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00]):
-        raise click.ClickException('FFXiMain.dll gear table signature mismatch.')
-    _dbg(f'read gear table signature from FFXiMain.dll in {time.perf_counter() - t:.3f}s')
-
-    target = gear_ftable_target(max_model)
+    from xi.ftable.xi_expand import resolve_uniform_target
+    target = resolve_uniform_target(gear_ftable_target(max_model), include_pivot=pivot)
     _dbg(f'target FTABLE entries = {target:,}  '
          f'(base {CUSTOM_GEAR_BASE:,} + {len(RACES)} races * {len(SLOTS)} slots * '
          f'{_window_size(max_model):,} window)')
@@ -470,21 +525,7 @@ def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
     _dbg(f'load_tables(1) -> FTABLE {len(ftbase):,}B / VTABLE {len(vtbase):,}B in '
          f'{time.perf_counter() - t:.3f}s')
     t = time.perf_counter()
-    pointers = []
-    for ri, race in enumerate(RACES):
-        for slot in ARMOR_SLOTS:
-            si = SLOTS.index(slot)
-            g5_off = ri * BYTES_PER_TABLE + si * GROUPS_PER_SLOT * 8 + 5 * 8
-            orig_base = struct.unpack_from('<I', dll_data, g5_off)[0]
-            orig_count = struct.unpack_from('<I', dll_data, g5_off + 4)[0]
-            g5_base_model = CUSTOM_MODEL_START[slot] - orig_count
-            for i in range(orig_count):
-                src = orig_base + i
-                if src < len(vtbase) and vtbase[src] != 0:
-                    ft_val = struct.unpack_from('<H', ftbase, src * 2)[0]
-                    pointers.append((custom_fid(race, slot, g5_base_model + i, max_model),
-                                     ft_val, vtbase[src]))
-
+    pointers = _armor_links(group_tables, ftbase, vtbase, max_model)
     _dbg(f'built {len(pointers):,} armor pointer links in {time.perf_counter() - t:.3f}s')
 
     click.echo(f'  Step 2/2: keeping {len(pointers):,} existing armor models working '
@@ -505,9 +546,15 @@ def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
     # custom model_ids into the windows we just made. Without this the client's
     # group walker stops at retail counts and never finds a custom model.
     from xi.ffximain.xi_gear_patch import patch_gear_groups
-    click.echo('\n  Step 3/3: patching FFXiMain.dll gear groups (so the client can '
-               'resolve custom model_ids) ...')
-    if not dry_run:
+    if not dll:
+        click.echo('\n  Step 3/3: skipped (--no-dll) — FFXiMain.dll is left alone; the client '
+                   'needs its gear groups patched another way (cexidats, at load).')
+    else:
+        click.echo('\n  Step 3/3: patching FFXiMain.dll gear groups (so the client can '
+                   'resolve custom model_ids) ...')
+    if not dll:
+        pass
+    elif not dry_run:
         patch_gear_groups(dll_path, max_model)
         click.echo(click.style(
             '  ✓ Patched FFXiMain.dll — restart the client to reload it.', fg='green'))
@@ -521,7 +568,7 @@ def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
 
 def expand_all(do_gear: bool = True, do_backup: bool = True,
                dry_run: bool = False, debug: bool = False, force: bool = False,
-               pivot: bool = True):
+               pivot: bool = True, dll: bool = True):
     """Provision both custom buffers in a single pass.
 
     The gear table target is a strict superset of the entity buffer
@@ -572,7 +619,7 @@ def expand_all(do_gear: bool = True, do_backup: bool = True,
 
     if do_gear:
         # One grow to the gear target covers the entity region for free.
-        expand_gear_tables(max_model=MAX_GEAR_MODELID, dry_run=dry_run, force=force)
+        expand_gear_tables(max_model=MAX_GEAR_MODELID, dry_run=dry_run, force=force, dll=dll, pivot=pivot)
         final_target = gear_target
     else:
         click.echo(f'\n[*] Growing tables to the entity buffer ({entity_target:,} entries) ...')
@@ -722,7 +769,10 @@ def inject_model(race: str, slot: str, source_model_id: int,
               help='Re-expand even if already expanded (you must restore the FTABLEs first).')
 @click.option('--debug', '-v', is_flag=True,
               help='Print timed, per-step diagnostics (which file/operation is slow).')
-def gear_expand_cmd(max_model, dry_run, force, debug):
+@click.option('--no-dll', is_flag=True,
+              help="Don't patch FFXiMain.dll's gear groups (for a client that patches them at "
+                   "load, such as cexidats); the windows are expanded and linked all the same.")
+def gear_expand_cmd(max_model, dry_run, force, debug, no_dll):
     """Expand FTABLE/VTABLE for custom GEAR models, up to MAX_MODEL per slot.
 
     One-time step. Each (race, slot) gets a window of (MAX_MODEL+1) file_ids and the
@@ -738,7 +788,7 @@ def gear_expand_cmd(max_model, dry_run, force, debug):
     """
     _set_debug(debug)
     try:
-        expand_gear_tables(max_model=max_model, dry_run=dry_run, force=force)
+        expand_gear_tables(max_model=max_model, dry_run=dry_run, force=force, dll=not no_dll)
     except click.ClickException:
         raise
     from xi.ftable.xi_expand import sync_pivot_from_base, pivot_root

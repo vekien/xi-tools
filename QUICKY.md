@@ -485,6 +485,7 @@ xi ui items mount import
 xi ftable expand
 xi ftable expand entity
 xi ftable expand gear
+xi ftable expand --no-dll          # tables + gear windows, FFXiMain.dll left alone (cexidats patches it)
 xi ftable reset
 xi ftable json
 xi ftable list
