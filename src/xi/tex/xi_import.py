@@ -58,11 +58,12 @@ def import_textures(dat_path: Path, png_paths: List[Path]) -> Dict[str, List[str
 @click.command()
 @click.argument("dat_path")
 @click.argument("pngs", nargs=-1, type=click.Path(exists=True))
-@click.option("--dir", "png_dir", type=click.Path(exists=True), default=None, help="Import every *.png in this dir (default: exports/tex/<rom>/).")
+@click.option("--source-dir", "--dir", "png_dir", type=click.Path(exists=True), default=None,
+              help="Import every *.png in this folder instead of exports/tex/<rom>/ (--dir is the older name).")
 def import_cmd(dat_path, pngs, png_dir):
     """Re-encode edited PNG(s) back into the DAT, matched to their texture by name.
 
-    With no PNG args, imports every PNG in exports/tex/<rom>/ (or --dir).
+    With no PNG args, imports every PNG in exports/tex/<rom>/ (or --source-dir).
     """
     try:
         resolved = resolve_dat_path(dat_path)

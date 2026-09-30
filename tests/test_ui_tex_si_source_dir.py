@@ -1,6 +1,6 @@
-"""`xi ui tex si --dir DIR` (xi.ui.xi_simple): the PNGs of another folder imported into a UI DAT,
-from a temporary copy seeded with the DAT's own DDS, so the folder is never written to. On a
-copy of the install's title screen sheet (ROM/119/50.DAT); skips without FFXI_DIR."""
+"""`xi ui tex si --source-dir DIR` (xi.ui.xi_simple): the PNGs of another folder imported into a
+UI DAT, from a temporary copy seeded with the DAT's own DDS, so the folder is never written to.
+On a copy of the install's title screen sheet (ROM/119/50.DAT); skips without FFXI_DIR."""
 import shutil
 from pathlib import Path
 
@@ -21,7 +21,7 @@ def _copy_sheet(root: Path, tmp_path: Path) -> Path:
     return game
 
 
-def test_dir_imports_from_a_folder_it_leaves_alone(root, tmp_path, monkeypatch):
+def test_source_dir_imports_from_a_folder_it_leaves_alone(root, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     game = _copy_sheet(root, tmp_path)
     before = parse_textures(bytearray((game / SHEET).read_bytes()))
@@ -35,7 +35,7 @@ def test_dir_imports_from_a_folder_it_leaves_alone(root, tmp_path, monkeypatch):
     shutil.rmtree(tmp_path / "exports")
     listing = sorted(p.name for p in title.iterdir())
 
-    r = CliRunner().invoke(S.simple_import_cmd, [SHEET, "--ffxi", str(game), "--dir", str(title)],
+    r = CliRunner().invoke(S.simple_import_cmd, [SHEET, "--ffxi", str(game), "--source-dir", str(title)],
                            catch_exceptions=False)
     assert r.exit_code == 0, r.output
     assert f"patched {len(before)} texture(s)" in r.output
@@ -46,17 +46,17 @@ def test_dir_imports_from_a_folder_it_leaves_alone(root, tmp_path, monkeypatch):
            [(t.name, t.width, t.height, compression_name(t)) for t in before]   # formats kept
 
     once = (game / SHEET).read_bytes()
-    r = CliRunner().invoke(S.simple_import_cmd, [SHEET, "--ffxi", str(game), "--dir", str(title)],
+    r = CliRunner().invoke(S.simple_import_cmd, [SHEET, "--ffxi", str(game), "--source-dir", str(title)],
                            catch_exceptions=False)
     assert r.exit_code == 0 and (game / SHEET).read_bytes() == once     # the same PNGs, the same DAT
 
 
-def test_dir_needs_pngs_and_not_all_themes(root, tmp_path):
+def test_source_dir_needs_pngs_and_not_all_themes(root, tmp_path):
     game = _copy_sheet(root, tmp_path)
     empty = tmp_path / "empty"
     empty.mkdir()
-    r = CliRunner().invoke(S.simple_import_cmd, [SHEET, "--ffxi", str(game), "--dir", str(empty)])
+    r = CliRunner().invoke(S.simple_import_cmd, [SHEET, "--ffxi", str(game), "--source-dir", str(empty)])
     assert r.exit_code != 0 and "No .png files found" in r.output
     r = CliRunner().invoke(S.simple_import_cmd,
-                           [SHEET, "--ffxi", str(game), "--dir", str(empty), "--all-themes"])
+                           [SHEET, "--ffxi", str(game), "--source-dir", str(empty), "--all-themes"])
     assert r.exit_code != 0 and "cannot be used together" in r.output

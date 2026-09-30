@@ -35,7 +35,7 @@ uv run xi tex import ROM/1/41              # re-imports every PNG in that folder
   `funsui  sib1` → `funsui_sib1.png`). `tex import` matches each PNG back to its
   section **by that name** — just edit the PNGs and run import, no manual mapping.
 - With no PNG args, `tex import` imports every `*.png` in `exports/tex/<rom>/`
-  (or `--dir`). Specific files: `tex import <dat> a.png b.png`.
+  (or `--source-dir DIR`; `--dir` is the older name). Specific files: `tex import <dat> a.png b.png`.
 - A `<dat>.base` backup is kept (shared with `zone import` / `fx`).
 
 ## Caveats

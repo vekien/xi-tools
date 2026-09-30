@@ -500,7 +500,7 @@ def _seed_theme_from_source(source_dir: Path, theme_dat: Path) -> Path:
               help='Window skins only (ROM/0/14..21): apply this theme\'s edited PNGs to ALL skins and import each.')
 @click.option('--ffxi', default=None, metavar='DIR',
               help='Override FFXI_DIR for this command (e.g. a pivot/override root).')
-@click.option('--dir', 'png_dir', type=click.Path(exists=True, file_okay=False), default=None,
+@click.option('--source-dir', 'png_dir', type=click.Path(exists=True, file_okay=False), default=None,
               help='Import the PNGs in this folder (and its alpha-scale.json, if any) instead of '
                    'the working folder. The folder is left as it is: the DDS are built in a '
                    'temporary copy, seeded with the DAT\'s own so --format auto keeps each format.')
@@ -510,7 +510,7 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
     """Convert edited PNG files back to DDS and import them into a UI DAT.
 
     The working folder is derived automatically from the DAT path:
-    `ROM/0/1.DAT -> exports/ui/0/1`; --dir imports the PNGs of another folder instead
+    `ROM/0/1.DAT -> exports/ui/0/1`; --source-dir imports the PNGs of another folder instead
     (a repo's `content/title`, say), leaving it untouched.
 
     With --all-themes, the edited PNGs from this DAT's folder are copied onto every
@@ -519,12 +519,12 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
     \b
     Examples:
       xi ui tex si ROM/119/50.DAT
-      xi ui tex si rom/ROM/119/50.DAT --dir content/title
+      xi ui tex si rom/ROM/119/50.DAT --source-dir content/title
     """
     _apply_ffxi_dir(ffxi)
     dat_file = _resolve_dat_path(dat_path)
     if png_dir and all_themes:
-        raise click.ClickException('--dir and --all-themes cannot be used together.')
+        raise click.ClickException('--source-dir and --all-themes cannot be used together.')
 
     if requested_format.lower() == 'dxt5':
         # Tested on ROM/119/50: a correctly-built all-DXT5 DAT renders flat grey.
@@ -576,7 +576,7 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
 
 @contextlib.contextmanager
 def _seeded_work_dir(png_dir: Path, dat_file: Path):
-    """A temporary working folder for --dir: the folder's PNGs and alpha sidecar, plus the
+    """A temporary working folder for --source-dir: the folder's PNGs and alpha sidecar, plus the
     DAT's own textures as DDS -- what sx leaves beside the PNGs, so --format auto keeps each
     texture's format and one with no PNG is written back as it was. The folder itself is
     never written to (the import builds its DDS and .alpha files in the working folder)."""

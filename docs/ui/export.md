@@ -87,10 +87,10 @@ uv run xi ui tex sx ROM/119/50.DAT
 uv run xi ui tex si ROM/119/50.DAT
 ```
 
-PNGs kept somewhere else — a repo's `content/title`, say — import with `--dir`:
+PNGs kept somewhere else — a repo's `content/title`, say — import with `--source-dir`:
 
 ```bash
-uv run xi ui tex si rom/ROM/119/50.DAT --dir content/title
+uv run xi ui tex si rom/ROM/119/50.DAT --source-dir content/title
 ```
 
 The folder is only read. The import runs in a temporary copy of its PNGs (and its

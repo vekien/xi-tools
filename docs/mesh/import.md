@@ -12,7 +12,8 @@ uv run xi mesh import ROM/7/97 model.fbx   # or an explicit model
 `<dat>` may be a filesystem path or a ROM-relative spec like `ROM/7/97`. If
 `[model]` is omitted, the model exported for that DAT
 (`exports/mesh/<rom>/<stem>.fbx`, then `.glb`/`.gltf`) is used automatically.
-Older exports under `exports/entity` are still accepted as a fallback.
+Older exports under `exports/entity` are still accepted as a fallback. `--source-dir DIR`
+looks for the same `<stem>.fbx`/`.glb`/`.gltf` in another folder instead (only read).
 
 Verified in-game on `ROM/7/97` with both round-tripped retail geometry and a
 fully custom replacement model (custom geometry + custom texture).
@@ -44,6 +45,8 @@ triangles) so you can watch the geometry budget.
 - `--single-sided` — do not emit reversed back-faces (default is double-sided so
   thin surfaces like flags are not back-face culled)
 - `--mesh-name` — 4-char section name (default reuses the DAT's first mesh section)
+- `--source-dir DIR` — with no `[model]`, look for it in this folder instead of
+  `exports/mesh/<rom>/`
 
 ## What is and isn't changed
 

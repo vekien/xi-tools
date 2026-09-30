@@ -25,10 +25,12 @@ frame for *placements*, but for *mesh-merge* the Blender path is what's verified
 ## CLI
 
 ```
-xi zone import ROM/1/41 [model.glb] [--prune] [--rebuild] [--placement MESH] [--add-collision OBJ]
+xi zone import ROM/1/41 [model.glb] [--source-dir DIR] [--prune] [--rebuild] [--placement MESH] [--add-collision OBJ]
 ```
 
 - `model` optional — defaults to the newest `.glb` in `exports/zone/<rom>/`.
+- `--source-dir DIR` — look for the model in this folder instead; `--tex` reads its PNGs
+  from there too (`--tex-dir` still picks the PNG folder on its own).
 - A `<dat>.base` pristine backup is created on first edit.
 - **Stacking rules (not uniform):**
   - **GLB import** (placements + mesh-merge + `--prune`/`--rebuild`/`--placement`)

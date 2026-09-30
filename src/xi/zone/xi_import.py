@@ -945,13 +945,13 @@ def import_zone_placements(dat_path: Path, model_path: Path, prune: bool = False
     return target, matched, node_count, skipped_placements, deleted, rebuilt, added, merged
 
 
-def default_model_path(dat_path: Path) -> Optional[Path]:
+def default_model_path(dat_path: Path, source_dir: Optional[Path] = None) -> Optional[Path]:
     """The GLB to import for this DAT, looked up in its export dir
-    (exports/zone/<rom>/). Prefers an exact ``<stem>.glb`` (then .gltf); otherwise
+    (exports/zone/<rom>/, or ``source_dir``). Prefers an exact ``<stem>.glb`` (then .gltf); otherwise
     picks the most recently modified .glb/.gltf there, so a freshly-saved C4D
     export under any name is found without typing the path. (FBX is not imported.)"""
     from xi.zone.xi_export import default_output_dir
-    out_dir = default_output_dir(dat_path)
+    out_dir = source_dir or default_output_dir(dat_path)
     for ext in (".glb", ".gltf"):
         candidate = out_dir / f"{dat_path.stem}{ext}"
         if candidate.is_file():
@@ -1019,6 +1019,8 @@ import click as _click  # noqa: E402
 @_click.command("import")
 @_click.argument("dat_path")
 @_click.argument("model_path", required=False, type=_click.Path(exists=True, path_type=Path))
+@_click.option("--source-dir", type=_click.Path(exists=True, file_okay=False, path_type=Path), default=None,
+               help="Read the model and --tex's PNGs from this folder instead of exports/zone/<rom>/")
 @_click.option("--prune", is_flag=True, help="Delete (blank) placements whose object was removed in the model")
 @_click.option("--rebuild", is_flag=True, help="Patch mesh vertex positions in place (same topology) from the GLB")
 @_click.option("--placement", "placements_add", multiple=True, metavar="MESH",
@@ -1039,14 +1041,15 @@ import click as _click  # noqa: E402
                help="Re-import textures from the zone export dir (exports/zone/<rom>/*.png). "
                     "Matches PNGs to 0x20 sections by filename stem = texture name.")
 @_click.option("--tex-dir", "tex_dir", default=None, type=_click.Path(path_type=Path),
-               help="PNG directory for --tex (default: exports/zone/<rom>/)")
-def cmd(dat_path: str, model_path, prune: bool, rebuild: bool, placements_add, add_collision_obj,
+               help="PNG directory for --tex (default: --source-dir, else exports/zone/<rom>/)")
+def cmd(dat_path: str, model_path, source_dir, prune: bool, rebuild: bool, placements_add, add_collision_obj,
         collision_scale, camera_block, tex: bool, tex_dir):
     """Import an edited GLB into a zone DAT (GLB only — FBX is not accepted).
 
     DAT_PATH may be a ROM-relative spec like ROM/1/41. MODEL_PATH is optional —
     if omitted, the GLB exported for this DAT (newest .glb/.gltf in
-    exports/zone/<rom>/) is used. Export your edits as GLB from your DCC tool.
+    exports/zone/<rom>/, or --source-dir) is used. Export your edits as GLB from
+    your DCC tool.
 
     GLB import writes placement transforms and auto mesh-merges edited geometry
     (from ``<dat>.base`` each run — not stacked). --prune also deletes objects
@@ -1067,10 +1070,11 @@ def cmd(dat_path: str, model_path, prune: bool, rebuild: bool, placements_add, a
     needs_model = model_path is not None or prune or rebuild or placements_add
     if needs_model or (not tex and not add_collision_obj):
         if model_path is None:
-            model_path = default_model_path(resolved)
+            model_path = default_model_path(resolved, source_dir)
             if model_path is None:
                 raise _click.ClickException(
-                    "No model given and none found in exports/zone. Export first, or pass a model path."
+                    f"No model given and none found in {source_dir or 'exports/zone'}. "
+                    "Export first, or pass a model path."
                 )
             _click.echo(f"Using model:    {model_path}")
         try:
@@ -1092,7 +1096,7 @@ def cmd(dat_path: str, model_path, prune: bool, rebuild: bool, placements_add, a
 
     if tex:
         from xi.tex.xi_import import import_textures
-        png_dir = Path(tex_dir) if tex_dir else default_output_dir(resolved)
+        png_dir = Path(tex_dir) if tex_dir else (source_dir or default_output_dir(resolved))
         pngs = sorted(png_dir.glob("*.png")) if png_dir.is_dir() else []
         if not pngs:
             _click.echo(_click.style(f"--tex: no PNGs found in {png_dir}", fg="yellow"))

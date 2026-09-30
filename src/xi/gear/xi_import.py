@@ -16,11 +16,13 @@ from xi.entity.mesh.xi_import import import_mesh
 from xi.xi_config import output_path_for
 
 
-def default_gear_model_path(race: str, slot: str, dat_path: Path) -> Path | None:
+def default_gear_model_path(race: str, slot: str, dat_path: Path,
+                            source_dir: Path | None = None) -> Path | None:
     # New flat layout first, then the legacy <race>/<slot> path so models
-    # exported before the flatten are still auto-found.
-    for out_dir in (default_gear_output_dir(dat_path),
-                    legacy_gear_output_dir(race, slot, dat_path)):
+    # exported before the flatten are still auto-found. A source_dir replaces both.
+    dirs = ((source_dir,) if source_dir else
+            (default_gear_output_dir(dat_path), legacy_gear_output_dir(race, slot, dat_path)))
+    for out_dir in dirs:
         for ext in (".glb", ".gltf", ".fbx"):
             candidate = out_dir / f"{dat_path.stem}{ext}"
             if candidate.is_file():
@@ -33,6 +35,8 @@ def default_gear_model_path(race: str, slot: str, dat_path: Path) -> Path | None
 @click.argument("spec2", required=False, metavar="SLOT|GLB_PATH")
 @click.argument("spec3", required=False, metavar="[MODEL_ID]")
 @click.argument("spec4", required=False, metavar="[GLB_PATH]")
+@click.option("--source-dir", type=click.Path(exists=True, file_okay=False, path_type=Path), default=None,
+              help="Look for the GLB (<stem>.glb/.gltf/.fbx) in this folder instead of the export folder.")
 @click.option("--mesh-name", default=None,
               help="Override the target mesh section name (default: first mesh in the DAT).")
 @click.option("--double-sided/--single-sided", default=True, show_default=True,
@@ -49,7 +53,7 @@ def default_gear_model_path(race: str, slot: str, dat_path: Path) -> Path | None
 @click.option("--tex-local", "tex_local", is_flag=True, default=False,
               help="Texture-only import sourcing images from files next to the GLB "
                    "(matched by name; the GLB is only a naming reference). Implies --tex.")
-def cmd(spec1, spec2, spec3, spec4, mesh_name, double_sided, manual_scale, rotate_y_deg, flip_yz,
+def cmd(spec1, spec2, spec3, spec4, source_dir, mesh_name, double_sided, manual_scale, rotate_y_deg, flip_yz,
         tex_only, tex_local):
     """Import an edited GLB into a gear model DAT (GLB only — convert FBX in Blender first).
 
@@ -57,7 +61,8 @@ def cmd(spec1, spec2, spec3, spec4, mesh_name, double_sided, manual_scale, rotat
     GLB, and writes the DAT back in place under FFXI_DIR (pristine bytes kept
     in a `<dat>.base` backup). Identify the model explicitly
     (RACE SLOT MODEL_ID) or by a DAT path / file_id (race auto-detected); the GLB
-    path always comes last.
+    path always comes last. With no GLB path, the one the export wrote is used
+    (--source-dir looks in another folder).
 
     With --tex, only the DAT's texture sections are replaced (geometry left
     alone); --tex-local additionally reads the images from files on disk next to
@@ -117,10 +122,10 @@ def cmd(spec1, spec2, spec3, spec4, mesh_name, double_sided, manual_scale, rotat
         raise click.ClickException(str(e))
 
     if glb_path is None:
-        glb_path = default_gear_model_path(race, slot, dat_path)
+        glb_path = default_gear_model_path(race, slot, dat_path, source_dir)
         if glb_path is None:
             raise click.ClickException(
-                f"No GLB found in {default_gear_output_dir(dat_path)}. "
+                f"No GLB found in {source_dir or default_gear_output_dir(dat_path)}. "
                 "Export first or pass a GLB path.")
         click.echo(f"Using model:    {glb_path}")
 

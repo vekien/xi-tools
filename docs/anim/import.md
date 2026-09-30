@@ -47,6 +47,8 @@ The three modes:
   `exports/anim/<rom>/<stem>/…`. If omitted entirely, the exported clip(s) for
   `<anim>` are found automatically under `exports/anim/<rom>/<stem>_<anim>/` (older
   exports under `exports/entity/anim` are still accepted as a fallback).
+- `--source-dir DIR` — look in this folder instead of the export folder, for the
+  clip (`<stem>_<anim>/…`), a bare-name `[gltf]` and a bare-name `--layer` glTF.
 - `--add NAME` — the target track name, and a signal to **create** it. Handy because
   a lone positional after it is then taken as the glTF: `--add tlk yap.gltf`. With
   `--layer` it names the layered result instead. A digit-less new name is
