@@ -366,6 +366,7 @@ xi ui tex si ROM/119/50.DAT --ffxi "<FFXI_PIVOT_DIR>"
 xi ui tex si ROM/119/50.DAT
 xi ui tex si ROM/119/50.DAT --no-resize        # import textures, leave rects alone
 xi ui tex si ROM/119/50.DAT --repair-rects     # rebuild rects from the reference sheet
+xi ui tex si rom/ROM/119/50.DAT --dir content/title   # PNGs from another folder (only read)
 
 # Go past vanilla resolution: keep a bigger PNG and scale its sprite rects to match
 xi ui tex si ROM/119/50.DAT --hd

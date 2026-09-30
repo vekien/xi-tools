@@ -87,6 +87,18 @@ uv run xi ui tex sx ROM/119/50.DAT
 uv run xi ui tex si ROM/119/50.DAT
 ```
 
+PNGs kept somewhere else — a repo's `content/title`, say — import with `--dir`:
+
+```bash
+uv run xi ui tex si rom/ROM/119/50.DAT --dir content/title
+```
+
+The folder is only read. The import runs in a temporary copy of its PNGs (and its
+`alpha-scale.json`, so an untouched `sx` export still has its alpha brightening
+undone), seeded with the DAT's own textures as DDS: `--format auto` keeps each
+texture's format, and a texture with no PNG is written back as it was. The same
+PNGs give the same DAT, run after run. Not with `--all-themes`.
+
 Notes:
 
 - **Edit the `.png`, not the `.dds`.** `si` re-encodes to DXT3 — the format

@@ -1,4 +1,6 @@
+import contextlib
 import shutil
+import tempfile
 from pathlib import Path
 
 import click
@@ -498,19 +500,31 @@ def _seed_theme_from_source(source_dir: Path, theme_dat: Path) -> Path:
               help='Window skins only (ROM/0/14..21): apply this theme\'s edited PNGs to ALL skins and import each.')
 @click.option('--ffxi', default=None, metavar='DIR',
               help='Override FFXI_DIR for this command (e.g. a pivot/override root).')
+@click.option('--dir', 'png_dir', type=click.Path(exists=True, file_okay=False), default=None,
+              help='Import the PNGs in this folder (and its alpha-scale.json, if any) instead of '
+                   'the working folder. The folder is left as it is: the DDS are built in a '
+                   'temporary copy, seeded with the DAT\'s own so --format auto keeps each format.')
 def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: str,
                       reference: str | None, fix_layout: bool, hd: bool, hd_only_arg: str | None,
-                      repair: bool, all_themes: bool, ffxi: str | None):
+                      repair: bool, all_themes: bool, ffxi: str | None, png_dir: str | None):
     """Convert edited PNG files back to DDS and import them into a UI DAT.
 
     The working folder is derived automatically from the DAT path:
-    `ROM/0/1.DAT -> exports/ui/0/1`.
+    `ROM/0/1.DAT -> exports/ui/0/1`; --dir imports the PNGs of another folder instead
+    (a repo's `content/title`, say), leaving it untouched.
 
     With --all-themes, the edited PNGs from this DAT's folder are copied onto every
     window-skin DAT (ROM/0/14..21) and imported into each in one go.
+
+    \b
+    Examples:
+      xi ui tex si ROM/119/50.DAT
+      xi ui tex si rom/ROM/119/50.DAT --dir content/title
     """
     _apply_ffxi_dir(ffxi)
     dat_file = _resolve_dat_path(dat_path)
+    if png_dir and all_themes:
+        raise click.ClickException('--dir and --all-themes cannot be used together.')
 
     if requested_format.lower() == 'dxt5':
         # Tested on ROM/119/50: a correctly-built all-DXT5 DAT renders flat grey.
@@ -551,5 +565,32 @@ def simple_import_cmd(dat_path: str, output_dat: str | None, requested_format: s
     else:
         # Default: write the DAT back in place.
         out_file = output_path_for(dat_file)
+    if png_dir:
+        with _seeded_work_dir(Path(png_dir), dat_file) as work:
+            _import_one(dat_file, out_file, work, requested_format,
+                        fix_layout, reference, repair, hd, hd_only_arg)
+        return
     _import_one(dat_file, out_file, _default_export_dir(dat_file), requested_format,
                 fix_layout, reference, repair, hd, hd_only_arg)
+
+
+@contextlib.contextmanager
+def _seeded_work_dir(png_dir: Path, dat_file: Path):
+    """A temporary working folder for --dir: the folder's PNGs and alpha sidecar, plus the
+    DAT's own textures as DDS -- what sx leaves beside the PNGs, so --format auto keeps each
+    texture's format and one with no PNG is written back as it was. The folder itself is
+    never written to (the import builds its DDS and .alpha files in the working folder)."""
+    pngs = sorted(png_dir.glob('*.png'))
+    if not pngs:
+        raise click.ClickException(f'No .png files found in {png_dir}')
+    with tempfile.TemporaryDirectory(prefix='xi-si-') as tmp:
+        work = Path(tmp)
+        for p in pngs:
+            shutil.copy2(p, work / p.name)
+        if (png_dir / ALPHA_SIDECAR).is_file():
+            shutil.copy2(png_dir / ALPHA_SIDECAR, work / ALPHA_SIDECAR)
+        entries = parse_textures(read_path_for(dat_file).read_bytes())
+        for entry, dds_name in zip(entries, output_file_names(entries)):
+            write_dds(entry, work / dds_name)
+        click.echo(f'PNGs from: {png_dir} ({len(pngs)})')
+        yield work
