@@ -95,7 +95,9 @@ detectable anywhere (e.g. weapons), it asks once, like before.
   into the first free consecutive block, one block per slot) and a single model id
   (recommend `3000+`) shared by the whole set — each slot has its own file_id window,
   so a set can sit at the same id in every slot.
-- **Requires** `xi ftable expand gear` first (per-race windowed file_ids).
+- **Requires** `xi ftable expand gear` first (per-race windowed file_ids). With
+  `--no-dll` (a client whose gear groups cexidats patches) the linked FTABLE windows
+  count as the gear window; [../gear/model_ids.md](../gear/model_ids.md).
 
 ### Mounts
 

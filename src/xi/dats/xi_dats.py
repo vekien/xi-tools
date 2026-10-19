@@ -1844,9 +1844,24 @@ def _gear_expand_max() -> int | None:
     FFXiMain.dll's patched gear group tables — the client's own model_id→file_id
     map, so it can't disagree with what the game will do — NOT from
     gear_inject_state.json, a machine-local sidecar that never ships with a
-    distributed install (real expanded installs looked unexpanded without it)."""
-    from xi.gear.xi_inject import dll_expand_max
-    return dll_expand_max()
+    distributed install (real expanded installs looked unexpanded without it).
+    A retail DLL whose FTABLE windows are expanded and linked (`xi ftable expand
+    --no-dll`) counts too: cexidats patches those gear groups at load."""
+    return _gear_window()[0]
+
+
+def _gear_window() -> tuple[int | None, str | None]:
+    """(max model id, where it was found) for the gear window: "dll" when FFXiMain.dll
+    carries the patch, "links" when only the FTABLE windows and their armour links are
+    there (a cexidats client), (None, None) when neither is."""
+    from xi.gear.xi_inject import dll_expand_max, linked_expand_max
+    max_model = dll_expand_max()
+    if max_model is not None:
+        return max_model, "dll"
+    max_model = linked_expand_max()
+    if max_model is not None:
+        return max_model, "links"
+    return None, None
 
 
 def _gear_tables_status() -> str:
@@ -1861,17 +1876,21 @@ def _gear_tables_status() -> str:
                  "retail size" if entries <= RETAIL_ENTRIES else
                  f"retail +{entries - RETAIL_ENTRIES:,}")
     lines = [f"FTABLE: {entries:,} entries ({size_note}) — {ft}"]
-    max_model = _gear_expand_max()
+    max_model, source = _gear_window()
     if max_model is None:
         need = gear_ftable_target(DEFAULT_MAX_MODELID)
-        lines.append(f"FFXiMain.dll gear window: none — retail DLL, or a client update "
-                     f"reverted the patch ({root / 'FFXiMain.dll'})")
-        lines.append(f"`xi ftable expand gear` patches the DLL and grows the FTABLE "
-                     f"to {need:,} entries (default window {DEFAULT_MAX_MODELID})")
+        lines.append(f"Gear window: none — FFXiMain.dll is at retail (or a client update "
+                     f"reverted its patch: {root / 'FFXiMain.dll'}) and the FTABLE windows "
+                     f"don't hold retail armour's links")
+        lines.append(f"`xi ftable expand gear` grows the FTABLE to {need:,} entries "
+                     f"(default window {DEFAULT_MAX_MODELID}), links the armour and patches "
+                     f"the DLL; `--no-dll` leaves the DLL to cexidats")
     else:
         need = gear_ftable_target(max_model)
         ok = "OK" if entries >= need else "FTABLE TOO SMALL"
-        lines.append(f"FFXiMain.dll gear window: model ids to {max_model} per slot "
+        found = ("FFXiMain.dll patch" if source == "dll" else
+                 "FTABLE links; FFXiMain.dll at retail, cexidats patches the groups at load")
+        lines.append(f"Gear window ({found}): model ids to {max_model} per slot "
                      f"→ needs {need:,} FTABLE entries ({ok})")
     return "\n  ".join(lines)
 
@@ -4981,7 +5000,8 @@ def _expansion_report(entries: int) -> list[tuple[str, str, bool, str]]:
     """(ctype, label, is_ready, detail) for each custom content type, given the
     base install's FTABLE entry count. Mounts fit within the retail range; entity +
     gear need the FTABLE grown past it (`xi ftable expand`). Gear additionally
-    needs the FFXiMain.dll gear-patch (a client/launcher update can revert it)."""
+    needs its window: the FFXiMain.dll gear-patch (a client/launcher update can
+    revert it), or the FTABLE's linked windows for a client cexidats patches."""
     from xi.mount.xi_core import MOUNT_FILE_BASE, MENU_CAP
     from xi.entity.xi_core import MODEL_FILE_OFFSET, MODEL_SAFE_START
     from xi.gear.xi_inject import gear_ftable_target, CUSTOM_GEAR_BASE
@@ -5001,15 +5021,21 @@ def _expansion_report(entries: int) -> list[tuple[str, str, bool, str]]:
     else:
         out.append(("entity", "Entity models", False,
                     f"FTABLE lacks the custom entity band — run `xi ftable expand entity`"))
-    max_model = _gear_expand_max()
+    max_model, source = _gear_window()
     if max_model is None:
         out.append(("gear", "Gear", False,
-                    "FFXiMain.dll has no custom gear window — retail DLL, or a client "
-                    "update reverted the patch (run `xi ftable expand gear`)"))
+                    "no custom gear window — FFXiMain.dll is at retail (or a client update "
+                    "reverted its patch) and the FTABLE windows aren't linked (run "
+                    "`xi ftable expand gear`; `--no-dll` for a cexidats client)"))
     else:
         need = gear_ftable_target(max_model)
         opened = need - CUSTOM_GEAR_BASE
-        if entries >= need:
+        if source == "links":
+            out.append(("gear", "Gear windows linked", True,
+                        f"model ids up to {max_model:,} per race & slot — "
+                        f"{opened:,} file ids opened; FFXiMain.dll at retail, cexidats "
+                        f"patches the groups at load"))
+        elif entries >= need:
             out.append(("gear", "Gear DLL patched", True,
                         f"model ids up to {max_model:,} per race & slot — "
                         f"{opened:,} file ids opened"))
@@ -5110,7 +5136,7 @@ def new_cmd(project: str | None, pivot: bool = False):
     if ctype not in ("ability", "copy", *RESTORABLE_TYPES, *RECORD_TYPES) \
             and not ready.get(ready_key, True):
         hint = {"gear": "Run `xi ftable expand gear` (expands the FTABLE and patches "
-                        "FFXiMain.dll)",
+                        "FFXiMain.dll; `--no-dll` for a client cexidats patches)",
                 "entity": "Run `xi ftable expand entity`",
                 "mount": "The FTABLE is smaller than retail — check the install"}[ready_key]
         raise click.ClickException(

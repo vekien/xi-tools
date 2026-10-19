@@ -105,10 +105,14 @@ against.
 - Face and ranged are not covered: their G5 is empty in retail, so the patch skips them.
 - Don't load the legacy `gearpatch` addon (`Ashita/addons/gearpatch`). It writes the old
   cexi layout into the same 56 entries.
-- `xi dats build` currently looks for the patch in the `FFXiMain.dll` file
-  (`dll_expand_max`), and `xi ftable expand` writes it there unless given `--no-dll` (tables
-  and armour links only, for a client whose gear groups cexidats patches). The build check
-  still assumes the file patch.
+- `xi dats build` takes the gear window from the patch in the `FFXiMain.dll` file
+  (`dll_expand_max`). With a retail DLL it takes the FTABLE instead (`linked_expand_max`): a
+  `MAX_GEAR_MODELID` window counts once the FTABLE is big enough for it and retail armour's
+  links are in it, which is what `xi ftable expand --no-dll` leaves for a client whose gear
+  groups cexidats patches. The window comes from the setting, not the table size, because
+  the tables can end larger than the gear target. The `xi dats new` report says which one
+  it found (`Gear DLL patched` or `Gear windows linked`). A `--no-dll` install without
+  cexidats builds all the same, but the client won't show the custom models.
 
 ---
 

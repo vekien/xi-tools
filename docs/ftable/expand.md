@@ -121,7 +121,7 @@ Flags on the unified command:
 | `--debug` / `-v` | off | Timed per-step diagnostics (spot slow disk I/O) |
 | `--force` | off | Re-run gear setup even if it's already been done |
 | `--pivot` / `--no-pivot` | **on** | Also sync/grow the pivot/override pack tables (`FFXI_PIVOT_DIR`) to match |
-| `--no-dll` | off | Grow and link the gear windows but never write `FFXiMain.dll` (for a client whose gear groups cexidats patches at load; [../gear/model_ids.md](../gear/model_ids.md)). The DLL is still read for where retail's armour lives; without one, the ported retail tables stand in. Also on `expand gear` |
+| `--no-dll` | off | Grow and link the gear windows but never write `FFXiMain.dll` (for a client whose gear groups cexidats patches at load; [../gear/model_ids.md](../gear/model_ids.md)). The DLL is still read for where retail's armour lives; without one, the ported retail tables stand in. `xi dats build` takes the linked windows as the gear window. Also on `expand gear` |
 
 The gear path counts as set up only when the retail armour links are in their windows, not
 merely when the tables are big enough, so `expand entity` (or anything else that grew the

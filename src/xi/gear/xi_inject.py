@@ -431,6 +431,25 @@ def _links_present(pointers: list, ftbase: bytes, vtbase: bytes) -> bool:
         for fid, ft, vt in pointers)
 
 
+def linked_expand_max() -> int | None:
+    """The gear window `xi ftable expand --no-dll` set up, or None: MAX_GEAR_MODELID's
+    window, once the FTABLE is big enough for it and retail armour's links are in it.
+    That is a client whose gear groups are patched at load (cexidats) rather than in
+    FFXiMain.dll, where `dll_expand_max` reads retail. The window is the setting, not
+    `current_expand_max`: the tables never shrink, so they can end larger than the gear
+    target (another tool grew them), and a window read off that size misses the links."""
+    import xi.xi_config as cfg
+    max_model = cfg.MAX_GEAR_MODELID
+    tables = load_tables(1)
+    if not tables or len(tables[0]) // 2 < gear_ftable_target(max_model):
+        return None
+    ftbase, vtbase = tables
+    group_tables = _retail_group_tables(Path(cfg.FFXI_DIR) / 'FFXiMain.dll', False)
+    if not _links_present(_armor_links(group_tables, ftbase, vtbase, max_model), ftbase, vtbase):
+        return None
+    return max_model
+
+
 def expand_gear_tables(max_model: int = DEFAULT_MAX_MODELID,
                        dry_run: bool = False, force: bool = False,
                        dll: bool = True, pivot: bool = True):
