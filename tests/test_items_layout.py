@@ -100,6 +100,32 @@ def test_retail_equipment_fields_shift_by_four_after_races():
     assert L.text_offset("roe", "retail") == L.text_offset("roe", "legacy") == 0x20
 
 
+# Charges, cast time, use and reuse delay of usable gear, as the retail legacy DATs hold them
+# (ROM/118/109 Signal Pearl, ROM/118/108 Charm Wand): one byte each for charges and cast time,
+# the reuse delay a u32 (Charm Wand's 86400 s doesn't fit a u16)
+SIGNAL_PEARL_1C = bytes.fromhex("010c0a0060540000")   # armor 0x1C..0x23
+CHARM_WAND_28 = bytes.fromhex("0a201e0080510100")     # weapon 0x28..0x2F
+
+
+@pytest.mark.parametrize("layout,offset,raw,expected", [
+    ("armor", 0x1C, SIGNAL_PEARL_1C, (1, 12, 10, 21600)),
+    ("weapon", 0x28, CHARM_WAND_28, (10, 32, 30, 86400)),
+])
+def test_legacy_usable_gear_fields(layout, offset, raw, expected):
+    rec = bytearray(L.STRIDE_LEGACY)
+    rec[offset:offset + len(raw)] = raw
+    names = ("max_charges", "cast_time", "use_delay", "reuse_delay")
+    assert tuple(L.read_field(rec, layout, "legacy", n) for n in names) == expected
+
+
+def test_legacy_reuse_delay_write_replaces_the_whole_u32():
+    rec = bytearray(L.STRIDE_LEGACY)
+    rec[0x1C:0x24] = SIGNAL_PEARL_1C
+    assert L.write_field(rec, "armor", "legacy", "reuse_delay", 3600)
+    assert rec[0x1C:0x24] == bytes.fromhex("010c0a00100e0000")
+    assert L.read_field(rec, "armor", "legacy", "reuse_delay") == 3600
+
+
 # ── build / parse round trips ───────────────────────────────────────────────
 
 WEAPON = {

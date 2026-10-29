@@ -12,6 +12,7 @@ job, race, slot, flag and skill name lands on the bit / number below.
 from __future__ import annotations
 
 import re
+import struct
 
 from xi.mv.xi_database import DMSG_TABLES, ITEM_TABLES, MENU_TABLES, _FIELD_KEYS
 from xi.ui.items.xi_layout import FIELDS, FORMAT_LEGACY, LAYOUTS
@@ -216,8 +217,16 @@ def _check_set(table: str, values, at: str, errs: list, layout: str | None = Non
         elif name == "elementCharge":
             if not _is_int(v, 0, 0xFFFFFFFF):
                 errs.append(f"{where} must be an integer 0-4294967295")
-        elif not _is_int(v, 0, 0xFFFF):
-            errs.append(f"{where} must be an integer 0-65535")
+        elif not _is_int(v, 0, (hi := _field_max(layout, name))):
+            errs.append(f"{where} must be an integer 0-{hi}")
+
+
+def _field_max(layout: str, name: str) -> int:
+    """The largest value a header field (by the viewer's name) holds in a legacy record."""
+    from xi.ui.items.xi_layout import UNKNOWN_FIELDS
+    key = {v: k for k, v in _FIELD_KEYS.items()}.get(name, name)
+    spec = FIELDS[layout][FORMAT_LEGACY].get(key) or UNKNOWN_FIELDS.get(layout, {}).get(FORMAT_LEGACY, {}).get(key)
+    return (1 << 8 * struct.calcsize(spec[1])) - 1 if spec else 0xFFFF
 
 
 def _check_strings(table: str, strings, at: str, errs: list) -> None:
