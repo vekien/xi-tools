@@ -371,7 +371,7 @@
           "$ref": "#/$defs/u16"
         },
         "maxCharges": {
-          "$ref": "#/$defs/u16"
+          "$ref": "#/$defs/u8"
         },
         "castTime": {
           "$ref": "#/$defs/u16"
@@ -380,7 +380,7 @@
           "$ref": "#/$defs/u16"
         },
         "reuseDelay": {
-          "$ref": "#/$defs/u16"
+          "$ref": "#/$defs/u32"
         },
         "itemLevel": {
           "$ref": "#/$defs/u16"
@@ -896,10 +896,20 @@
         }
       }
     },
+    "u8": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
     "u16": {
       "type": "integer",
       "minimum": 0,
       "maximum": 65535
+    },
+    "u32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
     },
     "modName": {
       "type": "string",

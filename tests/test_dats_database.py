@@ -70,6 +70,17 @@ def test_set_fields_follow_the_layout():
     assert db.string_names("armor", "jp") == ["name", "description"]
 
 
+
+def test_set_ranges_follow_the_field_width():
+    ok = {"id": "db.ok", "type": "database",
+          "edits": [{"table": "armor", "id": 14810, "set": {"reuseDelay": 86400, "maxCharges": 50}}]}
+    assert db.validate_action(ok) == []
+    bad = {"id": "db.bad", "type": "database",
+           "edits": [{"table": "armor", "id": 14810, "set": {"maxCharges": 256, "castTime": 300}}]}
+    text = "\n".join(db.validate_action(bad))
+    assert "edits[0].set.maxCharges must be an integer 0-255" in text
+    assert "edits[0].set.castTime must be an integer 0-255" in text
+
 def test_validator_names_the_field():
     bad = {
         "id": "db.bad", "type": "database", "extra": 1,

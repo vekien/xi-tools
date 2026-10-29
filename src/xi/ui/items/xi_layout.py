@@ -98,11 +98,14 @@ FIELDS: dict[str, dict[str, dict[str, tuple[int, str]]]] = {
         FORMAT_LEGACY: {**_COMMON_LEGACY, 'puppet_slot': (0x0E, '<H'), 'element_charge': (0x10, '<I')},
         FORMAT_RETAIL: {**_COMMON_RETAIL, 'puppet_slot': (0x10, '<H'), 'element_charge': (0x14, '<I')},
     },
+    # Armor and weapons: charges and cast time are a byte each, the reuse delay a u32 in seconds
+    # (retail Tavnazian Ring 86400, Charm Wand 86400, Treat Staff II 72000). The retail-format
+    # offsets below still follow the old u16 reading; no retail-format item file was at hand to check.
     'armor': {
         FORMAT_LEGACY: {
             **_COMMON_LEGACY, **_EQUIP_LEGACY,
-            'shield_size': (0x1A, '<H'), 'max_charges': (0x1C, '<H'), 'cast_time': (0x1E, '<H'),
-            'use_delay': (0x20, '<H'), 'reuse_delay': (0x22, '<H'), 'item_level': (0x26, '<H'),
+            'shield_size': (0x1A, '<H'), 'max_charges': (0x1C, '<B'), 'cast_time': (0x1D, '<B'),
+            'use_delay': (0x1E, '<H'), 'reuse_delay': (0x20, '<I'), 'item_level': (0x26, '<H'),
         },
         FORMAT_RETAIL: {
             **_COMMON_RETAIL, **_EQUIP_RETAIL,
@@ -115,8 +118,8 @@ FIELDS: dict[str, dict[str, dict[str, tuple[int, str]]]] = {
             **_COMMON_LEGACY, **_EQUIP_LEGACY,
             'dmg': (0x1C, '<H'), 'delay': (0x1E, '<H'), 'dps': (0x20, '<H'),
             'skill': (0x22, '<B'), 'jug_size': (0x23, '<B'),
-            'max_charges': (0x28, '<H'), 'cast_time': (0x2A, '<H'), 'use_delay': (0x2C, '<H'),
-            'reuse_delay': (0x2E, '<H'), 'base_item_id': (0x30, '<H'), 'item_level': (0x32, '<H'),
+            'max_charges': (0x28, '<B'), 'cast_time': (0x29, '<B'), 'use_delay': (0x2A, '<H'),
+            'reuse_delay': (0x2C, '<I'), 'base_item_id': (0x30, '<H'), 'item_level': (0x32, '<H'),
         },
         FORMAT_RETAIL: {
             **_COMMON_RETAIL, **_EQUIP_RETAIL,
