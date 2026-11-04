@@ -4,7 +4,7 @@ import struct
 import click
 from xi.xi_config import FFXI_DIR, read_path_for
 from xi.ftable.xi_core import ftable_path
-from xi.entity.xi_core import MODEL_FILE_OFFSET
+from xi.entity.xi_core import modelid_to_file_id
 
 
 def _find_vtable(ftable_path: str) -> str:
@@ -60,7 +60,8 @@ def lookup(ftable_file: str, file_id: int) -> dict:
                    'Ignored when an explicit FTABLE_FILE path is given.')
 @click.option('--file-id', type=int, default=None, help='Raw file_id to look up')
 @click.option('--modelid', type=int, default=None,
-              help=f'Monster modelid (converted via file_id = modelid + {MODEL_FILE_OFFSET})')
+              help='Entity modelid, converted to its file_id with the client\'s four '
+                   'modelid bands (modelid 1 → file_id 1301)')
 def cmd(ftable_file, table, file_id, modelid):
     """Resolve a file_id or modelid against an FTABLE/VTABLE pair.
 
@@ -73,7 +74,7 @@ def cmd(ftable_file, table, file_id, modelid):
     if file_id is not None and modelid is not None:
         raise click.UsageError('Provide --file-id or --modelid, not both')
     if modelid is not None:
-        file_id = MODEL_FILE_OFFSET + modelid
+        file_id = modelid_to_file_id(modelid)
     if ftable_file is None:
         ftable_file = read_path_for(ftable_path(table))
     try:
@@ -86,7 +87,7 @@ def cmd(ftable_file, table, file_id, modelid):
     click.echo('=' * 56)
     if modelid is not None:
         click.echo(f'  modelid      : {modelid}  (0x{modelid:04X})')
-        click.echo(f'  file_id      : {file_id}  (= {MODEL_FILE_OFFSET} + {modelid})')
+        click.echo(f'  file_id      : {file_id}  (= {modelid} + {file_id - modelid})')
     else:
         click.echo(f'  file_id      : {file_id}')
     click.echo()

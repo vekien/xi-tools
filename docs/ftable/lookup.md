@@ -27,25 +27,26 @@ and read from the output mirror when present. An explicit `FTABLE_FILE` path ove
 |---|---|
 | `--table N` | ROM table index: `1` = base `FTABLE.DAT` (default), `N` = `ROM{N}/FTABLE{N}.DAT`. Ignored when a path is given. |
 | `--file-id N` | Raw file_id to look up |
-| `--modelid N` | Monster modelid — converted via `file_id = modelid + 98239` (3500+ range only, see note below) |
+| `--modelid N` | Entity modelid, converted to its file_id with the client's four modelid bands (see below) |
 
 ---
 
 ## Examples
 
-### Look up a retail monster by file_id
+### Look up a retail monster by modelid
 
-Tiger skeleton (`modelid 308`, range 1 formula: `308 + 1300 = 1608`):
+Tiger skeleton (`modelid 308`, first band: `308 + 1300 = 1608`):
 
 ```
-uv run xi ftable lookup FTABLE.DAT --file-id 1608
+uv run xi ftable lookup --modelid 308
 ```
 
 ```
 ========================================================
   FFXI FTABLE Lookup
 ========================================================
-  file_id      : 1608
+  modelid      : 308  (0x0134)
+  file_id      : 1608  (= 308 + 1300)
 
   FTABLE value : 0x0283
   VTABLE value : 1
@@ -81,21 +82,18 @@ Returns `EMPTY SLOT (vtable=0)` on a retail (unexpanded) table.
 
 ---
 
-## `--modelid` note — 3500+ range only
+## How `--modelid` becomes a file_id
 
-The `--modelid` flag always uses `file_id = modelid + 98239`, which is the
-3500+ range formula. This is correct for all **custom monsters** (modelid 15000+)
-and retail monsters above modelid 3500.
-
-For retail monsters in other ranges, calculate the file_id manually and use
-`--file-id`:
+The client maps a modelid to a file_id in four bands, each with its own offset.
+`--modelid` follows the same bands (`xi.entity.xi_core.modelid_to_file_id`), so
+retail and custom modelids both resolve:
 
 | modelid range | formula |
 |---|---|
 | 0 – 1499 | `file_id = modelid + 1300` |
 | 1500 – 2999 | `file_id = modelid + 50295` |
 | 3000 – 3499 | `file_id = modelid + 96907` |
-| **3500+** | `file_id = modelid + 98239` ← what `--modelid` uses |
+| 3500+ | `file_id = modelid + 98239` (all custom monsters, 15000+) |
 
 → See [reference/model-file-ids.md](../reference/model-file-ids.md) for the full
 4-range formula and why it exists.
