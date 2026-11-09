@@ -55,6 +55,7 @@ xi dats build                    # --pivot: into FFXI_PIVOT_DIR instead of FFXI_
 xi dats build --list [--reset]   # the projects of projects/build_list.json (NAME --list: projects/NAME.json)
                                  #   in order; --reset resets every table they edit once, first
 xi dats build LIST.json          # a build list file is built as one without --list
+                                 # anim actions: --hd also edits FFXI_HD_DIR's own copy of the model
                                  # abilities: --apply-db [--db-row ID] --clone-from X --server-id ID
                                  #   --menu-record [--menu-name T] --lua-stub (docs/dats/README.md)
 xi dats new                      # --pivot: the same for the wizard
@@ -202,6 +203,18 @@ xi dats prepare 206.DAT --project P --type copy --target ROM10/20/0.DAT --file-i
 xi dats build P [--dry-run] [--pivot]               # written as it is; the install keeps <file>.base
 xi dats new [--pivot]                               # wizard: "Copy a file as it is"
 xi dats undo P                                      # install: .base back; pivot: the copy deleted
+```
+
+## A clip for a model, and the routine that fires it (docs/anim/schedule.md)
+
+```text
+xi dats prepare ROM6/0/4 --type anim --source-clip wz60 --target ROM/3/59 --clip gbw0 --project P
+                                                    # a bank's clip into the goblin, routine gbw0
+                                                    #   (--tag T --loops N --blend N --no-schedule)
+xi dats prepare 59_wave.gltf --target ROM/3/59 --clip wav0 --project P   # a .gltf: no --type needed
+xi dats build P [--dry-run] [--pivot] [--hd]        # --hd: the HD pack's own copy too (its .base kept)
+xi dats new [--pivot]                               # wizard: "Animation"
+xi dats undo P                                      # each copy's own clip and routine back
 ```
 
 ## Entity

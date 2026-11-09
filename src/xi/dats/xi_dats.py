@@ -1987,6 +1987,43 @@ def _build_zone_npcs(action: dict, manifest_path: Path, manifest: dict, force: b
         raise click.ClickException(f"{action.get('id')}: {e}")
 
 
+def _build_anim(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                dry_run: bool = False, hd: bool = False) -> dict:
+    """Put an anim action's clip and routine into the active target's own copy of its model
+    DAT (xi.entity.anim.xi_build). ``hd``: this build applies it to the HD folder too, so
+    the HD folder's copy needs no warning."""
+    import xi.xi_config as cfg
+    from xi.entity.anim import xi_build as AB
+    from xi.database.xi_build import _pivot_shadow
+    root = _active_build_root()
+    target = _root_target_name(root) or "dir"
+    res_file = (action.get("resources") or {}).get("animation")
+    gltf = _resolve_raw_source(res_file, manifest_path, manifest) if isinstance(res_file, str) else None
+    try:
+        result = AB.build(action, root=root, target=target, gltf=gltf, dry_run=dry_run)
+    except AB.AnimBuildError as e:
+        raise click.ClickException(f"{action.get('id')}: {e}")
+    rel = result["dat"]
+    result["warnings"] += [f"the pivot folder has its own {r}, which the client loads instead of this one — "
+                           "build with --pivot to change what players see"
+                           for r in _pivot_shadow(root, target, [rel])]
+    hd_dir = cfg.FFXI_HD_DIR
+    if target != "hd" and not hd and hd_dir and Path(hd_dir).is_dir() and AB.has_own_copy(Path(hd_dir), rel):
+        result["warnings"].append(f"the HD folder (FFXI_HD_DIR) has its own {rel}, which the client loads "
+                                  "instead of this one — build with --hd to change it too")
+    return result
+
+
+def _anim_result(built: list[dict], previous: dict | None) -> dict:
+    """The inline ``result`` of an anim action: per target it was built into, the sections
+    its build wrote there (what undo and the next build put back)."""
+    roots = dict((previous or {}).get("roots") or {})
+    for b in built:
+        if b and not b.get("skipped"):
+            roots[b.get("target") or "dir"] = b.get("records") or []
+    return {"roots": roots}
+
+
 def _lua_path(action: dict, action_file: Path, project_file: Path) -> Path | None:
     """Where the action's proposed Lua goes: ``server.lua`` relative to the file holding the
     action, else ``<project>.lua`` beside the project file. None when ``server.emit`` is false."""
@@ -2182,6 +2219,67 @@ def _database_result(built: dict | None, previous: dict | None, keep: bool = Fal
     return out
 
 
+def _dat_clips(rel: str) -> list[str]:
+    """The clip names in the install's ``rel``, in DAT order."""
+    import xi.xi_config as cfg
+    from xi.entity.anim.xi_build import CLIP, _label
+    from xi.entity.anim.xi_export import parse_sections
+    p = Path(cfg.FFXI_DIR) / Path(*rel.split("/"))
+    if not p.is_file():
+        raise click.ClickException(f"{rel} isn't in the game folder (FFXI_DIR)")
+    data = p.read_bytes()
+    return list(dict.fromkeys(_label(s.name) for s in parse_sections(data) if s.type_code == CLIP))
+
+
+def _anim_action_from_source(source: Path, manifest_path: Path, manifest: dict, *, action_id: str | None,
+                             target: str | None, clip: str | None, source_clip: str | None, tag: str | None,
+                             loops: int | None, blend: int | None, schedule: bool,
+                             skeleton_dat: str | None) -> dict:
+    """An anim action (schema/anim.json) from ``dats prepare``: SOURCE is a .gltf (referenced
+    where it is, like a copy's file) or a DAT holding the clip (a ROM path such as
+    ``ROM6/0/4``, or a DAT file in the game folder). On --replace the target and clip name
+    already in the project are kept unless a flag names new ones."""
+    from xi.dats import xi_copy as CP
+    from xi.entity.anim import xi_build as AB
+    existing = next((a for a in manifest.get("actions", []) if action_id and a.get("id") == action_id), None)
+    prev_target = (existing or {}).get("target") or {}
+    dat = AB.rom_rel(target) if target else prev_target.get("dat")
+    if target and dat is None:
+        raise click.ClickException(f"--target {target!r} must be a ROM DAT path, like ROM/3/59")
+    if not dat:
+        raise click.ClickException(f"{source}: pass --target, the model DAT the clip goes into (like ROM/3/59)")
+    action: dict = {"id": "", "type": "anim", "target": {"dat": dat}}
+    if source.suffix.lower() == ".gltf":
+        action["resources"] = {"animation": _file_ref(source, manifest_path)}
+        default_clip = source.stem.rsplit("_", 1)[-1][:4]      # an export's 95_q4s0.gltf -> q4s0
+    else:
+        src_rel = AB.rom_rel(str(source)) or (AB.rom_rel(CP.guess_target(source) or "") if source.is_file()
+                                              else None)
+        if src_rel is None:
+            raise click.ClickException(f"{source}: an anim's SOURCE is a .gltf, or the DAT holding the clip "
+                                       "(a ROM path like ROM6/0/4)")
+        clips = _dat_clips(src_rel)
+        want = source_clip or (clips[0] if len(clips) == 1 else None)
+        if want is None or want not in clips:
+            listed = ", ".join(clips) or "none"
+            raise click.ClickException(f"{src_rel} holds {len(clips)} clip{'s' if len(clips) != 1 else ''} "
+                                       f"({listed}): pass --source-clip with one of them")
+        action["source"] = {"dat": src_rel, "clip": want}
+        default_clip = want
+    action["target"]["animation"] = clip or prev_target.get("animation") or default_clip
+    action["id"] = action_id or f"anim.{_slug(dat.rsplit('.', 1)[0])}.{_slug(action['target']['animation'])}"
+    if not schedule:
+        action["schedule"] = False
+    elif tag is not None or loops is not None or blend is not None:
+        action["schedule"] = {k: v for k, v in (("tag", tag), ("loops", loops), ("blend", blend)) if v is not None}
+    if skeleton_dat:
+        action["options"] = {"skeleton_dat": AB.rom_rel(skeleton_dat) or skeleton_dat}
+    errs = AB.validate_action(action)
+    if errs:
+        raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
+    return action
+
+
 def _database_action_from_source(source: Path, data, action_id: str | None, manifest: dict,
                                  merge: bool) -> dict:
     """A database action from a source file: a whole action, ``{"edits": [...]}`` or a bare
@@ -2237,7 +2335,7 @@ def json_cmd(manifest: Path, output: Path | None):
 
 
 @group.command("prepare")
-@click.argument("source", type=click.Path(exists=True, path_type=Path))
+@click.argument("source", type=click.Path(path_type=Path))
 @click.argument("manifest", type=click.Path(path_type=Path), default=None, required=False)
 @click.option("--project", default=None, help="Manifest name — writes to projects/<project>.json instead of projects/update.json.")
 @click.option("--id", "action_id", default=None, help="Stable action id to use in the manifest.")
@@ -2269,12 +2367,29 @@ def json_cmd(manifest: Path, output: Path | None):
               help="A cutscene: the name its event is recorded by (default: the file's name).")
 @click.option("--file-id", type=int, default=None,
               help="A copy (--type copy) to a ROM DAT path: the file id to register there.")
+@click.option("--clip", default=None,
+              help="Anim: the clip's name in the model (up to 4 characters; default: the source clip's).")
+@click.option("--source-clip", default=None,
+              help="Anim from a DAT: the clip to take out of it (default: its only clip).")
+@click.option("--tag", default=None,
+              help="Anim: the routine tag the server or a cutscene fires (default: the clip name).")
+@click.option("--loops", type=click.IntRange(0, 0xFFFF), default=None,
+              help="Anim: how many times the routine plays the clip, then holds; 0 = loop (default 0).")
+@click.option("--blend", type=click.IntRange(0, 0xFFFF), default=None,
+              help="Anim: crossfade in and out of the clip, in frames (30 a second; default 15).")
+@click.option("--schedule/--no-schedule", "anim_schedule", default=True,
+              help="Anim: add the routine that plays the clip (default: for a new clip).")
+@click.option("--skeleton-dat", default=None,
+              help="Anim from a glTF into a DAT with no skeleton: the model it was exported on (ROM path).")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
                 record_id: int | None = None, menu_index: int | None = None,
                 animation_from: int | None = None, merge: bool = False, zone_id: int | None = None,
-                camera: str | None = None, event_name: str | None = None, file_id: int | None = None):
+                camera: str | None = None, event_name: str | None = None, file_id: int | None = None,
+                clip: str | None = None, source_clip: str | None = None, tag: str | None = None,
+                loops: int | None = None, blend: int | None = None, anim_schedule: bool = True,
+                skeleton_dat: str | None = None):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -2289,13 +2404,26 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     Database edits (schema/database.json) — a database action, {"edits": [...]} or a bare
     list of edits — become a `database` action; --merge adds them to the one already there:
       xi dats prepare edits.json --project gear_tweaks --merge
+
+    
+    A clip for a model (schema/anim.json) — a .gltf, or a clip in another DAT (a ROM path
+    with --type anim) — becomes an `anim` action: the clip goes into --target with a
+    routine that plays it, so the server or a cutscene can fire it by its tag:
+      xi dats prepare ROM6/0/4 --type anim --source-clip wz60 --target ROM/3/59 --clip gbw0 --project goblin
+      xi dats build goblin --hd --dry-run
     """
+    from xi.entity.anim import xi_build as AB
+    if action_type is None and source.suffix.lower() == ".gltf":
+        action_type = "anim"
+    if not source.exists() and not (action_type == "anim" and AB.rom_rel(str(source))):
+        raise click.BadParameter(f"Path {str(source)!r} does not exist.", param_hint="'SOURCE'")
     manifest = _resolve_manifest_path(manifest, project)
     manifest_data = _read_manifest(manifest)
     if project:
         manifest_data["name"] = project
-    # A copy's source is the file itself (any bytes), not a JSON to read.
-    kind, data = ("copy", {}) if action_type == "copy" else _detect_source_type(source, action_type)
+    # A copy's source is the file itself (any bytes), not a JSON to read; so is a clip's.
+    kind, data = ((action_type, {}) if action_type in ("copy", "anim")
+                  else _detect_source_type(source, action_type))
     resource_root = _resource_root(manifest, manifest_data)
 
     if kind == "copy":
@@ -2316,6 +2444,11 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         errs = CP.validate_action(action)
         if errs:
             raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
+    elif kind == "anim":
+        action = _anim_action_from_source(source, manifest, manifest_data, action_id=action_id, target=target,
+                                          clip=clip, source_clip=source_clip, tag=tag, loops=loops,
+                                          blend=blend, schedule=anim_schedule, skeleton_dat=skeleton_dat)
+        action_id = action["id"]
     elif kind == "ability":
         action = _ability_action_from_recipe(source, resource_root, action_id=action_id,
                                              kind=ability_kind, animation=animation, subdir=subdir,
@@ -2432,6 +2565,12 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         # Same rule: the recorded id survives a re-prepare; the target too unless set here.
         explicit = record_id is not None or menu_index is not None
         preserve = ("result",) + (() if explicit else ("target",))
+    elif kind == "anim":
+        # What each build wrote survives (undo and the next build put it back); so do a
+        # hand-edited target, routine and options unless a flag here set them.
+        sched_set = not anim_schedule or tag is not None or loops is not None or blend is not None
+        preserve = (("result",) + (() if target or clip else ("target",))
+                    + (() if sched_set else ("schedule",)) + (() if skeleton_dat else ("options",)))
     elif kind in RESTORABLE_TYPES:
         # What each build changed (the values undo and the next build put back) survives.
         preserve = ("result",)
@@ -2504,6 +2643,17 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
                         if typ == "zone_npcs" else
                         [f"{e.get('table')} {e.get('id')}" for e in action.get("edits") or []])
                 rows += [(aid, typ, "-", w, "-") for w in todo]
+            continue
+        if typ == "anim":
+            recorded = [(t, e) for t, recs in (res.get("roots") or {}).items() for e in recs]
+            for t, e in recorded:
+                rows.append((aid, f"{typ} ({t})", e.get("dat") or "-",
+                             f"{e.get('kind')} {e.get('name')}{' (retail one replaced)' if e.get('retail') else ''}",
+                             "-"))
+            if not recorded:
+                from xi.entity.anim.xi_build import clip_name
+                rows.append((aid, typ, (action.get("target") or {}).get("dat") or "-",
+                             f"clip {clip_name(action)}", "-"))
             continue
         if typ in RECORD_TYPES:
             rid = res.get("record_id", (action.get("target") or {}).get("id", "auto"))
@@ -2590,6 +2740,13 @@ def _action_summary(action: dict) -> str:
     if action.get("type") == "copy":
         line += (f": {(action.get('resources') or {}).get('file', '?')} >> "
                  f"{(action.get('target') or {}).get('path', '?')}")
+        return line
+    if action.get("type") == "anim":
+        from xi.entity.anim.xi_build import clip_name
+        src = action.get("source")
+        frm = (f"{src.get('dat', '?')} {src.get('clip', '?')}" if isinstance(src, dict)
+               else (action.get("resources") or {}).get("animation", "?"))
+        line += f": {frm} >> {(action.get('target') or {}).get('dat', '?')} clip {clip_name(action)}"
         return line
     if action.get("type") == "ability":
         anim = (action.get("target") or {}).get("animation", "auto")
@@ -2694,13 +2851,18 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
               help="MANIFEST / --project names a build list (projects/build_list.json when neither is "
                    "given): build its projects in order. A build list file is built as one without it too. "
                    "With --reset, every table they edit is reset once, first.")
+@click.option("--hd", is_flag=True, default=False,
+              help="Anim actions: also put the clip into FFXI_HD_DIR's own copy of the model DAT (the HD "
+                   "pack's, which the client loads instead of the install's), keeping a .base there. A model "
+                   "the HD folder has no copy of is left alone there.")
 @click.option("--fresh", is_flag=True, default=False, hidden=True,
               help="The tables were just reset (a --list --reset): the result records this build only.")
 def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...], verbose: bool,
               force: bool, dry_run: bool, dry_note: bool = True, pivot: bool = False,
               apply_db: bool = False, db_row: int | None = None, clone_from: str | None = None,
               server_id: int | None = None, menu_record: bool = False, menu_name: str | None = None,
-              lua_stub: bool = False, reset: bool = False, build_list: bool = False, fresh: bool = False):
+              lua_stub: bool = False, reset: bool = False, build_list: bool = False, fresh: bool = False,
+              hd: bool = False):
     """Build a manifest into the base install (FFXI_DIR), or FFXI_PIVOT_DIR with --pivot.
 
     DATs are placed and their file_ids registered straight into the target's tables
@@ -2740,7 +2902,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         return _build_list(list_file, reset=reset, pivot=pivot, dry_run=dry_run,
                            dry_note=dry_note, force=force, verbose=verbose, apply_db=apply_db, db_row=db_row,
                            clone_from=clone_from, server_id=server_id, menu_record=menu_record,
-                           menu_name=menu_name, lua_stub=lua_stub)
+                           menu_name=menu_name, lua_stub=lua_stub, hd=hd)
     opts = SP.ServerOpts(apply_db=apply_db, db_row=db_row,
                          clone_from=(clone_from.strip() or None) if isinstance(clone_from, str) else None,
                          server_id=server_id, menu_record=menu_record, menu_name=menu_name, lua_stub=lua_stub)
@@ -2798,6 +2960,11 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     target_roots = [(target, _target_root(target))]
     if pivot and not target_roots[0][1].is_dir():
         raise click.ClickException(f"FFXI_PIVOT_DIR does not exist: {target_roots[0][1]}")
+    # --hd: the HD folder is one more target, for the anim actions only (it registers nothing;
+    # its DATs are the HD pack's own, edited in place).
+    hd_roots = [("hd", _target_root("hd"))] if hd else []
+    if hd_roots and not hd_roots[0][1].is_dir():
+        raise click.ClickException(f"FFXI_HD_DIR does not exist: {hd_roots[0][1]}")
     if any(a.get("type") != "zone" for a in active_actions):
         from xi.xi_config import CUSTOM_ROM_IDX
         n_with_tables = 0
@@ -2814,6 +2981,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             elif pack_actions and main_entries == 0:
                 suffix = f"  (ROM{CUSTOM_ROM_IDX} tables only)"
             click.echo(f"Target: {_TARGET_LABELS[name]} -> {root}{suffix}")
+        for name, root in hd_roots:
+            click.echo(f"Target: {_TARGET_LABELS[name]} -> {root}  (anim actions, its own copies only)")
         if pack_actions and n_with_tables == 0:
             raise click.ClickException(
                 "None of the chosen targets have an FTABLE to register the file_ids in — "
@@ -2868,6 +3037,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         if kind == "zone_events":
             return _build_zone_events(action, manifest, manifest_data, force=force, dry_run=dry_run,
                                       apply=mode == "apply")
+        if kind == "anim":
+            return _build_anim(action, manifest, manifest_data, force=force, dry_run=dry_run, hd=hd)
         raise click.ClickException(
             f"{action.get('id')}: build support for type {kind!r} is not implemented yet.")
 
@@ -2878,8 +3049,11 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         # A dry run holds what it would write, so each step sees the ones before it.
         if reset:
             _reset_tables(target_roots[0][1], reset_rels, dry_run, active_actions, opts.menu_record)
+            if hd_roots:
+                _reset_hd(hd_roots[0][1], [a for a in active_actions if a.get("type") == "anim"], dry_run)
         for action in active_actions:
             kind = action.get("type")
+            per_root: list = []
             if kind == "zone":
                 # Zone actions use the standard/hd package roots, not the live target.
                 if dry_run:
@@ -2887,12 +3061,22 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                 with _package_config(standard_root, hd_root):
                     result = _build_zone(action, manifest, manifest_data, redirect_root)
             else:
-                # Place into every selected target (a dry-run just previews once).
+                # Place into every selected target (a dry-run just previews once). An anim
+                # action edits each target's own copy, so a dry run previews each, the HD
+                # folder's too.
                 result = None
-                for _name, root in (target_roots[:1] if dry_run else target_roots):
+                if kind == "anim":
+                    roots = target_roots + hd_roots
+                else:
+                    roots = target_roots[:1] if dry_run else target_roots
+                for _name, root in roots:
                     _set_target_root(root)
                     result = _dispatch(action, kind)
-            results.append(result)
+                    per_root.append(result)
+            if kind == "anim":
+                results.extend(per_root)
+            else:
+                results.append(result)
             if kind == "ability" and isinstance(result, dict):
                 server_pairs.append((action, result))
             # Record the allocation INLINE on the action (idempotent — overwrites the
@@ -2901,6 +3085,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             if not dry_run and kind != "zone":
                 prior = set((action.get("result") or {}).get("targets") or [])
                 built = prior | {name for name, _ in target_roots}
+                if kind == "anim":
+                    built |= {r["target"] for r in per_root if r and not r.get("skipped")}
                 # An ability's allocation (animation number, per-race placements) is
                 # decided by the build against the live tables, not by the definition
                 # alone, so it is taken from the build result rather than re-planned.
@@ -2908,6 +3094,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                     res = _ability_result(result, action.get("result"))
                 elif kind in RECORD_TYPES:
                     res = _record_result(result)   # the id is decided against the live table too
+                elif kind == "anim":
+                    res = _anim_result(per_root, action.get("result"))
                 elif kind in RESTORABLE_TYPES:
                     # Applied on top, the tables still hold what the last build changed: its
                     # records stay, ahead of this build's (undo and --reset take both back).
@@ -2930,7 +3118,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             SP.run(server_pairs, opts, dry_run=True, **server_kw)     # SELECT-only, reads files
         _print_placements(results, "Planned actions:")
         if any(a.get("type") != "zone" for a in active_actions):
-            click.echo("\nWould build into: " + ", ".join(str(r) for _n, r in target_roots))
+            also = hd_roots if any(a.get("type") == "anim" for a in active_actions) else []
+            click.echo("\nWould build into: " + ", ".join(str(r) for _n, r in target_roots + also))
         if dry_note:
             click.echo(click.style("\nDry run — nothing was written. Re-run without --dry-run to build.",
                                    fg="cyan"))
@@ -2975,7 +3164,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         click.echo(db_line)
 
 
-RESTORABLE_TYPES = ("database", "zone_dialog", "zone_npcs", "zone_events")
+RESTORABLE_TYPES = ("database", "zone_dialog", "zone_npcs", "zone_events", "anim")
 
 
 def _build_list(path: Path, *, reset: bool, pivot: bool, dry_run: bool, dry_note: bool, **build_kw) -> None:
@@ -3020,6 +3209,8 @@ def _build_list(path: Path, *, reset: bool, pivot: bool, dry_run: bool, dry_note
             actions = [a for _p, m in projects for a in m.get("actions", []) if isinstance(a, dict)]
             _reset_tables(root, sorted(edited | set(BL.recorded(doc, target))), dry_run, actions,
                           build_kw.get("menu_record"))
+            if build_kw.get("hd"):
+                _reset_hd(_target_root("hd"), [a for a in actions if a.get("type") == "anim"], dry_run)
         ctx = click.get_current_context()
         for p, _m in projects:
             _rule()
@@ -3056,13 +3247,27 @@ def _reset_tables(root: Path, rels: list[str], dry_run: bool, actions: list[dict
                                        "build with --menu-record to place it again", fg="yellow"))
 
 
+def _reset_hd(root: Path, actions: list[dict], dry_run: bool) -> None:
+    """``--reset --hd``: the model DATs the anim actions edit go back to the HD folder's own
+    ``.base`` (the HD pack's untouched bytes, never the install's copy)."""
+    from xi.dats import xi_build_list as BL
+    rels = sorted({r for a in actions if a.get("enabled", True) for r in _edited_tables({"actions": [a]}, "hd")})
+    if not rels:
+        return
+    n = len(BL.reset_tables(root, rels, dry_run)["restored"])
+    click.echo(f"{'Would reset' if dry_run else 'Reset'} {n} DAT{'s' if n != 1 else ''} in the HD folder "
+               "from its own .base")
+
+
 def _manifest_problems(manifest: dict) -> list[str]:
     """What the validators of the table-editing types say about a project's actions."""
     from xi.database.xi_core import validate_action as database
     from xi.dialog.xi_zone_dialog import validate_action as zone_dialog
     from xi.entity.xi_zone_npcs import validate_action as zone_npcs
     from xi.event.xi_zone_events import validate_action as zone_events
-    checks = {"database": database, "zone_dialog": zone_dialog, "zone_npcs": zone_npcs, "zone_events": zone_events}
+    from xi.entity.anim.xi_build import validate_action as anim
+    checks = {"database": database, "zone_dialog": zone_dialog, "zone_npcs": zone_npcs, "zone_events": zone_events,
+              "anim": anim}
     out = []
     for action in manifest.get("actions", []):
         check = checks.get(action.get("type")) if isinstance(action, dict) and action.get("enabled", True) else None
@@ -3075,7 +3280,8 @@ def _edited_tables(manifest: dict, target: str) -> list[str]:
     """ROM paths of the tables a project's builds into ``target`` edited in place — what
     ``--reset`` resets: the database, dialog, NPC-name and event tables its records name, and
     the spell / command table and its name tables for a record action; for a database or
-    zone_dialog action also the tables its edits name, so a project that hasn't been
+    zone_dialog action also the tables its edits name, and for an anim action its model DAT,
+    so a project that hasn't been
     built into ``target`` yet resets them too. The DATs actions place (gear, camera scenes …)
     aren't: a build replaces them. Nor is an ability's menu record, which only a build with
     --menu-record puts back."""
@@ -3093,6 +3299,9 @@ def _edited_tables(manifest: dict, target: str) -> list[str]:
                 rels.update(ZD.tables(action, _target_root(target)))
             except click.ClickException:
                 pass
+        elif typ == "anim" and action.get("enabled", True):
+            from xi.entity.anim import xi_build as AB
+            rels.update(AB.tables(action))
         if typ in RESTORABLE_TYPES:
             for e in (res.get("roots") or {}).get(target) or []:
                 if e.get("dat"):
@@ -3112,6 +3321,8 @@ def _restorable_module(kind: str):
         from xi.dialog import xi_zone_dialog as mod
     elif kind == "zone_npcs":
         from xi.entity import xi_zone_npcs as mod
+    elif kind == "anim":
+        from xi.entity.anim import xi_build as mod
     else:
         from xi.event import xi_zone_events as mod
     return mod
@@ -3879,6 +4090,22 @@ def _print_placements(results: list[dict], title: str) -> None:
                                f"{_short(e['to'])}")
             for w in r.get("warnings") or []:
                 click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
+        elif kind == "anim":
+            where = _TARGET_LABELS.get(r.get("target"), r.get("target"))
+            if r.get("skipped"):
+                click.echo(f"{head} [{where}]: left alone — {r['skipped']}")
+                continue
+            click.echo(f"{head} [{where}]: {r.get('source')} -> {r.get('dat')} clip {r.get('clip')!r} "
+                       f"({r.get('frames')} frames)")
+            for e in r.get("records") or []:
+                if e.get("kind") == "routine" and e.get("plays"):
+                    loops = "loops" if not e.get("loops") else f"plays {e['loops']}x then holds"
+                    click.echo(f"     - routine {e['name']!r}: plays {e['plays']!r}, {loops}, "
+                               f"blend {e.get('blend')} frames")
+            for note in r.get("notes") or []:
+                click.echo(f"     - {note}")
+            for w in r.get("warnings") or []:
+                click.echo(click.style(f"     ⚠ {w}", fg="yellow"))
         elif kind == "copy":
             note = {"unchanged": "  (already the same)",
                     "source": "  (the source itself: building into the folder it lives in)"}.get(r.get("state"), "")
@@ -4616,6 +4843,101 @@ def _wizard_copy(slug: str, prev: dict | None, manifest_path: Path) -> dict:
             "resources": {"file": _file_ref(src, manifest_path)}}
 
 
+def _wizard_anim(slug: str, prev: dict | None, manifest_path: Path) -> dict:
+    """An anim action: the model DAT, where the clip comes from (a clip in another DAT, or a
+    glTF), its name in the model, and the routine tag that fires it."""
+    from xi.entity.anim import xi_build as AB
+    p = prev or {}
+    pt = p.get("target") or {}
+    while True:
+        dat = _prompt_dest_dat("Which model gets the clip? (its DAT, e.g. ROM/3/59)", default=pt.get("dat"))
+        try:
+            _dat_clips(dat)
+            break
+        except click.ClickException as e:
+            click.echo(f"  {e.format_message()}")
+    action: dict = {"id": f"anim.{slug}", "type": "anim", "target": {"dat": dat}}
+    from_dat = "A clip in another DAT (a cutscene gesture bank …)"
+    from_gltf = "A glTF (an xi anim export, edited or authored)"
+    how = _choose("Where does the clip come from?", [from_dat, from_gltf],
+                  default=from_gltf if p.get("resources") else from_dat)
+    if how == from_dat:
+        ps = p.get("source") or {}
+        while True:
+            src = _prompt_dest_dat("Which DAT holds the clip? (e.g. ROM6/0/4)", default=ps.get("dat"))
+            try:
+                clips = _dat_clips(src)
+            except click.ClickException as e:
+                click.echo(f"  {e.format_message()}")
+                continue
+            if clips:
+                break
+            click.echo("  That DAT holds no clips.")
+        click.echo(f"\n   Its clips: {', '.join(clips)}")
+        want = ps.get("clip") if ps.get("clip") in clips else clips[0]
+        while True:
+            want = str(_ask("Which clip?", "Enter clip", default=want)).strip()
+            if want in clips:
+                break
+            click.echo(f"  Not one of its clips: {want}")
+        action["source"] = {"dat": src, "clip": want}
+        default_name = want
+    else:
+        prev_file = (p.get("resources") or {}).get("animation")
+        if prev_file:
+            try:
+                prev_file = str(_resolve_raw_source(prev_file, manifest_path, _read_manifest(manifest_path)))
+            except click.ClickException:
+                pass
+        while True:
+            raw = str(_ask("Path to the .gltf?", "Enter path", default=prev_file)).strip().strip('"')
+            gltf = Path(os.path.expanduser(raw))
+            if gltf.suffix.lower() == ".gltf" and gltf.is_file():
+                break
+            click.echo("  A .gltf file (xi anim export writes one).")
+        action["resources"] = {"animation": _file_ref(gltf, manifest_path)}
+        default_name = gltf.stem.rsplit("_", 1)[-1][:4]
+    while True:
+        name = str(_ask("Name of the clip in the model? (up to 4 letters or digits)", "Enter name",
+                        default=pt.get("animation") or default_name)).strip()
+        if re.match(r"^[A-Za-z0-9_]{1,4}$", name):
+            break
+        click.echo("  Up to 4 letters, digits or '_' (like gbw0).")
+    action["target"]["animation"] = name
+    ps = p.get("schedule") if isinstance(p.get("schedule"), dict) else {}
+    while True:
+        tag = str(_ask("Routine tag the server or a cutscene fires? (- for none)", "Enter tag",
+                       default=ps.get("tag") or AB.clip_name(action))).strip()
+        if tag == "-" or re.match(r"^[A-Za-z0-9_]{1,4}$", tag):
+            break
+        click.echo("  Up to 4 letters, digits or '_' (like gbw0), or - for no routine.")
+    if tag == "-":
+        action["schedule"] = False
+    else:
+        loops = _ask("Play it how many times, then hold? (0 = loop until something else plays)",
+                     "Enter number", default=ps.get("loops", 0), type=click.IntRange(0, 0xFFFF))
+        action["schedule"] = {"tag": tag, "loops": loops}
+    errs = AB.validate_action(action)
+    if errs:
+        raise click.ClickException("\n  ".join(errs))
+    return action
+
+
+def _ask_hd(actions: list[dict]) -> bool:
+    """When the HD folder has its own copy of a model an anim action edits, ask whether the
+    build puts the clip into it too (`xi dats build --hd`)."""
+    import xi.xi_config as cfg
+    from xi.entity.anim import xi_build as AB
+    hd_dir = cfg.FFXI_HD_DIR
+    if not hd_dir or not Path(hd_dir).is_dir():
+        return False
+    rels = [r for a in actions for r in AB.tables(a) if AB.has_own_copy(Path(hd_dir), r)]
+    if not rels:
+        return False
+    return click.confirm(f"\n>> The HD folder (FFXI_HD_DIR) has its own {', '.join(rels)}, which the client "
+                         "loads instead of the install's. Put the clip into it too?", default=True)
+
+
 def _wizard_entity(slug: str, prev: dict | None = None) -> dict:
     p = prev or {}
     src = _prompt_existing_dat("Select your .DAT file",
@@ -5118,6 +5440,7 @@ def new_cmd(project: str | None, pivot: bool = False):
         "Zone NPCs (rename or add a zone's NPCs)": "zone_npcs",
         "Zone events (cutscenes and dialogue on a zone's NPCs)": "zone_events",
         "Copy a file as it is (a redrawn UI sheet, a music track …)": "copy",
+        "Animation (a clip for a model, and the routine that fires it)": "anim",
     }[_choose("What type of content is being added?",
               ["Gear", "Mounts", "Entity (NPC / Monster / Object)",
                "NPC (costume: race + gear + weapons)",
@@ -5128,7 +5451,8 @@ def new_cmd(project: str | None, pivot: bool = False):
                "Zone dialog (edit or add the lines a zone's NPCs say)",
                "Zone NPCs (rename or add a zone's NPCs)",
                "Zone events (cutscenes and dialogue on a zone's NPCs)",
-               "Copy a file as it is (a redrawn UI sheet, a music track …)"])]
+               "Copy a file as it is (a redrawn UI sheet, a music track …)",
+               "Animation (a clip for a model, and the routine that fires it)"])]
     # The baked NPC is placed at a custom entity model id, so it needs the entity tables.
     # Abilities take retail-range ids (job-ability / spell bands, weapon-skill dummies),
     # so the tables need no expansion.
@@ -5178,6 +5502,8 @@ def new_cmd(project: str | None, pivot: bool = False):
             new_actions = [_wizard_zone_events(slug, prev, pivot)]
         elif ctype == "copy":
             new_actions = [_wizard_copy(slug, prev, manifest_path)]
+        elif ctype == "anim":
+            new_actions = [_wizard_anim(slug, prev, manifest_path)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 
@@ -5196,8 +5522,11 @@ def new_cmd(project: str | None, pivot: bool = False):
     wrote = ", ".join(a["id"] for a in new_actions)
     click.echo(click.style(f"\n✓ Wrote {wrote} -> {manifest_path}", fg="green"))
 
+    # The HD pack's own copy of the model is what the client loads when there is one.
+    hd = ctype == "anim" and _ask_hd(new_actions)
     if click.confirm("\n>> Would you like to build this project now?", default=True):
         _rule()
-        click.get_current_context().invoke(build_cmd, project=slug, pivot=pivot)
+        click.get_current_context().invoke(build_cmd, project=slug, pivot=pivot, hd=hd)
     else:
-        click.echo(f"Run it later with:  xi dats build --project {slug}" + (" --pivot" if pivot else ""))
+        click.echo(f"Run it later with:  xi dats build --project {slug}" + (" --pivot" if pivot else "")
+                   + (" --hd" if hd else ""))

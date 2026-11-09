@@ -145,10 +145,11 @@ Rules that follow:
     `anim import` unless `--no-base`.
   - Layer on the current file (re-running stacks): `zone import --add-collision` alone,
     `event dialogue edit`, `fx set/copy/delete`, `object import/clone`.
-  - `xi dats build`'s table edits (`database`, `zone_dialog`, `zone_npcs`, `zone_events`)
-    apply on top, replacing what they name (an edit already there is a no-op); `--reset`
-    resets the tables the build edits to the install's untouched copy first (its `.base`;
-    with `--pivot` copied over the pivot folder's, which keeps no `.base`); `--list` builds the
+  - `xi dats build`'s table edits (`database`, `zone_dialog`, `zone_npcs`, `zone_events`,
+    and `anim`'s model edits) apply on top, replacing what they name (an edit already there
+    is a no-op); `--reset` resets the tables the build edits to the install's untouched copy
+    first (its `.base`; with `--pivot` copied over the pivot folder's, which keeps no
+    `.base`); `--list` builds the
     projects of `projects/build_list.json` in order, and a list file needs no `--list`
     (`--list --reset`: every table they edit reset once, first). `xi database grow` grows the
     install's table and its `.base` once (set-up; the actions only edit rows).
@@ -158,6 +159,12 @@ Rules that follow:
   tables (`FFXI_PIVOT_DIR`) so sizes match — a table size mismatch crashes the client.
   `--pivot` (also on `dats new`, `ability publish`, `ui spells`) writes `FFXI_PIVOT_DIR`
   instead and skips the sync; without it that sync is the only pivot write a build makes.
+- The HD pack's folder (`FFXI_HD_DIR`) has its own copies of some DATs (HD textures), which
+  the client loads instead of the install's, so an install-only edit of them is invisible.
+  `xi dats build --hd` applies `anim` actions (a clip + the routine that fires it, put into a
+  model: `xi dats prepare ROM6/0/4 --type anim --source-clip wz60 --target ROM/3/59 --clip
+  gbw0`) to the HD copy too, in its own bytes with its own `.base`; never copy the install's
+  DAT over an HD one.
 
 ### 2.7 Engine limits that decide "loads in a viewer but crashes in game"
 
@@ -172,7 +179,8 @@ Rules that follow:
 - Cutscene camera scenes: scene ref `p` must be **300–599** (file_id 56,941–57,240);
   ≥ 600 crashes. Look-at ~2 m from eye; multi-point routes use interp mode 4.
 - A cutscene can only `SetAction` a **`0x07` schedule routine**, never a raw clip — new
-  animation clips need `xi anim schedule add`.
+  animation clips need `xi anim schedule add` (as content: a `dats` `anim` action, which
+  adds the routine too and with `--hd` edits the HD pack's copy of the model as well).
 
 ## 3. Where to look (teach yourself before answering)
 
