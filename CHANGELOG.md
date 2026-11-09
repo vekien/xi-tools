@@ -6,6 +6,57 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
+## v1.16.0 — 2026-11-09
+
+[Compare v1.15.0...v1.16.0](https://github.com/vekien/xi-tools/compare/v1.15.0...v1.16.0)
+
+**dats**
+
+- New `anim` action: puts a clip into a monster or NPC model, either from a `.gltf` or copied out of another DAT (a cutscene gesture bank, say), along with the routine that lets the server play it with `entityAnimationPacket`. A copied clip that moves joints the model doesn't have is refused (a goblin has 56). Start one with `xi dats prepare … --type anim` or the wizard's Animation entry. Not yet tested in game.
+- `xi dats build --hd` also builds anim actions into the HD folder's (`FFXI_HD_DIR`) own copy of each model, keeping its HD bytes; `undo` and `--reset` restore it from its own `.base`. Without `--hd`, the build warns when the HD folder has its own copy of the model, since that copy is the one the game shows.
+- New `copy` action: puts a file into the install or CatsEyeXI's DATs folder (`FFXI_PIVOT_DIR`) unchanged, such as a redrawn UI sheet, a music track or a whole effect DAT. `target.file_id` also registers a new DAT's file id. `undo` puts the original back, or removes the copy and its id.
+- `--reset --pivot` resets every table the project edits from the install's untouched copy into CatsEyeXI's DATs folder, then builds. A build there no longer leaves `.base` files in that folder. A build-list file builds without `--list`.
+- A gear build works on a client whose gear windows were linked with `xi ftable expand --no-dll`; it used to stop with "custom gear tables are not expanded".
+
+**Animation**
+
+- `xi anim schedule add` and `create` work on models whose only routines play several clips in a row (the goblin's walk-then-idle). They used to find nothing to copy.
+
+**database**
+
+- `add` edits create whole items from fields in any item table: with an id the item replaces that row; without one it takes the next empty row, and is skipped if an item of that name is already there. `icon.file` takes a `.bmp`.
+- Gear charges, cast time and reuse delay are written at their real sizes. A reuse-delay edit used to land in the wrong bytes (a 3,600 s edit on the Signal Pearl showed as a 65,542-hour reuse). `database set` now refuses a value too big for its field.
+- Bytes nobody has named yet can be edited as `unknown_*` fields, in item records and in spell and command menu records.
+- `xi database grow` is a set-up step on the command line, no longer part of the database action. New rows are blank (not `.`) and keep the last row's numbers.
+
+**File tables**
+
+- `xi ftable expand --no-dll` (and `expand gear --no-dll`) grows the tables and links retail armour into the gear windows without touching `FFXiMain.dll`, for clients where cexidats patches the gear groups at load.
+- Gear only counts as set up once its armour links are in the windows, so running `expand entity` first no longer makes `expand gear` skip them. The tables never end smaller than the largest one.
+- `xi ftable expand gear` takes `--pivot/--no-pivot`, like the other expand commands.
+- `xi ftable lookup --modelid` follows the client's four modelid bands. A retail monster below 3500 used to resolve to the wrong file; modelid 1 now gives `ROM/3/3.DAT`.
+
+**Import and textures**
+
+- Every import that finds its input in the export folder takes `--source-dir DIR` to read another folder instead: `xi tex import` (whose `--dir` still works), `xi ui tex si`, `xi mesh import`, `xi gear import`, `xi zone import` and `xi anim import`. The folder is only read.
+- Object imports: GLBs whose textures share a name (four pumpkins all called `Pumpkin`) no longer overwrite each other's texture. Different pixels get a texture of their own.
+- New `xi tex normals` names normal maps for VanaCore texture packs: it matches a `tex_debug` dump to a DAT's textures and writes BC5 `.n.dds` files from the normal PNGs.
+
+**Events**
+
+- Recompiling a retail event reuses its dialog lines instead of adding copies. Whitegate's Rendezvous Point event had added 401 lines and rewritten the "What do you say?" menu; an unedited recompile now leaves the dialog DAT unchanged. Checked in game.
+- Dialog text decodes to text that encodes back to the same bytes; `{“}` and `{”}` stand for the game's own quote marks.
+
+**Fixes**
+
+- Every DAT section reader now reads a section's size the way the client does. A section with its shadow flag set was read 8 MiB too long, so everything after it was skipped.
+- `xi ui items <type>` and its commands show their help text again.
+- `xi event explain` loads on Python 3.11 again.
+
+**Docs**
+
+- [`DESIGN.md`](DESIGN.md): how xi-tools is developed and extended, for people and AI assistants. The release zip now includes it, along with `AGENTS.md` and `CLAUDE.md`.
+
 ## v1.15.0 — 2026-09-29
 
 [Compare v1.14.0...v1.15.0](https://github.com/vekien/xi-tools/compare/v1.14.0...v1.15.0)
