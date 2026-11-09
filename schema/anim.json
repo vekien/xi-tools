@@ -2,44 +2,115 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xi.tools/schema/anim.json",
   "title": "xi dats animation action",
+  "description": "A clip put into a model DAT, and the 0x07 routine that plays it, so the server (entityAnimationPacket) or a cutscene (0x2C SetAction) can fire it by its tag. The clip comes from a glTF (resources.animation, imported as `xi anim import --add` does) or straight out of another DAT (source: a cutscene gesture bank's clip, its bytes copied under the new name). The build edits each target's own copy of the model: the install's (.base kept), the pivot folder's, and with `xi dats build --hd` the HD folder's own copy (FFXI_HD_DIR), keeping its HD bytes. A clip that replaces one the model already has gets no routine unless schedule says so: the model's own routines play it.",
   "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "type", "target", "resources"],
+  "required": ["id", "type", "target"],
+  "anyOf": [{"required": ["resources"]}, {"required": ["source"]}],
   "properties": {
     "id": {"$ref": "common.json#/$defs/actionId"},
     "type": {"type": "string", "const": "anim"},
     "enabled": {"type": "boolean", "default": true},
     "description": {"type": "string"},
+    "depends_on": {"type": "array", "items": {"$ref": "common.json#/$defs/actionId"}},
     "target": {
       "type": "object",
       "additionalProperties": false,
       "required": ["dat", "animation"],
-      "properties": {"dat": {"$ref": "common.json#/$defs/romPath"}, "animation": {"type": "string"}}
+      "properties": {
+        "dat": {"$ref": "common.json#/$defs/romPath", "description": "The model DAT the clip goes into (ROM/3/59.DAT, a goblin)."},
+        "animation": {"$ref": "#/$defs/name", "description": "The clip's name in the model. A digit-less name is slot 0 (gbw -> gbw0)."}
+      }
     },
     "resources": {
       "type": "object",
       "additionalProperties": false,
       "required": ["animation"],
-      "properties": {"animation": {"$ref": "common.json#/$defs/relativePath"}}
+      "properties": {
+        "animation": {"type": "string", "pattern": "\\.[gG][lL][tT][fF]$", "description": "The .gltf the clip is built from (an `xi anim export`, edited or authored): relative to the project file (what `dats prepare` writes), projects/resources, or the working folder; or absolute. Read where it is, not copied."}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dat", "clip"],
+      "properties": {
+        "dat": {"$ref": "common.json#/$defs/romPath", "description": "The DAT holding the clip (ROM6/0/4.DAT, a cutscene gesture bank)."},
+        "clip": {"$ref": "#/$defs/name", "description": "The clip's name there. It must drive no joint past the model's skeleton."}
+      }
     },
     "options": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "template_anim": {"type": "string"},
-        "keep_routine_duration": {"type": "boolean", "default": false},
-        "fps": {"type": "number"}
+        "template_anim": {"$ref": "#/$defs/name", "description": "glTF source: the model clip whose rig translations and scales a new clip takes (default idl)."},
+        "keep_routine_duration": {"type": "boolean", "default": false, "description": "A clip that replaces one the model has: don't grow the window of the routine that plays it."},
+        "fps": {"type": "number", "description": "glTF source: keyframe sampling rate (default the template clip's)."},
+        "skeleton_dat": {"$ref": "common.json#/$defs/romPath", "description": "glTF source into a DAT with no skeleton of its own: the model the glTF was exported on."}
       }
     },
-    "outputs": {"$ref": "common.json#/$defs/outputTree"}
+    "schedule": {
+      "description": "The routine that plays the clip: false for none. Left out: a routine tagged with the clip's name, for a new clip only.",
+      "anyOf": [
+        {"type": "boolean", "const": false},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tag": {"$ref": "#/$defs/name", "description": "The tag the server or a cutscene fires (default the clip name)."},
+            "loops": {"type": "integer", "minimum": 0, "maximum": 65535, "default": 0, "description": "Times the clip plays, then holds its last frame; 0 loops until something else plays."},
+            "blend": {"type": "integer", "minimum": 0, "maximum": 65535, "default": 15, "description": "Crossfade in and out of the clip, in frames (30 a second)."}
+          }
+        }
+      ]
+    },
+    "outputs": {"$ref": "common.json#/$defs/outputTree"},
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Recorded by dats build: per build target, each section it wrote (the clip, a routine) with the SHA-1 of its bytes — what undo and the next build put back.",
+      "properties": {
+        "targets": {"type": "array", "items": {"type": "string", "enum": ["dir", "pivot", "hd"]}},
+        "roots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "dat": {"$ref": "common.json#/$defs/romPath"},
+                "kind": {"type": "string", "enum": ["clip", "routine"]},
+                "name": {"type": "string"},
+                "sha1": {"type": "string"},
+                "retail": {"type": "boolean", "description": "The untouched copy holds a section of this name, which undo puts back."},
+                "seeded": {"type": "boolean", "description": "A pivot build made this copy from the install's; undo removes it once it is the install's again."}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9_]{1,4}$"}
   },
   "examples": [
     {
-      "id": "anim.crab_idle",
+      "id": "anim.goblin_bow",
       "type": "anim",
-      "target": {"dat": "ROM/128/79.DAT", "animation": "idl"},
-      "resources": {"animation": "anim/rom/128/79/idl.glb"}
+      "description": "Cutscene gesture wz60 on the goblin, fired as gbw0 (mob:entityAnimationPacket(\"gbw0\")), played once",
+      "target": {"dat": "ROM/3/59.DAT", "animation": "gbw0"},
+      "source": {"dat": "ROM6/0/4.DAT", "clip": "wz60"},
+      "schedule": {"tag": "gbw0", "loops": 1}
+    },
+    {
+      "id": "anim.goblin_wave",
+      "type": "anim",
+      "description": "A clip edited from an xi anim export, on the goblin's rig",
+      "target": {"dat": "ROM/3/59.DAT", "animation": "wav0"},
+      "resources": {"animation": "../exports/anim/rom/3/59/59_wave/59_wave.gltf"}
     }
   ]
 }

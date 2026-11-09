@@ -117,16 +117,24 @@ def reset_tables(root: Path, rels, dry_run: bool) -> dict[str, list[str]]:
     ``{"restored": [...], "none": [...]}``. In the install that is its ``.base``; ``none``
     there has no ``.base`` (never written through xi-tools, so already untouched). Into the
     pivot folder the install's copy is written over the pivot's; ``none`` is a table the
-    install doesn't have. A dry run holds the reset tables for the builds after it."""
+    install doesn't have. The HD folder's (FFXI_HD_DIR) copies are their own untouched source
+    (the HD pack's bytes): they go back to their own ``.base``, never to the install's; ``none``
+    there has no ``.base``. A dry run holds the reset tables for the builds after it."""
     import xi.xi_config as cfg
     from xi.dats import xi_stage
     from xi.menu.xi_menu_table import target_path
     out: dict[str, list[str]] = {"restored": [], "none": []}
     install = Path(cfg.FFXI_DIR)
     in_place = Path(root).resolve() == install.resolve()
+    hd = bool(cfg.FFXI_HD_DIR) and Path(root).resolve() == Path(cfg.FFXI_HD_DIR).resolve()
     for rel in rels:
         src = install / Path(*rel.split("/"))
-        source = cfg.pristine(src)
+        if hd:
+            own = target_path(root, rel)
+            base = own.with_name(own.name + ".base")
+            source = base if base.is_file() and base.stat().st_size else None
+        else:
+            source = cfg.pristine(src)
         if source is None or (in_place and source == src):
             out["none"].append(rel)
             continue

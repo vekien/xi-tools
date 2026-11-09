@@ -56,8 +56,9 @@ It walks you through, in order:
 
 3. **Content type** — `Gear`, `Mounts`, `Entity (NPC / Monster / Object)`,
    `NPC (costume: race + gear + weapons)`, `Ability` (a recipe from the model
-   viewer's Ability Mixer or `xi ability recipe`), or a `Spell` / `Command` menu
-   record (a new spell or job-ability id with its name, help and stats).
+   viewer's Ability Mixer or `xi ability recipe`), a `Spell` / `Command` menu
+   record (a new spell or job-ability id with its name, help and stats), or an
+   `Animation` (a clip for a model and the routine that fires it).
 
 4. **Type-specific questions** (see below), then it writes the manifest action and offers
    to build (with a dry-run preview first).
@@ -235,6 +236,29 @@ copied into resources. Non-interactive: `xi dats prepare rom/ROM/119/51.DAT --pr
 new DAT the client doesn't read yet, such as a retail effect cloned to a custom animation
 number (`--target ROM10/20/0.DAT --file-id 424764`).
 
+### Animation (a clip for a model, and the routine that fires it)
+
+Puts a clip into a model DAT with the `0x07` routine that plays it, so the server
+(`mob:entityAnimationPacket("gbw0")`) or a cutscene can fire it by its tag. Pick the model
+(`ROM/3/59`, a goblin), then where the clip comes from: a clip in another DAT (a cutscene
+gesture bank such as `ROM6/0/4`; its clips are listed) or a `.gltf` (an `xi anim export`,
+edited or authored). Then the clip's name in the model (up to 4 characters) and the routine
+tag (`-` for none) and how many times it plays (0 loops). The action is `anim.<project>`
+([`schema/anim.json`](../../schema/anim.json)); when the HD folder (`FFXI_HD_DIR`) has its
+own copy of the model the wizard asks whether the build puts the clip into it too (`--hd`).
+Non-interactive:
+
+```bash
+uv run xi dats prepare ROM6/0/4 --type anim --source-clip wz60 --target ROM/3/59 --clip gbw0 --loops 1 --project goblin
+uv run xi dats prepare exports/anim/rom/3/59/59_wave/59_wave.gltf --target ROM/3/59 --clip wav0 --project goblin
+uv run xi dats build goblin --hd --dry-run
+```
+
+A `.gltf` source needs no `--type`. `--tag` (default the clip name), `--loops`, `--blend`
+and `--no-schedule` set the routine; `--skeleton-dat` names the model a glTF was exported on
+when the target has no skeleton of its own. More in
+[../anim/schedule.md](../anim/schedule.md#as-a-dats-action-every-copy-of-the-model).
+
 ## Building (`xi dats build`)
 
 A build writes DATs and patches their file_ids **directly into the base install
@@ -253,10 +277,28 @@ uv run xi dats build --project gyokko_mask --dry-run  # preview only, writes not
 uv run xi dats changelog --project gyokko_mask        # table of recorded results
 ```
 
+### The HD folder (`--hd`)
+
+The HD pack's folder (`FFXI_HD_DIR`) holds its own copies of some DATs, with high-res
+textures, and the client loads those instead of the install's. An edit made only in the
+install is then invisible. With `--hd` an `anim` action is also applied to the HD folder's
+own copy of its model: the clip and routine go into the HD pack's bytes (never replaced by
+the install's copy), and the untouched HD bytes are kept as `.base` beside it. A model the
+HD folder has no copy of is left alone there (the client reads the install's). Without
+`--hd` the build warns when the HD folder has its own copy. The action records `hd` in
+`result.targets`, so `undo` takes the clip back out of the HD copy too, and `--reset --hd`
+resets the HD copy from its own `.base`. `--hd` works with `--pivot` (the pivot folder and
+the HD folder) and with `--list`. Other action types ignore it.
+
+```bash
+uv run xi dats build goblin --hd            # the install's goblin and the HD pack's
+uv run xi dats build goblin --pivot --hd    # the pivot folder's goblin and the HD pack's
+```
+
 ### Applying, `--reset` and `--list`
 
-The types that edit tables in place (`database`, `zone_dialog`, `zone_npcs`, `zone_events`)
-record what each build changed. A build assumes the tables are ready and applies to them as
+The types that edit tables in place (`database`, `zone_dialog`, `zone_npcs`, `zone_events`,
+and `anim`, which edits a model DAT) record what each build changed. A build assumes the tables are ready and applies to them as
 they are; resetting is asked for with `--reset`.
 
 | Build | What it does |
@@ -304,6 +346,7 @@ one every in-place edit keeps, else the file itself — and never the pivot fold
 |---|---|---|
 | `xi dats build P` | the install's DATs, in place | each table back to its `.base` in the install |
 | `xi dats build P --pivot` | the pivot folder's copy; a table it doesn't have is read from the install and written into the folder | the install's `.base` (else its file) copied over the pivot folder's copy |
+| `xi dats build P --hd` (anim actions) | also the HD folder's own copy, its `.base` kept there | the HD folder's copy back to its own `.base`, never the install's |
 
 A `--pivot` build keeps no `.base` in the pivot folder, and never writes the install. Without
 `--reset` it applies on top of what the folder holds, so a server's DATs folder keeps its other
@@ -567,12 +610,12 @@ files — gear, record edits, events — without splitting the build:
 | Command | What it does |
 |---|---|
 | `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity/NPC) at new model ids, publish an ability recipe, or add a spell / command menu record, and write a manifest action; `--pivot` checks and builds into `FFXI_PIVOT_DIR` |
-| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--pivot` builds into `FFXI_PIVOT_DIR` instead (no sync); `--dry-run` previews (no separate `plan` command); `--reset` resets the tables the build edits from `.base` first; `--list` builds the projects of a build list in order ([above](#applying---reset-and---list)); for abilities `--apply-db` / `--menu-record` / `--lua-stub` ([above](#ability-server-options---apply-db---menu-record---lua-stub)) |
+| `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--pivot` builds into `FFXI_PIVOT_DIR` instead (no sync); `--dry-run` previews (no separate `plan` command); `--reset` resets the tables the build edits from `.base` first; `--list` builds the projects of a build list in order ([above](#applying---reset-and---list)); `--hd` also applies anim actions to the HD folder's own copies ([above](#the-hd-folder---hd)); for abilities `--apply-db` / `--menu-record` / `--lua-stub` ([above](#ability-server-options---apply-db---menu-record---lua-stub)) |
 | `xi dats package <project>` | Zip the project's built DATs + F/V tables (`--from dir`/`pivot`/`hd`, default where it was built) into `projects/packages/<project>.zip` (ROM-relative, XIPivot-ready) |
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder), and the DATs of `--pivot` builds into the release's pivot folder. Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build in each target an action was built into: delete the placed DATs + clear their file_id entries, put menu records back (an ability's only while the row still holds what the build wrote), then remove the manifest (`--keep-json` keeps it). `--apply-db` also reverts the database row an ability inserted or changed and deletes its unedited Lua stub; without it they are listed (with the revert SQL) and left, and the manifest is **kept** — its cleared actions marked `undone` — until a later `undo --apply-db` removes them (a row already gone or already back at its old animation counts as done). An ability menu record that can't be written back (the game has `114.DAT` open) also keeps the manifest, and the next undo retries it |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`); `--type copy` takes any file, referenced where it is, with `--target` its game path |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe/spell or command definition into `projects/resources` and add an action (`--type`; for abilities `--kind` / `--animation` / `--subdir`; for spells and commands `--record-id` / `--menu-index`); `--type copy` takes any file, referenced where it is, with `--target` its game path; `--type anim` takes a `.gltf` or a DAT's clip (a ROM path, `--source-clip`) for the model `--target` (`--clip`, `--tag`, `--loops`, `--blend`, `--no-schedule`, `--skeleton-dat`) |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
@@ -650,6 +693,22 @@ Record edits:
   A camera gets its own scene DAT, placed and registered at a safe-band file id. The
   cast-name SQL goes to `<project>.sql`, the start scripts to `<project>.lua`, never run.
   `xi event cutscene compile` and `xi event dialogue new` are aliases of prepare + build.
+
+Model edits:
+
+- `anim` ([`schema/anim.json`](../../schema/anim.json), `xi.entity.anim.xi_build`,
+  [../anim/schedule.md](../anim/schedule.md#as-a-dats-action-every-copy-of-the-model)): a clip
+  put into a model DAT, from a `.gltf` (built as `xi anim import --add` builds it) or copied
+  out of another DAT under a new name (`source`; it must drive no joint past the model's
+  skeleton), plus the `0x07` routine that plays it (cloned as `xi anim schedule add` does;
+  `schedule: false` for none). A clip that replaces one the model has gets no routine of its
+  own unless `schedule` asks, and the window of the routine that plays it grows to fit. Each
+  target's own copy of the model is edited: the install's, the pivot folder's, and with
+  `--hd` the HD folder's. Records each section it wrote (clip or routine, with its SHA-1) per
+  target; `undo` puts back the untouched copy's section or takes the section out, leaving one
+  that changed since, and a rebuild does the same for the last build's sections first, so it
+  changes nothing when nothing changed. A pivot copy the build made from the install's is
+  deleted again by `undo`. No file ids, no table expansion.
 
 GLB-rebuild / package types:
 

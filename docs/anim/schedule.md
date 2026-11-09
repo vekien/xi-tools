@@ -61,8 +61,10 @@ routine is spliced in beside the donor so its clip reference resolves the same w
 **not** restore `.base` first, so your imported clip is kept. Re-running with the same
 `--tag` replaces that routine.
 
-If the model has no clean single-clip routine to clone (only complex ones with
-sub-routines/sounds/vfx), it refuses rather than drag their extra commands along.
+If the model has no clean single-clip routine to clone, a routine of markers and plays only
+is cloned instead with its plays cut down to the one (a goblin's `@tl0`, see
+[below](#as-a-dats-action-every-copy-of-the-model); not yet verified in game). With only
+complex ones (sub-routines/sounds/vfx) it refuses rather than drag their extra commands along.
 
 ## `schedule create` — chain several clips
 
@@ -158,6 +160,75 @@ uv run xi anim import <dat> --anim idl --add tlk --layer yap.gltf \
 
 Then **hard-refresh the editor** (Ctrl+Shift+R) so it re-fetches the model's routine
 list — `tlk0` will appear in the keyframe "Anim" dropdown.
+
+## As a dats action: every copy of the model
+
+`anim import` and `schedule add` edit the install's DAT only. To ship a clip as content (kept
+in Git, rebuilt on another install, taken back out with `undo`), make it an `anim` action of
+[`xi dats`](../dats/README.md#animation-a-clip-for-a-model-and-the-routine-that-fires-it)
+([`schema/anim.json`](../../schema/anim.json)). One action puts the clip and its routine into
+every copy of the model the client might load: the install's, the pivot folder's
+(`--pivot`), and the HD pack's own copy in `FFXI_HD_DIR` (`--hd`), which the client loads
+in place of the install's when it has one. The HD copy keeps its HD textures: the clip goes
+into its own bytes, and its untouched bytes are kept as `.base` there.
+
+A cutscene gesture from a bank DAT, put into the goblin model (`ROM/3/59`) and fired by the
+server as `gbw0`:
+
+```bash
+uv run xi anim list ROM6/0/4                       # the bank's clips: wz60 (43 frames)
+uv run xi dats prepare ROM6/0/4 --type anim --source-clip wz60 --target ROM/3/59 --clip gbw0 --loops 1 --project goblin
+uv run xi dats build goblin --hd --dry-run
+uv run xi dats build goblin --hd
+```
+
+```json
+{
+  "id": "anim.rom_3_59.gbw0",
+  "type": "anim",
+  "target": {"dat": "ROM/3/59.DAT", "animation": "gbw0"},
+  "source": {"dat": "ROM6/0/4.DAT", "clip": "wz60"},
+  "schedule": {"loops": 1}
+}
+```
+
+Server side: `mob:entityAnimationPacket("gbw0")` (packet `0x038`, `RecvSchedulor` in the
+PS2 client: it fires a routine by its tag, so the routine is what makes the clip playable).
+The bank clip is copied as it is under the new name, so it must be made for the model's
+skeleton: a clip that drives a joint past the model's skeleton is refused. Every goblin model
+has the 56-joint `gob_` skeleton; of the banks the model viewer pairs with goblins,
+`ROM6/0/4` `wz60` (joints up to 55), `ROM/302/90` and `ROM6/0/0` `wz00`–`wz20` (up to 32) and
+`ROM/101/85` `jm00` / `jm10` / `jm20` (up to 17) fit, while `ROM/322/95`'s clips drive up to
+joint 92 and are refused (measured on the retail DATs). A clip edited or authored in a DCC tool comes in as a `.gltf`
+instead (`"resources": {"animation": "…/59_wave.gltf"}`; `xi dats prepare 59_wave.gltf
+--target ROM/3/59 --clip wav0`), built as `anim import --add` builds it.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `target.dat` / `target.animation` | — | the model, and the clip's name there (a digit-less name is slot 0) |
+| `source` (`dat`, `clip`) or `resources.animation` | — | where the clip comes from: a DAT's clip, or a `.gltf` |
+| `schedule.tag` | the clip name | the routine tag the server or a cutscene fires |
+| `schedule.loops` | `0` | times it plays, then holds the last frame; `0` loops until something else plays |
+| `schedule.blend` | `15` | crossfade in and out, in frames (30 a second) |
+| `schedule: false` | — | no routine |
+| `options.template_anim` | `idl` | glTF: the clip whose rig translations and scales a new clip takes |
+| `options.skeleton_dat` | — | glTF into a DAT with no skeleton: the model it was exported on |
+
+A clip whose name the model already has replaces it: it gets no routine of its own unless
+`schedule` is given (the model's routines already play it), and the window of the routine
+that plays it grows to fit (`options.keep_routine_duration: true` keeps it). `undo` puts the
+model's own clip and routine back.
+
+The goblin model has no single-clip routine to clone: its only routines, `@tl0` and `@tr0`,
+play `wlk?` then `idl?`. The routine is cloned from one of those with its run of plays
+replaced by the one play (sec3's offset moves back by the bytes taken out, `totalDelay` is
+restamped to the new play's delay), the way `schedule create` grows a routine for a chain.
+`schedule add` and `schedule create` use the same fallback on a model like it.
+
+Not yet verified in game through this action, nor the cloned-down routine. The same edit
+made by hand (a gesture from a cutscene bank put into the goblin model, fired with
+`entityAnimationPacket`) was reported working on a CatsEyeXI server, with the HD pack's copy
+edited too.
 
 ## Format reference
 

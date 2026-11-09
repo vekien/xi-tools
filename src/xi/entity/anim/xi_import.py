@@ -599,6 +599,34 @@ def _resolve_bind_joints(dat_path: Path, sections, data: bytes, skeleton_dat, ra
     return parse_skeleton(skel_data, base_skel)
 
 
+def clip_block(name: str, gltf_path: Path, joints, template_data: bytes, template_section: Optional[Section],
+               template_anim_name: str, gltf_cache: Optional[Dict[Path, Tuple[dict, list]]] = None,
+               fps: Optional[float] = None, static_base: bool = False,
+               trans_joints: Optional[Sequence[int]] = None) -> Tuple[bytes, int, float, str]:
+    """One 0x2B clip section named ``name`` from a glTF, its rig translations/scales taken
+    from ``template_section`` of ``template_data``. Works on bytes, so the dats ``anim``
+    action can build the same clip into each target's own copy of a DAT.
+    Returns ``(section, num_frames, keyframe_duration, gltf_animation_name)``."""
+    gltf_cache = {} if gltf_cache is None else gltf_cache
+    gpath = Path(gltf_path)
+    if gpath not in gltf_cache:
+        gltf_cache[gpath] = load_gltf_document(gpath)
+    gltf_doc, gltf_buffers = gltf_cache[gpath]
+    gltf_animation = choose_gltf_animation(gltf_doc, gltf_buffers, name)
+    if not gltf_animation.sample_times:
+        raise ValueError(
+            f"'{gpath.name}' has no bone animation keyframes. Keyframe the bones in "
+            f"your DCC tool and re-export, then import.")
+    if template_section is None:
+        raise ValueError(f"Could not find target animation '{name}' or template animation '{template_anim_name}'")
+    template = parse_animation_template(template_data, template_section)
+    template_anim = parse_animation(template_data, template_section)   # decoded rig translations/scales to preserve
+    block, num_frames, keyframe_duration = build_animation_block(
+        name, template, template_anim, joints, gltf_animation, fps=fps, static_base=static_base,
+        trans_joints=trans_joints)
+    return block, num_frames, keyframe_duration, gltf_animation.name
+
+
 def _write_part_file(dat_src: Path, slot_to_gltf: Dict[str, Path], joints, template_anim_name: str,
                      gltf_cache: Dict[Path, Tuple[dict, list]], no_base: bool, fit_routine: bool,
                      fps: Optional[float] = None, static_base: bool = False,
@@ -615,24 +643,10 @@ def _write_part_file(dat_src: Path, slot_to_gltf: Dict[str, Path], joints, templ
     for name, gpath in slot_to_gltf.items():
         if gpath is None:
             raise ValueError(f"No glTF supplied for slot '{name}'")
-        gpath = Path(gpath)
-        if gpath not in gltf_cache:
-            gltf_cache[gpath] = load_gltf_document(gpath)
-        gltf_doc, gltf_buffers = gltf_cache[gpath]
-        gltf_animation = choose_gltf_animation(gltf_doc, gltf_buffers, name)
-        if not gltf_animation.sample_times:
-            raise ValueError(
-                f"'{gpath.name}' has no bone animation keyframes. Keyframe the bones in "
-                f"your DCC tool and re-export, then import.")
-        last_name = gltf_animation.name
         tmpl_sec = choose_section_by_name(sections, name) or choose_section_by_name(sections, template_anim_name)
-        if tmpl_sec is None:
-            raise ValueError(f"Could not find target animation '{name}' or template animation '{template_anim_name}'")
-        template = parse_animation_template(data, tmpl_sec)
-        template_anim = parse_animation(data, tmpl_sec)   # decoded rig translations/scales to preserve
-        block, num_frames, keyframe_duration = build_animation_block(
-            name, template, template_anim, joints, gltf_animation, fps=fps, static_base=static_base,
-            trans_joints=trans_joints)
+        block, num_frames, keyframe_duration, last_name = clip_block(
+            name, Path(gpath), joints, data, tmpl_sec, template_anim_name, gltf_cache,
+            fps=fps, static_base=static_base, trans_joints=trans_joints)
         replacements[name] = block
         written.append((name, num_frames))
         max_length = max(max_length, (num_frames - 1) / keyframe_duration if keyframe_duration else num_frames - 1)

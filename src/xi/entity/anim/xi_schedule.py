@@ -9,7 +9,8 @@ routine wraps it: this module builds that routine.
 
 Rather than synthesise the sec1/sec2/sec3 headers from scratch (fragile), it
 **clones a clean single-clip routine already in the model** (e.g. ``corp`` — sec2 is
-just a start marker + one ``0x05`` play + end) and retargets three fixed fields: the
+just a start marker + one ``0x05`` play + end; a model with none, such as a goblin, a
+routine of markers and plays only, its plays cut to one) and retargets three fixed fields: the
 section name (the new action tag), the ``0x05`` command's clip DatId (``+8``), its
 ``duration`` (``+6``), and ``maxLoops`` (``+30``: ``0`` = loop forever, ``1`` = play
 once then hold). The new section is spliced in right after the donor so it shares the
@@ -79,15 +80,23 @@ class Donor:
     tag: str
     cmd_pos: int          # byte offset of the 0x05 command within the section
     entry_len: int        # length of that command entry
+    run_len: Optional[int] = None    # a plays-only donor: bytes of its whole run of 0x05 plays
+    template_pos: Optional[int] = None   # …and the play cloned for each new one (its last)
 
 
 def find_clean_donor(data: bytes) -> Optional[Donor]:
     """A ``0x07`` routine whose sec2 is only markers + a single ``0x05`` clip play (no
     sub-routine/sound/vfx refs to drag along). Prefers the simplest (fewest commands)
-    so the cloned routine does nothing but play the clip."""
+    so the cloned routine does nothing but play the clip.
+
+    A model with none (a goblin, ``ROM/3/59``: only ``@tl0`` / ``@tr0``, each playing
+    ``wlk?`` then ``idl?``) falls back to a routine of markers and a contiguous run of
+    plays: ``run_len`` covers the run, which a clone replaces with its own plays
+    (:func:`build_chain_routine_section`), so nothing of the donor's clips is kept."""
     from xi.event.xi_event import _scene_sections, _routine_sec2_commands
 
     best: Optional[Tuple[int, Donor]] = None
+    runs: Optional[Tuple[int, Donor]] = None
     for off, tag, tc, size in _scene_sections(data):
         if tc != ROUTINE_TYPE:
             continue
@@ -95,16 +104,29 @@ def find_clean_donor(data: bytes) -> Optional[Donor]:
         if not cmds:
             continue
         ops = [c["op"] for c in cmds]
-        if ops.count(0x05) != 1 or any(o not in (0x00, 0x01, 0x05) for o in ops):
+        if any(o not in (0x00, 0x01, 0x05) for o in ops) or 0x05 not in ops:
             continue
-        c05 = next(c for c in cmds if c["op"] == 0x05)
-        cmd_pos = 16 + c05["off"]                        # header is 16 bytes
+        plays = [c for c in cmds if c["op"] == 0x05]
+        cmd_pos = 16 + plays[0]["off"]                   # header is 16 bytes
         n = struct.unpack_from("<H", data, off + cmd_pos + 1)[0] & 0x1F
         entry_len = max(1, n) * 4
-        donor = Donor(off=off, size=size, tag=tag, cmd_pos=cmd_pos, entry_len=entry_len)
-        if best is None or len(cmds) < best[0]:
-            best = (len(cmds), donor)
-    return best[1] if best else None
+        if len(plays) == 1:
+            donor = Donor(off=off, size=size, tag=tag, cmd_pos=cmd_pos, entry_len=entry_len)
+            if best is None or len(cmds) < best[0]:
+                best = (len(cmds), donor)
+            continue
+        # Plays back to back, all the same length: the run a clone swaps for its own.
+        i = ops.index(0x05)
+        if ops[i:i + len(plays)] != [0x05] * len(plays) or any(
+                p["off"] != plays[0]["off"] + k * entry_len for k, p in enumerate(plays)):
+            continue
+        donor = Donor(off=off, size=size, tag=tag, cmd_pos=cmd_pos, entry_len=entry_len,
+                      run_len=entry_len * len(plays), template_pos=16 + plays[-1]["off"])
+        if runs is None or len(cmds) < runs[0]:
+            runs = (len(cmds), donor)
+    if best:
+        return best[1]
+    return runs[1] if runs else None
 
 
 def clip_duration_frames(data: bytes, clip_name: str) -> float:
@@ -159,15 +181,27 @@ def build_routine_section(data: bytes, routine_tag: str, clip_name: str,
             "routines (sub-routines / sounds / vfx). Cloning those would drag their "
             "extra commands along, so schedule creation is refused here.")
 
-    clone = bytearray(data[donor.off: donor.off + donor.size])
-    cp = donor.cmd_pos
-
     if dur is None:
         dur = round(2.0 * clip_duration_frames(data, clip_name))     # 2x length = natural speed
     dur = max(1, min(0xFFFF, int(dur)))
     ml = _resolve_max_loops(loop=loop, max_loops=max_loops)
     trans_in = max(0, min(0xFFFF, int(trans_in)))
     trans_out = max(0, min(0xFFFF, int(trans_out)))
+
+    if donor.run_len is not None:
+        # A plays-only donor: its run of plays becomes this one play (the chain builder's
+        # splice, one step long).
+        step = {"clip": clip_name, "delay": 0, "dur": dur, "maxLoops": ml,
+                "transIn": trans_in, "transOut": trans_out, "startAt": 0}
+        section, chain = build_chain_routine_section(data, routine_tag, [step])
+        info = {"donor": donor.tag, "tag": routine_tag, "clip": clip_name,
+                "ref": _clip_ref(clip_name).decode("ascii", "replace"),
+                "dur": dur, "loop": ml == 0, "maxLoops": ml,
+                "transIn": trans_in, "transOut": trans_out, "size": chain["size"]}
+        return section, info
+
+    clone = bytearray(data[donor.off: donor.off + donor.size])
+    cp = donor.cmd_pos
 
     clone[0:4] = _name4(routine_tag)
     clone[cp + 8: cp + 12] = _clip_ref(clip_name)
@@ -228,12 +262,12 @@ def resolve_steps(data: bytes, steps: List[ScheduleStep], loop_last: bool = True
 
 def build_chain_routine_section(data: bytes, routine_tag: str,
                                 resolved: List[dict]) -> Tuple[bytes, dict]:
-    """Clone the donor routine and replace its single ``0x05`` play command with one per
-    step — a multi-clip chain (stand → sit-down → sit-idle …). Returns
-    ``(section_bytes, info)``.
+    """Clone the donor routine and replace its single ``0x05`` play command (a plays-only
+    donor's whole run of plays) with one per step — a multi-clip chain (stand → sit-down →
+    sit-idle …). Returns ``(section_bytes, info)``.
 
-    The extra entries grow sec2, so the header's sec1/sec2/sec3 offsets past the splice
-    shift by the growth, ``totalDelay`` (``+0x1C``) is restamped to the sum of the sec2
+    The new entries change sec2's length, so the header's sec1/sec2/sec3 offsets past the
+    splice shift by the growth (negative when a run of plays becomes fewer), ``totalDelay`` (``+0x1C``) is restamped to the sum of the sec2
     delays (the retail invariant — every multi-clip routine surveyed sums exactly), and
     the section is re-padded to the 16-byte size granularity."""
     donor = find_clean_donor(data)
@@ -248,7 +282,9 @@ def build_chain_routine_section(data: bytes, routine_tag: str,
 
     clone = bytearray(data[donor.off: donor.off + donor.size])
     cp, el = donor.cmd_pos, donor.entry_len
-    template = bytes(clone[cp: cp + el])
+    tp = donor.template_pos if donor.template_pos is not None else cp
+    template = bytes(clone[tp: tp + el])
+    run = donor.run_len if donor.run_len is not None else el    # the donor's plays, all replaced
 
     entries = bytearray()
     for r in resolved:
@@ -261,8 +297,8 @@ def build_chain_routine_section(data: bytes, routine_tag: str,
         struct.pack_into("<H", e, 30, r["maxLoops"])
         entries += e
 
-    growth = len(entries) - el
-    out = bytearray(clone[:cp] + entries + clone[cp + el:])
+    growth = len(entries) - run
+    out = bytearray(clone[:cp] + entries + clone[cp + run:])
 
     # Header fixups: the routine's sec1/sec2/sec3 offsets and totalDelay sit AFTER the
     # 16-byte section header + 16 zero bytes → buffer 0x20/0x24/0x28/0x2C. The stored
