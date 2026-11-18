@@ -365,6 +365,7 @@ xi dats new                                       # wizard: place prebuilt DATs 
 xi dats prepare exports/mesh/rom/351/102/102_schema.json --project my_mob --replace
 xi dats build my_mob [--dry-run]                  # writes DATs + patches tables, syncs pivot
 xi dats build --list --reset                      # every project of projects/build_list.json, clean
+xi dats prepare content/zones/X.json --project zones  # a zone recipe -> zone_clone (a recoloured retail zone at a new id)
 xi dats changelog --project my_mob / xi dats package / xi dats release / xi dats undo
 ```
 

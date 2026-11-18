@@ -269,7 +269,7 @@ xi zone export
 xi zone tree
 xi zone import
 xi zone import-json
-xi zone inject
+xi zone inject              # hidden alias: a zone_clone dats action (prepare + build)
 xi zone reset
 xi zone build-from-manifest
 xi zone navmesh

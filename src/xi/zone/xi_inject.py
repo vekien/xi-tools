@@ -1,5 +1,7 @@
 """``xi zone inject`` — create new zones by cloning existing ones with
-colour/lighting modifications.
+colour/lighting modifications. A hidden alias of ``xi dats prepare`` + ``xi dats build``
+of a ``zone_clone`` action (xi.zone.xi_clone); the zone file-id formulas and the ROM10
+helpers ``xi zone new`` uses stay here.
 
 Supports hue shift, saturation, lightness, tint (with blend modes), and
 environment lighting controls (ambient darkening, fog colour/distance).
@@ -20,9 +22,8 @@ import click
 
 from xi.ftable.xi_core import (
     patch_table, ftable_path, vtable_path,
-    load_all_tables, scan_file_ids, load_tables,
+    scan_file_ids, load_tables,
 )
-from xi.tex.xi_recolor import recolour_zone_dat
 from xi.xi_config import FFXI_DIR
 from xi.zone.xi_list import zone_file_id
 
@@ -438,20 +439,31 @@ def _next_free_zone_id(tables: dict) -> int:
                    'instead of --hue/--saturation/--lightness/--tint. Repeatable.')
 @click.option('--zone-id', type=int, default=None,
               help='Target zone ID (default: auto-assign from 400+).')
-@click.option('--model-dat', type=str, default=None,
-              help='Override model DAT path.')
+@click.option('--model-dat', type=str, default=None, hidden=True,
+              help='No longer taken: the zone_clone action copies the source zone\'s own model.')
 @click.option('--subdir', type=int, default=1,
               help='ROM10 subdirectory (default: 1).')
+@click.option('--project', default='zones', show_default=True,
+              help='The dats project the zone_clone action goes into (projects/<project>.json).')
+@click.option('--pivot', is_flag=True, help='Build into FFXI_PIVOT_DIR instead of the base install.')
 @click.option('--dry-run', is_flag=True, help='Show plan without writing.')
 def cmd(name: str, clone: str, hue: float | None, saturation: float | None,
         lightness: float | None, tint: str | None, blend: str,
         env_lightness: float | None, fog_tint: str | None,
         fog_end: float | None, fog_start: float | None,
         textures: tuple, skips: tuple, ranges: tuple,
-        zone_id: int | None, model_dat: str | None, subdir: int, dry_run: bool):
-    """Create a new zone by cloning an existing one into FTABLE10.
+        zone_id: int | None, model_dat: str | None, subdir: int, project: str, pivot: bool,
+        dry_run: bool):
+    """Create a new zone by cloning an existing one (a `zone_clone` dats action).
 
     NAME is the new zone's name (e.g. "Verdant Sarutabaruta").
+
+    \b
+    Shorthand for
+      xi dats prepare <recipe> --project zones --type zone_clone --replace
+      xi dats build zones --only zone_clone.<name> [--pivot] [--dry-run]
+    so the zone is rebuilt, listed and undone (`xi dats undo zones`) with the project.
+    Then the !zone entry is added when XI_SERVER_DIR points at a server checkout.
 
     \b
     Examples:
@@ -463,116 +475,50 @@ def cmd(name: str, clone: str, hue: float | None, saturation: float | None,
       xi zone inject "Shadow Jeuno" --clone 244 --hue 180 --texture "suny*:lightness=-70" \\
           --texture "clod*:hue=180,lightness=-60"
     """
-    tables = load_all_tables()
-    zone_names = _load_zone_names()
+    import json
+    import tempfile
+    from xi.dats.xi_dats import build_cmd, prepare_cmd, _read_manifest, _resolve_manifest_path
+    from xi.gear.xi_edit import texture_passes_kwargs
+    from xi.zone import xi_clone as ZC
 
+    if model_dat:
+        raise click.ClickException('--model-dat is no longer taken: a zone_clone action copies the '
+                                   'source zone\'s own model (build a changed model with `xi zone import`).')
     try:
         clone_zid = int(clone)
     except ValueError:
-        clone_zid = _find_zone_by_name(clone, zone_names)
+        clone_zid = _find_zone_by_name(clone, _load_zone_names())
         if clone_zid is None:
             raise click.ClickException(f'Could not find zone "{clone}".')
 
-    clone_name = zone_names[clone_zid] if clone_zid < len(zone_names) else f'zone {clone_zid}'
-    from xi.gear.xi_edit import texture_passes_kwargs
-    passes_kw = texture_passes_kwargs(textures, skips, ranges)
-    has_adjustments = any([hue, saturation, lightness, tint, env_lightness, fog_tint, passes_kw,
-                           fog_end is not None, fog_start is not None])
+    recolour = {k: v for k, v in (("hue", hue), ("saturation", saturation), ("lightness", lightness),
+                                  ("tint", tint), ("env_lightness", env_lightness), ("fog_tint", fog_tint),
+                                  ("fog_end", fog_end), ("fog_start", fog_start)) if v is not None}
+    if tint and blend != 'normal':
+        recolour["blend"] = blend
+    recolour.update(texture_passes_kwargs(textures, skips, ranges))
+    spec = {"source": {"zone": clone_zid}, "names": {"en": name},
+            "target": {"zone_id": zone_id if zone_id is not None else "auto", "subdir": subdir}}
+    if recolour:
+        spec["recolour"] = recolour
+    action = ZC.action_from_recipe(spec)
+    errs = ZC.validate_action(action)
+    if errs:
+        raise click.ClickException("\n  ".join(errs))
 
-    desc = []
-    if hue:        desc.append(f'hue {hue}°')
-    if saturation: desc.append(f'sat {saturation:+.0f}%')
-    if lightness:  desc.append(f'lit {lightness:+.0f}%')
-    if tint:       desc.append(f'tint {tint} ({blend})')
-    if env_lightness: desc.append(f'env {env_lightness:+.0f}%')
-    if fog_tint:   desc.append(f'fog {fog_tint}')
-    if fog_end is not None: desc.append(f'fog_end={fog_end}')
-    click.echo(f'Cloning zone {clone_zid} ({clone_name}) → "{name}"')
-    if desc:
-        click.echo(f'  Adjustments: {", ".join(desc)}')
-
-    if model_dat:
-        source = Path(FFXI_DIR) / model_dat if not Path(model_dat).is_absolute() else Path(model_dat)
-    else:
-        hits = scan_file_ids([zone_model_file_id(clone_zid)], tables)
-        if not hits:
-            raise click.ClickException(f'Model DAT for zone {clone_zid} not found.')
-        source = Path(FFXI_DIR) / hits[0]['dat']
-    if not source.exists():
-        raise click.ClickException(f'Source DAT not found: {source}')
-    click.echo(f'  Source: {source.name} ({source.stat().st_size:,} bytes)')
-
-    if zone_id is None:
-        zone_id = _next_free_zone_id(tables)
-    else:
-        if scan_file_ids([zone_model_file_id(zone_id)], tables):
-            raise click.ClickException(f'Zone {zone_id} already registered.')
-    click.echo(f'  Target: zone {zone_id}')
-
-    ft10, vt10 = _ensure_rom10() if not dry_run else (None, None)
-    rom10_dir = Path(FFXI_DIR) / 'ROM10'
-    plan = []
-
-    # _next_free_slot reads disk state, but the planner allocates multiple
-    # slots before any write happens — so we must track in-flight allocations
-    # locally or every entry collides at slot 0.
-    reserved: set[int] = set()
-    def _alloc(subdir_: int) -> int:
-        if dry_run:
-            slot = 0
-        else:
-            slot = _next_free_slot(rom10_dir, subdir_)
-            while slot in reserved:
-                slot += 1
-        reserved.add(slot)
-        return slot
-
-    slot = _alloc(subdir)
-    plan.append(('model', zone_model_file_id(zone_id), subdir, slot, source))
-
-    for dtype, fn in [('event', zone_event_file_id),
-                      ('dialog', zone_dialog_file_id),
-                      ('npc', zone_npc_file_id)]:
-        src_hits = scan_file_ids([fn(clone_zid)], tables)
-        if not src_hits:
-            click.echo(click.style(f'  warning: {dtype} DAT not found, skipping', fg='yellow'))
-            continue
-        src_dat = Path(FFXI_DIR) / src_hits[0]['dat']
-        if not src_dat.exists():
-            continue
-        slot = _alloc(subdir)
-        plan.append((dtype, ZONE_DAT_TYPES[dtype](zone_id), subdir, slot, src_dat))
-
-    click.echo(f'\n  Injection plan:')
-    for dtype, fid, sd, sl, src in plan:
-        click.echo(f'    {dtype:8s}  file_id={fid:6d}  → ROM10/{sd}/{sl}.DAT')
-
+    ctx = click.get_current_context()
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / f"{action['id'].split('.', 1)[1]}.json"
+        src.write_text(json.dumps({k: v for k, v in action.items() if k not in ("id", "type")}), encoding="utf-8")
+        ctx.invoke(prepare_cmd, source=src, project=project, action_type="zone_clone",
+                   action_id=action["id"], replace=True)
+    click.echo()
+    ctx.invoke(build_cmd, project=project, only=(action["id"],), dry_run=dry_run, pivot=pivot)
     if dry_run:
-        click.echo(click.style('\n  Dry run — nothing written.', fg='cyan'))
         return
-
-    for dtype, fid, sd, sl, src in plan:
-        dst = rom10_dir / str(sd) / f'{sl}.DAT'
-        dst.parent.mkdir(parents=True, exist_ok=True)
-
-        if dtype == 'model' and has_adjustments:
-            click.echo(f'  Recolouring {src.name} → {dst.name}')
-            stats = recolour_zone_dat(
-                src, dst,
-                hue=hue or 0, saturation=saturation or 0, lightness=lightness or 0,
-                tint=tint, blend_mode=blend,
-                env_lightness=env_lightness, fog_tint=fog_tint,
-                fog_end=fog_end, fog_start=fog_start, **passes_kw,
-            )
-            click.echo(f'    {stats["dxt"]} DXT + {stats["paletted"]} paletted + '
-                       f'{stats["environment"]} environment sections')
-        else:
-            click.echo(f'  Copying {src.name} → {dst.name}')
-            shutil.copy2(src, dst)
-
-        register_zone_file(fid, sd, sl)   # ROM10 + base tables
-
-    click.echo(click.style(f'\n✓ Zone {zone_id} "{name}" registered.', fg='green'))
+    built = next(a for a in _read_manifest(_resolve_manifest_path(None, project))["actions"]
+                 if a.get("id") == action["id"])
+    zone_id = built["result"]["zone_id"]
 
     # !zone spawn entry — edited in place when XI_SERVER_DIR points at a checkout,
     # otherwise printed for the user to paste.

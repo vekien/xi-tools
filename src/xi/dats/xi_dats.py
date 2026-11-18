@@ -569,6 +569,9 @@ def _detect_source_type(source: Path, explicit_type: str | None) -> tuple[str, d
     if (isinstance(data.get("events"), list) and "zone" in data and not data.get("type")
             and not isinstance(data.get("sources"), dict)) or data.get("schema") in CUTSCENE_SCHEMAS:
         return "zone_events", data
+    # A zone recipe (schema/zone_clone.json, $defs.recipe): a retail zone to copy, recoloured.
+    if data.get("type") == "zone_clone" or ("clone" in data and "name" in data and not data.get("type")):
+        return "zone_clone", data
     if source.name == "zone-changes.json" or "placements" in data or "vfx" in data or "zone" in data:
         return "zone", data
     # A spell / command definition (schema/spell_definition.json, command_definition.json).
@@ -850,6 +853,72 @@ def _build_copy(action: dict, manifest_path: Path, manifest: dict, force: bool =
     if collision:
         result["occupied_by"] = existing
     return result
+
+
+def _build_zone_clone(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
+                      dry_run: bool = False) -> dict:
+    """A copy of a retail zone at a new zone id (xi.zone.xi_clone): its model (recoloured
+    when ``recolour`` says so), event, dialog and NPC files placed in ROM10/<subdir>/ of the
+    active target and registered at the new zone's file ids, and its name in the zone-name
+    tables. A rebuild keeps the zone id and slots the first build took."""
+    from xi.dats import xi_stage
+    from xi.zone import xi_clone as ZC
+    errs = ZC.validate_action(action)
+    if errs:
+        raise click.ClickException(f"{action.get('id')}:\n  " + "\n  ".join(errs))
+    root = _active_build_root()
+    prev = action.get("result") or {}
+    target = action.get("target") or {}
+    try:
+        sources = ZC.source_dats(action["source"]["zone"])
+        zone_id = target.get("zone_id", "auto")
+        if zone_id == "auto":
+            zone_id = prev.get("zone_id") if isinstance(prev.get("zone_id"), int) else ZC.free_zone_id(root)
+        xi_stage.claim("zone_id", zone_id)
+        subdir = target.get("subdir", 1)
+        fids = ZC.file_ids(zone_id)
+        before = {p.get("kind"): p.get("dat") for p in prev.get("placements") or []}
+        kinds = [k for k in ZC.KINDS if k in sources]
+        slots: dict = {}
+        if "slot" in target:
+            slots = {k: target["slot"] + i for i, k in enumerate(kinds)}
+        elif all(before.get(k) and _parse_rom_placement(before[k])[:2] == (10, subdir) for k in kinds):
+            slots = {k: _parse_rom_placement(before[k])[2] for k in kinds}      # a rebuild: the same slots
+        else:
+            taken = ZC.taken_slots(root, subdir)
+            free = [i for i in range(ZC.MAX_SLOT + 1) if i not in taken]
+            if len(free) < len(kinds):
+                raise ZC.CloneError(f"ROM10/{subdir} has {len(free)} free slots; {len(kinds)} are needed "
+                                    "(set target.subdir)")
+            slots = dict(zip(kinds, free))
+        placements, stats = [], None
+        for kind in kinds:
+            xi_stage.claim("rom10_slot", (subdir, slots[kind]))
+            rel = f"ROM10/{subdir}/{slots[kind]}.DAT"
+            if kind == "model":
+                data, stats = ZC.model_bytes(sources[kind], action.get("recolour"))
+            else:
+                data = sources[kind].read_bytes()
+            placed = _place_raw_dat_in_build(sources[kind], rel, fids[kind], force=force,
+                                             action_id=action["id"], dry_run=dry_run, data=data)
+            placements.append({"kind": kind, "file_id": fids[kind], "dat": rel, "bytes": len(data),
+                               "source": str(sources[kind]), "occupied_by": placed.get("occupied_by")})
+        names = ZC.set_names(root, zone_id, action["names"], dry_run, previous=prev.get("names"))
+    except ZC.CloneError as e:
+        raise click.ClickException(f"{action['id']}: {e}")
+    return {"id": action["id"], "type": "zone_clone", "zone_id": zone_id,
+            "source_zone": action["source"]["zone"], "name": action["names"]["en"],
+            "placements": placements, "names": names, "recolour": stats}
+
+
+def _zone_clone_result(built: dict | None, previous: dict | None) -> dict:
+    """The inline ``result`` of a zone_clone action: the zone id, each placement
+    (kind, file id, DAT) and the zone-name rows with their text before the first build."""
+    if not built:
+        return dict(previous or {})
+    return {"zone_id": built["zone_id"],
+            "placements": [{k: p[k] for k in ("kind", "file_id", "dat")} for p in built["placements"]],
+            "names": built["names"]}
 
 
 def _build_mesh(action: dict, manifest_path: Path, manifest: dict, force: bool = False,
@@ -2351,7 +2420,8 @@ def json_cmd(manifest: Path, output: Path | None):
 @click.option("--animation-from", type=int, default=None,
               help="Ability recipes: where auto starts — the first free number at or above this.")
 @click.option("--subdir", type=int, default=None,
-              help=f"Ability recipes: ROM10 folder to place the DAT(s) in (default {ABILITY_DEFAULT_SUBDIR}).")
+              help=f"Ability recipes: ROM10 folder to place the DAT(s) in (default {ABILITY_DEFAULT_SUBDIR}). "
+                   "Zone recipes: the ROM10 folder for the zone's four files (default 1).")
 @click.option("--record-id", type=int, default=None,
               help="Spell / command definitions: the record id to take (default auto = highest free above the retail band).")
 @click.option("--menu-index", type=int, default=None,
@@ -2361,7 +2431,7 @@ def json_cmd(manifest: Path, output: Path | None):
                    "replacing an edit of the same table and id (or a line of the same id); the rest stay.")
 @click.option("--zone", "zone_id", type=int, default=None,
               help="Zone dialog lines / zone NPCs / a cutscene: the zone a bare list (or a cutscene with no "
-                   "zone field) belongs to.")
+                   "zone field) belongs to. A zone recipe: the new zone's id (default auto, 400 up).")
 @click.option("--camera", default=None,
               help="A cutscene with a camera: where its camera scene DAT goes (like ROM10/490/55.DAT).")
 @click.option("--event-name", default=None,
@@ -2407,6 +2477,12 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
       xi dats prepare edits.json --project gear_tweaks --merge
 
     
+    A zone recipe (schema/zone_clone.json) — a retail zone to copy, recoloured, with its
+    name — becomes a `zone_clone` action: the zone's four files go into ROM10 at a new zone
+    id (--zone, default auto) and its name into the zone-name tables:
+      xi dats prepare content/zones/Azure_Gustaberg.json --project zones
+      xi dats build zones --dry-run
+
     A clip for a model (schema/anim.json) — a .gltf, or a clip in another DAT (a ROM path
     with --type anim) — becomes an `anim` action: the clip goes into --target with a
     routine that plays it, so the server or a cutscene can fire it by its tag:
@@ -2473,6 +2549,20 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
                                                         zone_id, camera, event_name)
         action_id = action["id"]
         replace = replace or merge
+    elif kind == "zone_clone":
+        from xi.zone import xi_clone as ZC
+        try:
+            action = ZC.action_from_recipe(data, action_id)
+        except ZC.CloneError as e:
+            raise click.ClickException(f"{source}: {e}")
+        if zone_id is not None:
+            action.setdefault("target", {})["zone_id"] = zone_id
+        if subdir is not None:
+            action.setdefault("target", {})["subdir"] = subdir
+        action_id = action["id"]
+        errs = ZC.validate_action(action)
+        if errs:
+            raise click.ClickException(f"{source}:\n  " + "\n  ".join(errs))
     elif kind == "zone":
         dat_target = _rom_rel(target or data.get("zone", ""))
         if not dat_target:
@@ -2579,6 +2669,10 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
         # Where the last build put the file survives (undo takes it from there); the target
         # too unless --target or --file-id changed it.
         preserve = ("result",) + (() if target or file_id is not None else ("target",))
+    elif kind == "zone_clone":
+        # The zone id and slots the last build took survive; so does a hand-edited target,
+        # unless --zone or --subdir set it here.
+        preserve = ("result",) + (() if zone_id is not None or subdir is not None else ("target",))
     else:
         preserve = ("model",) + (() if target else ("target",))
     _add_or_replace_action(manifest_data, action, replace, preserve=preserve)
@@ -2665,6 +2759,15 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
             rows.append((aid, typ, res.get("path") or (action.get("target") or {}).get("path") or "-", "-",
                          str(fid) if fid is not None else "-"))
             continue
+        if typ == "zone_clone":
+            zid = res.get("zone_id", (action.get("target") or {}).get("zone_id", "auto"))
+            for p in res.get("placements") or []:
+                rows.append((aid, typ, p.get("dat") or "-", f"zone {zid} {p.get('kind')}", str(p.get("file_id"))))
+            for n in (res.get("names") or {}).values():
+                rows.append((aid, typ, n.get("dat") or "-", f"zone {zid} name {n.get('to')!r}", "-"))
+            if not res.get("placements"):
+                rows.append((aid, typ, "-", f"zone {zid} from {(action.get('source') or {}).get('zone')}", "-"))
+            continue
         if typ in ("gear", "ability"):
             placements = res.get("placements") or []
             model_id = res.get("model_id", (action.get("model") or {}).get("model_id"))
@@ -2737,6 +2840,16 @@ def _action_summary(action: dict) -> str:
     if action.get("type") in RECORD_TYPES:
         rid = (action.get("result") or {}).get("record_id", (action.get("target") or {}).get("id", "auto"))
         line += f" - id {rid}: {(action.get('resources') or {}).get('definition', '?')}"
+        return line
+    if action.get("type") == "zone_clone":
+        zid = (action.get("result") or {}).get("zone_id", (action.get("target") or {}).get("zone_id", "auto"))
+        rc = action.get("recolour") or {}
+        adj = ", ".join(f"{k} {v}" for k, v in rc.items() if k not in ("texture_overrides", "skip_textures",
+                                                                        "color_ranges"))
+        extra = len(rc.get("texture_overrides") or {}) + len(rc.get("color_ranges") or [])
+        line += (f": zone {(action.get('source') or {}).get('zone')} >> zone {zid} "
+                 f"\"{(action.get('names') or {}).get('en', '?')}\""
+                 + (f" ({adj}{', ' if adj and extra else ''}{f'{extra} more' if extra else ''})" if adj or extra else ""))
         return line
     if action.get("type") == "copy":
         line += (f": {(action.get('resources') or {}).get('file', '?')} >> "
@@ -2957,7 +3070,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     # target (the base install, or FFXI_PIVOT_DIR with --pivot); menu records edit its
     # 114.DAT and string tables. A copy registers nothing, so it needs no tables here.
     pack_actions = [a for a in active_actions
-                    if a.get("type") in ("mesh", "entity", "gear", "mount", "ability")]
+                    if a.get("type") in ("mesh", "entity", "gear", "mount", "ability", "zone_clone")]
     target_roots = [(target, _target_root(target))]
     if pivot and not target_roots[0][1].is_dir():
         raise click.ClickException(f"FFXI_PIVOT_DIR does not exist: {target_roots[0][1]}")
@@ -3024,6 +3137,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
             return _build_ability(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind == "copy":
             return _build_copy(action, manifest, manifest_data, force=force, dry_run=dry_run)
+        if kind == "zone_clone":
+            return _build_zone_clone(action, manifest, manifest_data, force=force, dry_run=dry_run)
         if kind in RECORD_TYPES:
             return _build_record(action, manifest, manifest_data, force=force, dry_run=dry_run)
         # The restorable types write what their edits name over what is there; a zone_events
@@ -3095,6 +3210,8 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
                     res = _ability_result(result, action.get("result"))
                 elif kind in RECORD_TYPES:
                     res = _record_result(result)   # the id is decided against the live table too
+                elif kind == "zone_clone":
+                    res = _zone_clone_result(result, action.get("result"))   # zone id + slots: the live tables
                 elif kind == "anim":
                     res = _anim_result(per_root, action.get("result"))
                 elif kind in RESTORABLE_TYPES:
@@ -3267,8 +3384,9 @@ def _manifest_problems(manifest: dict) -> list[str]:
     from xi.entity.xi_zone_npcs import validate_action as zone_npcs
     from xi.event.xi_zone_events import validate_action as zone_events
     from xi.entity.anim.xi_build import validate_action as anim
+    from xi.zone.xi_clone import validate_action as zone_clone
     checks = {"database": database, "zone_dialog": zone_dialog, "zone_npcs": zone_npcs, "zone_events": zone_events,
-              "anim": anim}
+              "anim": anim, "zone_clone": zone_clone}
     out = []
     for action in manifest.get("actions", []):
         check = checks.get(action.get("type")) if isinstance(action, dict) and action.get("enabled", True) else None
@@ -3281,8 +3399,8 @@ def _edited_tables(manifest: dict, target: str) -> list[str]:
     """ROM paths of the tables a project's builds into ``target`` edited in place — what
     ``--reset`` resets: the database, dialog, NPC-name and event tables its records name, and
     the spell / command table and its name tables for a record action; for a database or
-    zone_dialog action also the tables its edits name, and for an anim action its model DAT,
-    so a project that hasn't been
+    zone_dialog action also the tables its edits name, for an anim action its model DAT, and
+    for a zone_clone action the zone-name tables, so a project that hasn't been
     built into ``target`` yet resets them too. The DATs actions place (gear, camera scenes …)
     aren't: a build replaces them. Nor is an ability's menu record, which only a build with
     --menu-record puts back."""
@@ -3303,6 +3421,9 @@ def _edited_tables(manifest: dict, target: str) -> list[str]:
         elif typ == "anim" and action.get("enabled", True):
             from xi.entity.anim import xi_build as AB
             rels.update(AB.tables(action))
+        elif typ == "zone_clone" and action.get("enabled", True):
+            from xi.zone.xi_clone import NAME_TABLES
+            rels.update(NAME_TABLES.values())       # the zone-name tables (its DATs a build replaces)
         if typ in RESTORABLE_TYPES:
             for e in (res.get("roots") or {}).get(target) or []:
                 if e.get("dat"):
@@ -3351,7 +3472,7 @@ def _action_placements(action: dict) -> list[tuple[int, str]]:
     inline result — one per race for gear, one otherwise."""
     res = action.get("result") or {}
     out: list[tuple[int, str]] = []
-    if action.get("type") in ("gear", "ability"):
+    if action.get("type") in ("gear", "ability", "zone_clone"):
         for p in res.get("placements", []):
             if p.get("file_id") is not None and p.get("dat"):
                 out.append((int(p["file_id"]), _rom_rel(p["dat"])))
@@ -3423,6 +3544,9 @@ def _project_dat_rels(manifest_data: dict, target: str | None = None) -> tuple[l
             continue
         if target is not None and target not in _action_targets(action):
             continue
+        if typ == "zone_clone":
+            rels += [_rom_rel(p["dat"]) for p in res.get("placements", []) if p.get("dat")]
+            rels += [_rom_rel(n["dat"]) for n in (res.get("names") or {}).values() if n.get("dat")]
         if typ in ("gear", "ability"):
             rels += [_rom_rel(p["dat"]) for p in res.get("placements", []) if p.get("dat")]
             menu = res.get("menu") if typ == "ability" else None
@@ -3747,6 +3871,9 @@ def undo_cmd(project: str | None, yes: bool, keep_json: bool, apply_db: bool = F
                     removed += 1
                 if _unregister_file_id(root, file_id, rom):
                     cleared += 1
+            if action.get("type") == "zone_clone":
+                from xi.zone import xi_clone as ZC
+                db_left.extend(ZC.undo_names((action.get("result") or {}).get("names"), root))
             if action.get("type") == "mount":
                 mid = (action.get("result") or {}).get("mount_id")
                 if isinstance(mid, int):
@@ -4006,6 +4133,21 @@ def _print_placements(results: list[dict], title: str) -> None:
             if r.get("sql"):
                 for line in r["sql"].splitlines():
                     click.echo(f"       {line}")
+        elif kind == "zone_clone":
+            click.echo(f"{head}: zone {r.get('source_zone')} -> zone {r.get('zone_id')} \"{r.get('name')}\"")
+            for p in r.get("placements") or []:
+                mark = ""
+                if p.get("occupied_by"):
+                    mark = f"  ⚠ file_id was registered to {p['occupied_by']}"
+                    collisions += 1
+                click.echo(f"     - {p['kind']:<6} file_id {p['file_id']} -> {p['dat']}{mark}")
+            st = r.get("recolour")
+            if st:
+                click.echo(f"     recoloured: {st.get('dxt', 0)} DXT + {st.get('paletted', 0)} paletted textures, "
+                           f"{st.get('environment', 0)} environment sections"
+                           + (f", {st['skipped']} left as they were" if st.get("skipped") else ""))
+            for lang, n in (r.get("names") or {}).items():
+                click.echo(f"     name [{lang}]: {n['dat']} row {n['row']}: {_short(n['from'])} -> {_short(n['to'])}")
         elif kind == "database":
             recs = r.get("records") or []
             where = ", ".join(r.get("files") or []) or "no DAT changes"
@@ -4844,6 +4986,47 @@ def _wizard_copy(slug: str, prev: dict | None, manifest_path: Path) -> dict:
             "resources": {"file": _file_ref(src, manifest_path)}}
 
 
+def _wizard_zone_clone(slug: str, prev: dict | None) -> dict:
+    """A zone_clone action: the retail zone to copy, the new zone's name and id, and how to
+    recolour it (blank keeps the colours)."""
+    from xi.zone import xi_clone as ZC
+    from xi.zone.xi_inject import _find_zone_by_name, _load_zone_names
+    p = prev or {}
+    names = _load_zone_names()
+    while True:
+        raw = str(_ask("Which retail zone is copied? (id or name, e.g. 107 or South Gustaberg)", "Enter zone",
+                       default=str((p.get("source") or {}).get("zone", "")) or None)).strip()
+        zone = int(raw) if raw.isdigit() else _find_zone_by_name(raw, names)
+        if isinstance(zone, int):
+            break
+        click.echo("  No zone by that name — `xi zone search <text>` finds one.")
+    default_name = (p.get("names") or {}).get("en") or (f"{names[zone]} (copy)" if zone < len(names) else None)
+    name = str(_ask("The new zone's name?", "Enter name", default=default_name)).strip()
+    zid = str(_ask("Its zone id? (auto: the lowest free from 400)", "Enter zone id",
+                   default=str((p.get("target") or {}).get("zone_id", "auto")))).strip()
+    rc = dict(p.get("recolour") or {})
+    for key, label in (("hue", "Hue shift in degrees (0 keeps it)"), ("saturation", "Saturation, -100..100"),
+                       ("lightness", "Lightness, -100..100")):
+        val = str(_ask(label, "Enter number", default=str(rc.get(key, 0)))).strip()
+        rc[key] = float(val) if "." in val else int(val or 0)
+    tint = str(_ask("Tint colour? (#RRGGBB or #RRGGBBAA; blank for none)", "Enter colour",
+                    default=rc.get("tint", ""), show_default=bool(rc.get("tint")))).strip()
+    rc["tint"] = tint or None
+    if tint:
+        rc["blend"] = _choose("Blend the tint how?", list(ZC.BLENDS), default=rc.get("blend", "normal"))
+    else:
+        rc.pop("blend", None)
+    rc = {k: v for k, v in rc.items() if v not in (None, 0, "")}
+    action = {"id": f"zone_clone.{slug}", "type": "zone_clone", "source": {"zone": zone},
+              "target": {**(p.get("target") or {}), "zone_id": int(zid) if zid.isdigit() else "auto"},
+              "names": {**(p.get("names") or {}), "en": name}}
+    if rc:
+        action["recolour"] = rc
+    if p.get("result"):
+        action["result"] = p["result"]          # the zone id and slots the last build took
+    return action
+
+
 def _wizard_anim(slug: str, prev: dict | None, manifest_path: Path) -> dict:
     """An anim action: the model DAT, where the clip comes from (a clip in another DAT, or a
     glTF), its name in the model, and the routine tag that fires it."""
@@ -5442,6 +5625,7 @@ def new_cmd(project: str | None, pivot: bool = False):
         "Zone events (cutscenes and dialogue on a zone's NPCs)": "zone_events",
         "Copy a file as it is (a redrawn UI sheet, a music track …)": "copy",
         "Animation (a clip for a model, and the routine that fires it)": "anim",
+        "Zone copy (a retail zone at a new zone id, recoloured)": "zone_clone",
     }[_choose("What type of content is being added?",
               ["Gear", "Mounts", "Entity (NPC / Monster / Object)",
                "NPC (costume: race + gear + weapons)",
@@ -5453,12 +5637,13 @@ def new_cmd(project: str | None, pivot: bool = False):
                "Zone NPCs (rename or add a zone's NPCs)",
                "Zone events (cutscenes and dialogue on a zone's NPCs)",
                "Copy a file as it is (a redrawn UI sheet, a music track …)",
-               "Animation (a clip for a model, and the routine that fires it)"])]
+               "Animation (a clip for a model, and the routine that fires it)",
+               "Zone copy (a retail zone at a new zone id, recoloured)"])]
     # The baked NPC is placed at a custom entity model id, so it needs the entity tables.
     # Abilities take retail-range ids (job-ability / spell bands, weapon-skill dummies),
     # so the tables need no expansion.
     ready_key = "entity" if ctype == "npc" else ctype
-    if ctype not in ("ability", "copy", *RESTORABLE_TYPES, *RECORD_TYPES) \
+    if ctype not in ("ability", "copy", "zone_clone", *RESTORABLE_TYPES, *RECORD_TYPES) \
             and not ready.get(ready_key, True):
         hint = {"gear": "Run `xi ftable expand gear` (expands the FTABLE and patches "
                         "FFXiMain.dll; `--no-dll` for a client cexidats patches)",
@@ -5505,12 +5690,14 @@ def new_cmd(project: str | None, pivot: bool = False):
             new_actions = [_wizard_copy(slug, prev, manifest_path)]
         elif ctype == "anim":
             new_actions = [_wizard_anim(slug, prev, manifest_path)]
+        elif ctype == "zone_clone":
+            new_actions = [_wizard_zone_clone(slug, prev)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 
     by_id = {a.get("id"): a for a in manifest.get("actions", [])}
     for action in new_actions:
-        if action.get("type") not in ("ability", *RESTORABLE_TYPES, *RECORD_TYPES):
+        if action.get("type") not in ("ability", "zone_clone", *RESTORABLE_TYPES, *RECORD_TYPES):
             # Allocated deterministically from the definition; abilities and menu
             # records are decided by the build against the live tables instead.
             action["result"] = _plan_result(action)  # record the allocation inline (same as build)

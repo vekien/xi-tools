@@ -237,6 +237,16 @@ copied into resources. Non-interactive: `xi dats prepare rom/ROM/119/51.DAT --pr
 new DAT the client doesn't read yet, such as a retail effect cloned to a custom animation
 number (`--target ROM10/20/0.DAT --file-id 424764`).
 
+### Zone copy (a retail zone at a new zone id, recoloured)
+
+Give the retail zone to copy (an id or a name), the new zone's name and id (`auto`: the
+lowest free from 400), then hue, saturation, lightness and a tint (blank keeps the colours).
+The action is `zone_clone.<project>`. Non-interactive: `xi dats prepare <recipe.json>
+--project P [--zone N] [--subdir N]` with a zone recipe, or `xi zone inject NAME --clone ID
+[--hue …]`, which prepares and builds in one go. The zone-name tables must be grown first
+(`xi database grow ROM/165/84.DAT 512`, and `ROM/165/63.DAT`). See
+[../zone/inject-legacy.md](../zone/inject-legacy.md).
+
 ### Animation (a clip for a model, and the routine that fires it)
 
 Puts a clip into a model DAT with the `0x07` routine that plays it, so the server
@@ -659,6 +669,14 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   `undo` puts it back (a file that was new is deleted); in a pivot folder `undo` deletes the
   copy. A build into the folder the source lives in leaves it (`the source itself`), and
   `undo` never deletes the source.
+
+- `zone_clone` ([`schema/zone_clone.json`](../../schema/zone_clone.json), `xi.zone.xi_clone`):
+  copies retail zone `source.zone` to a new zone id: the model (recoloured by `recolour`,
+  `xi.tex.xi_recolor`), event, dialog and NPC DATs placed in `ROM10/<subdir>/` at the lowest
+  free slots (or `target.slot`) and registered at the zone's file ids, and the name written
+  into `ROM/165/84` / `ROM/165/63` (grown first). The zone id and slots are decided against the
+  live tables on the first build and kept on `result`; `undo` deletes the files, clears the
+  ids and puts the name rows back; `--reset` resets the name tables.
 
 Record edits:
 

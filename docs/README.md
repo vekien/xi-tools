@@ -111,7 +111,7 @@ and per-object mesh (0x2A) import/export.
 | [zone/check.md](zone/check.md) | `xi zone check`: a zone model's structure and the client's limits, before loading it (every retail zone checks clean) |
 | [zone/navmesh.md](zone/navmesh.md) | Server navmesh (`.nav`): bake from collision via Recast/Detour |
 | [zone/subareas.md](zone/subareas.md) | Client-side sub-areas (shop interiors, Ru'Aun's island platforms): how they work, every zone that has them, `zone export --sub-areas` |
-| [zone/inject-legacy.md](zone/inject-legacy.md) | Legacy injection path |
+| [zone/inject-legacy.md](zone/inject-legacy.md) | The `zone_clone` dats action: a retail zone copied to a new zone id, recoloured, named (`xi zone inject` is its alias) |
 | [zone/lod-draw-distance.md](zone/lod-draw-distance.md) | LOD and draw-distance mechanics |
 | [zone/reset.md](zone/reset.md) | Restoring a zone DAT to pristine state |
 | [zone/templates.md](zone/templates.md) | Zone templates: snapshotting a curated zone for reuse |

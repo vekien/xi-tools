@@ -1,11 +1,77 @@
-# Zone Injection Legacy
+# Zone copies: the `zone_clone` action (and `xi zone inject`)
 
-`xi zone inject` is a hidden compatibility command. New distributable zones
-should use `xi zone new` plus `xi dats prepare` / `xi dats build`.
+A new zone made from a retail one, recoloured: the `zone_clone` dats action
+([`schema/zone_clone.json`](../../schema/zone_clone.json), `xi.zone.xi_clone`). It places the
+source zone's model (recoloured), event, dialog and NPC files in `ROM10/<subdir>/`, registers
+them at the new zone's file ids, and writes the zone's name into the zone-name tables, so it
+is built, rebuilt, listed (`xi dats changelog`) and undone (`xi dats undo`) like every other
+action, into the install or, with `--pivot`, the pivot folder.
 
+```bash
+xi dats prepare content/zones/Azure_Gustaberg.json --project zones   # a zone recipe (below)
+xi dats build zones --pivot --dry-run
+xi dats build zones --pivot
+xi dats undo zones
+```
+
+`xi zone inject` is a hidden alias of the two: it prepares the action into
+`projects/<--project, default zones>.json` and builds just that action, then adds the
+`!zone` entry when `XI_SERVER_DIR` points at a server checkout. (It used to write the install
+directly; `--model-dat` is no longer taken.) A brand-new zone built from scratch is
+`xi zone new`.
+
+### The action
+
+```json
+{"id": "zone_clone.shadow_jeuno", "type": "zone_clone",
+ "source": {"zone": 244},
+ "target": {"zone_id": 400, "subdir": 1},
+ "names": {"en": "Shadow Jeuno"},
+ "recolour": {"hue": 180, "saturation": 20, "lightness": -30,
+              "texture_overrides": {"suny*": {"lightness": -70},
+                                    "environment": {"lightness": -60, "fog_tint": "#1a0a2a", "fog_end": 80}}}}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `source.zone` | — | The retail zone copied, by id (read from the install, its `.base` when an edit kept one) |
+| `target.zone_id` | `auto` | The new zone id; `auto` takes the lowest free from 400 |
+| `target.subdir` | 1 | The ROM10 folder for the four files |
+| `target.slot` | the lowest free | The first of four slots there; slots registered in the target's ROM10 tables or on disk are skipped |
+| `names.en` / `names.jp` | — / `en` | The zone's name in `ROM/165/84.DAT` / `ROM/165/63.DAT` at its id |
+| `recolour` | none (copied as it is) | `hue`, `saturation`, `lightness`, `tint`, `blend`, `env_lightness`, `fog_tint`, `fog_end`, `fog_start`, `texture_overrides`, `skip_textures`, `color_ranges`: the options below |
+
+The zone-name tables need a row for the zone id: grow them once, in the install, as for
+every table a build writes past retail's rows:
+
+```bash
+xi database grow ROM/165/84.DAT 512
+xi database grow ROM/165/63.DAT 512
+```
+
+A rebuild keeps the zone id and the slots the first build took (`result`), and so does a
+re-`prepare --replace`; `--reset` puts the zone-name tables back to the install's copy first.
+`undo` deletes the four files, clears their file ids and puts each name row back while it
+still says what the build wrote.
+
+**A zone recipe**, what `xi dats prepare` reads (CatsEyeXI's `content/zones/*.json`, LPS's
+`zones.json` entries; `$defs.recipe` in the schema):
+`{"name", "clone", "zone_id", "hue", "saturation", "lightness", "tint", "blend_mode",
+"textures", "skip_textures", "color_ranges"}`, `textures` being `texture_overrides`.
+`--zone N` and `--subdir N` set the target.
+
+Verified on CatsEyeXI's six recoloured zones (its dats repo's `content/zones/*.json`, built
+until now by its own `tools/zone_builder.py`), built with `--pivot` into a copy of its ROM10
+tables with those zones' entries cleared: the same zone ids and slots, ROM10 tables, event /
+dialog / NPC files and `ROM/165/84.DAT` byte for byte; the models within one 5/6-bit step per
+DXT colour endpoint (±2 per palette byte) of its files (the colour maths' rounding); every
+model passing `xi zone check --base <source>`; a rebuild changing nothing; `undo` taking
+everything back. The action follows that builder, written by Loxley, ported with his
+permission.
+
+## Legacy notes (`xi zone inject`)
 
 Create new zones by cloning existing ones with colour/lighting modifications.
-Registers into FTABLE10 without touching original game files.
 
 ## Quick start
 
@@ -254,8 +320,10 @@ zones, clouds weather with dark-tinted skybox textures often looks better than f
 1. Resolves the source zone's model, dialog, NPC, and event DATs via FTABLE
 2. Copies or recolours the model DAT into `ROM10/<subdir>/<n>.DAT`
 3. Clones dialog, NPC, and event DATs
-4. Registers all four file IDs in `FTABLE10.DAT` / `VTABLE10.DAT`
+4. Registers all four file IDs in the target's `ROM10` tables (and the install's main
+   pair when it holds the id; see [../dats/README.md](../dats/README.md#which-table-registers-a-file_id))
 5. Auto-assigns a zone ID from 400+ if not specified
+6. Writes the zone's name into `ROM/165/84.DAT` and `ROM/165/63.DAT`
 
 ### Zone file ID formulas
 
@@ -314,9 +382,9 @@ Copy `Zone.lua` and `DefaultActions.lua` from the source zone.
 
 ### 4. Zone name (in-game display)
 
-The zone name string table `ROM/165/84.DAT` (d_msg, XOR 0xFF) must be
-extended to include the new zone ID. Without patching it, the client
-shows "Area: N".
+The zone name string table `ROM/165/84.DAT` (d_msg, XOR 0xFF) must have a row for the
+new zone ID, or the client shows "Area: N". The `zone_clone` action writes it (and the
+Japanese `ROM/165/63.DAT`) once the tables are grown (`xi database grow`, above).
 
 ### 5. Restart
 
