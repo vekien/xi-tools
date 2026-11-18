@@ -108,6 +108,7 @@ and per-object mesh (0x2A) import/export.
 | [zone/import.md](zone/import.md) | Re-importing edited geometry (placement edits) |
 | [zone/import-json.md](zone/import-json.md) | JSON change-set format used by the web level editor |
 | [zone/collision.md](zone/collision.md) | Player-collision mesh (MZB): format, export, adding blockers |
+| [zone/edit.md](zone/edit.md) | `xi zone edit`: recolour an existing zone in place (colours, per-texture settings, lighting, fog) |
 | [zone/check.md](zone/check.md) | `xi zone check`: a zone model's structure and the client's limits, before loading it (every retail zone checks clean) |
 | [zone/navmesh.md](zone/navmesh.md) | Server navmesh (`.nav`): bake from collision via Recast/Detour |
 | [zone/subareas.md](zone/subareas.md) | Client-side sub-areas (shop interiors, Ru'Aun's island platforms): how they work, every zone that has them, `zone export --sub-areas` |

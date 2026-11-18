@@ -205,7 +205,7 @@ Resolution order for any question about a command:
 | `xi entity`, `xi model` | `src/xi/entity/` | `docs/entity/`, `docs/model/{json,free}.md` |
 | `xi gear` | `src/xi/gear/` | `docs/gear/*.md` (whole-character export: `docs/gear/pose.md`), `docs/reference/model-file-ids.md` |
 | `xi mount` | `src/xi/mount/` | `docs/mounts/{README,mechanism,data}.md` |
-| `xi zone` | `src/xi/zone/` | `docs/zone/README.md` → `format/export/import/import-json/collision/check/navmesh/templates/zones.md` |
+| `xi zone` | `src/xi/zone/` | `docs/zone/README.md` → `format/export/import/import-json/collision/check/edit/navmesh/templates/zones.md` |
 | `xi object` | `src/xi/zone/xi_object.py`, `xi_zonedef.py` | `docs/object/*.md` |
 | `xi fx` | `src/xi/fx/` | `docs/fx/README.md`, `effects.md`, `effect_system.md` |
 | `xi audio` | `src/xi/audio/` | `docs/audio/{README,format,refs}.md` |
@@ -295,6 +295,7 @@ xi zone export ROM/1/41 [--fbx] [--no-sky --no-vfx] [--objects] [--collision] [-
 xi zone check ROM10/1/8.DAT [--base 154] / xi zone check --all --no-notes   # structure + client limits
 xi zone import ROM/1/41 [edited.glb] [--prune] [--add-collision blocker.obj [--scale 0.1]]
 xi zone import-json zone-changes.json [--dry-run] [--pivot]   # editor change-set
+xi zone edit 244 --hue 180 [--texture "suny*:lightness=-70"] [--fog-end 120] [--dry-run]   # recolour in place
 xi zone reset ROM/1/41
 xi object export ROM/1/41 gaitou01
 xi object import ROM/1/41 lamp.glb --name lamp --pos -8.8 0 -7.7 --rot 3.142 1.044 3.142

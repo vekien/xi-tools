@@ -15,6 +15,7 @@ a zone DAT (`ROM/<dir>/<dat>.DAT`). Mirrors the `xi zone` command group.
 | `zone import` | [import.md](import.md) | Import an edited whole-zone GLB (move/rotate/scale/delete + mesh-merge) |
 | `zone import-json` | [import-json.md](import-json.md) | Apply a JSON change-set from the web level editor |
 | `bridge` | [import-json.md](import-json.md) | WebSocket backend the [xi-zone-editor](https://github.com/vekien/xi-zone-editor) talks to (`xi bridge --port 8777`) |
+| `zone edit` | [edit.md](edit.md) | Recolour an existing zone in place: colours, per-texture settings, lighting and fog (`zone reset` undoes it) |
 | `zone reset` | [reset.md](reset.md) | Restore a zone DAT to pristine (undo all edits) |
 | `zone new` | [templates.md](templates.md) | Create a custom zone (**requires** `--template <id>`; see [templates.md](templates.md)); optional `--sky <DAT>` to splice atmosphere |
 | `zone delete` | — | Remove a custom zone (ID ≥ 400) — deletes DAT, zeros FTABLE10, prints server SQL |
