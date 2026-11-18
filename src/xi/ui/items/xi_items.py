@@ -61,7 +61,9 @@ _SPLIT_GROUPS = {
 
 
 def _dat_path(en_rom: str) -> Path:
-    return Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
+    # pathlib joins the ROM-relative path on every platform (a hard-coded backslash
+    # made a single file name on Linux and macOS, so no item DAT was ever found there).
+    return Path(FFXI_DIR) / en_rom
 
 
 def _item_to_dict(item):
@@ -251,11 +253,14 @@ def _find_item_dat(item_id: int):
 @icon_grp.command('export')
 @click.argument('item_id', type=int)
 @click.option('--output', '-o', default=None,
-              help='Output file path. Default: item_<id>.png next to the DAT.')
+              help='Output file path. Default: item_<id>.png (or .bmp) in the current folder.')
 @click.option('--bmp', 'as_bmp', is_flag=True,
-              help='Save as BMP instead of PNG.')
+              help='Save as an 8-bit BMP (what a database edit\'s icon.file takes) instead of PNG.')
 def icon_export_cmd(item_id, output, as_bmp):
     """Extract an item's icon and save it as PNG (or BMP).
+
+    The PNG is an indexed image with the record's own palette, alpha and tag, so
+    `icon import` of an unedited export writes the same bytes back.
 
     \b
     Examples:
@@ -263,10 +268,7 @@ def icon_export_cmd(item_id, output, as_bmp):
       xi ui items icon export 12345 -o sword.png
       xi ui items icon export 12345 --bmp -o sword.bmp
     """
-    try:
-        from PIL import Image
-    except ImportError:
-        raise click.ClickException('Pillow is required: pip install pillow')
+    from xi.ui.items import xi_icon
 
     cat_name, base_id, item_type, en_path, idx = _find_item_dat(item_id)
     dat = ItemDat.load(en_path)
@@ -278,73 +280,78 @@ def icon_export_cmd(item_id, output, as_bmp):
         raise click.ClickException(f'Item {item_id} has no icon (size=0).')
     if ICON_DATA + icon_size > dat.stride:
         raise click.ClickException(f'Icon size {icon_size} exceeds record bounds.')
-
-    bmp_bytes = rec[ICON_DATA:ICON_DATA + icon_size]
+    blob = rec[ICON_DATA:ICON_DATA + icon_size]
 
     ext = 'bmp' if as_bmp else 'png'
     out = Path(output) if output else Path(f'item_{item_id}.{ext}')
-
-    if as_bmp:
-        out.write_bytes(bmp_bytes)
-    else:
-        img = Image.open(io.BytesIO(bmp_bytes))
-        img.save(out, format='PNG')
-
-    click.echo(f'Icon exported ({icon_size} bytes BMP -> {out})')
+    try:
+        data = xi_icon.to_bmp(blob) if as_bmp else xi_icon.to_png(blob)
+    except xi_icon.IconError as e:
+        raise click.ClickException(f'Item {item_id}: {e}')
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    click.echo(f'Icon exported ({icon_size}-byte icon -> {out})')
 
 
 @icon_grp.command('import')
 @click.argument('item_id', type=int)
-@click.argument('png_file', type=click.Path(exists=True))
+@click.argument('image_file', type=click.Path(exists=True, dir_okay=False))
+@click.option('--tag', default=None,
+              help='The icon\'s 16-character tag. Default: the PNG\'s own (an export carries it), '
+                   'else the tag the record has now.')
 @click.option('--dry-run', is_flag=True, help='Show plan without writing.')
-def icon_import_cmd(item_id, png_file, dry_run):
-    """Replace an item's icon with a PNG image (resized to 32x32).
+def icon_import_cmd(item_id, image_file, tag, dry_run):
+    """Replace an item's icon with a PNG (or BMP) image.
 
-    Finds the correct DAT, decrypts the record, replaces the BMP icon
-    at offset 0x284, re-encrypts and writes to the output directory.
+    An indexed 32x32 PNG keeps its palette and indices as they are, so an unedited
+    `icon export` comes back byte for byte. Any other image is resized to 32x32 and
+    reduced to 256 colours. The icon is written as every retail icon is: an 8-bit
+    bitmap with alpha 0..128, after a mark byte and a 16-character tag. The first
+    write keeps the DAT's .base.
 
     \b
     Examples:
       xi ui items icon import 12345 my_icon.png
       xi ui items icon import 12345 my_icon.png --dry-run
     """
-    try:
-        from PIL import Image
-    except ImportError:
-        raise click.ClickException('Pillow is required: pip install pillow')
+    from xi.ui.items import xi_icon
+    from xi.xi_config import editable_dat
 
     cat_name, base_id, item_type, en_path, idx = _find_item_dat(item_id)
     dat = ItemDat.load(en_path)
     click.echo(f'Found item {item_id} in {cat_name}: {en_path}  (record {idx}, {describe(dat.stride)})', err=True)
 
-    img = Image.open(png_file).resize((32, 32)).convert('RGBA')
-    buf = io.BytesIO()
-    img.save(buf, format='BMP')
-    bmp_bytes = buf.getvalue()
-
-    max_icon_size = dat.icon_capacity
-    if len(bmp_bytes) > max_icon_size:
-        raise click.ClickException(
-            f'BMP too large: {len(bmp_bytes)} bytes > max {max_icon_size}. '
-            'Try converting to RGB.')
-
-    if dry_run:
-        click.echo(f'Dry run: would write {len(bmp_bytes)}-byte BMP at record+0x284.')
-        return
-
     rec = bytearray(dat.record(idx))
     old_icon_size = struct.unpack_from('<I', rec, ICON_OFFSET)[0]
-    struct.pack_into('<I', rec, ICON_OFFSET, len(bmp_bytes))
-    rec[ICON_DATA:ICON_DATA + len(bmp_bytes)] = bmp_bytes
-    if old_icon_size > len(bmp_bytes):
-        tail = ICON_DATA + len(bmp_bytes)
-        rec[tail:ICON_DATA + old_icon_size] = b'\x00' * (old_icon_size - len(bmp_bytes))
-    dat.set_record(idx, bytes(rec))
+    current_tag = xi_icon.DEFAULT_TAG
+    if old_icon_size:
+        try:
+            current_tag = xi_icon.parse(bytes(rec[ICON_DATA:ICON_DATA + old_icon_size]))['tag']
+        except xi_icon.IconError:
+            pass
+    try:
+        blob = xi_icon.from_file(Path(image_file).read_bytes(), tag=tag, default_tag=current_tag)
+    except xi_icon.IconError as e:
+        raise click.ClickException(f'{image_file}: {e}')
+    if len(blob) > dat.icon_capacity:
+        raise click.ClickException(f'Icon is {len(blob)} bytes; the record holds {dat.icon_capacity}.')
 
-    out_path = output_path_for(en_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if dry_run:
+        click.echo(click.style(f'Dry run — would write a {len(blob)}-byte icon at record+0x284 '
+                               f'(tag {xi_icon.parse(blob)["tag"]!r}). Nothing written.', fg='cyan'))
+        return
+
+    struct.pack_into('<I', rec, ICON_OFFSET, len(blob))
+    rec[ICON_DATA:ICON_DATA + len(blob)] = blob
+    if old_icon_size > len(blob):
+        tail = ICON_DATA + len(blob)
+        rec[tail:ICON_DATA + old_icon_size] = b'\x00' * (old_icon_size - len(blob))
+
+    out_path = editable_dat(en_path, fresh=False)
+    dat = ItemDat.load(out_path)
+    dat.set_record(idx, bytes(rec))
     out_path.write_bytes(dat.encrypted())
-    click.echo(f'Icon updated ({len(bmp_bytes)} bytes) -> {out_path}')
+    click.echo(click.style(f'✓ Icon updated ({len(blob)} bytes) -> {out_path}', fg='green'))
 
 
 # ── Per-type subgroups ─────────────────────────────────────────────────────────

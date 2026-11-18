@@ -251,6 +251,7 @@ Commands live under `xi ui tex …` and `xi ui layout …`.
 | [ui/import.md](ui/import.md) | `xi ui tex import` / `si` — re-import edited textures |
 | [ui/list.md](ui/list.md) | `xi ui tex list` — list UI DATs by magic |
 | [ui/extract.md](ui/extract.md) | Redirect — there is no `extract` command |
+| [ui/item-icons.md](ui/item-icons.md) | `xi ui items icon export` / `import` — an item's icon as a PNG or BMP, byte-exact round trip |
 | [utils/texture.md](utils/texture.md) | DDS ↔ PNG conversion helpers |
 
 ---
