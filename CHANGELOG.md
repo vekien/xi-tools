@@ -6,6 +6,21 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ---
 
+## v1.17.0 — 2026-11-18
+
+[Compare v1.16.0...v1.17.0](https://github.com/vekien/xi-tools/compare/v1.16.0...v1.17.0)
+
+**database**
+
+- Mob skill names can be renamed and added. The name a TP move shows in the log ("The Goblin readies Stomp.") comes from the client, not the server: `ROM/27/80.DAT` (English) / `ROM/27/79.DAT` (Japanese), row `mob_skill_id − 256`. The database action's new `mobSkills` table edits it by the server's `mob_skill_id`; an id past the end grows the table, and the Japanese row takes the English name unless it has its own. `undo` and `--reset` put names back. Not yet tested in game for ids past retail's last row (above 5119).
+- New `xi database json` and `xi database search`: any table the model viewer's Database shows, as JSON or a short list. Mob skills are joined with the server's `mob_skills` row (animation, range, flags…) when `XI_SERVER_DIR` is set: `xi database search mobSkills "foot kick"`.
+- `xi database grow` also grows the mob skill name tables, as one-time set-up.
+- `xi mv database` bakes the mob skill names for the model viewer's new Mob Skill Names table.
+
+**Docs**
+
+- [`docs/database/mob_skills.md`](docs/database/mob_skills.md): one page on mob skill names: where they come from, renaming and adding them, how high an id can go (the server's `MAX_MOBSKILL_ID`, 4,262 in CatsEyeXI's tree and 65,535 if raised) and looking them up.
+
 ## v1.16.0 — 2026-11-09
 
 [Compare v1.15.0...v1.16.0](https://github.com/vekien/xi-tools/compare/v1.15.0...v1.16.0)
