@@ -263,7 +263,7 @@ Related: **[xi-model-viewer](https://github.com/vekien/xi-model-viewer)** — We
 
 ## Credits
 
-- Built by: Vekien
+- Core developers: Vekien, Carver
 - Advanced by: Loxley
 - Team CatsEyeXI
 
