@@ -62,7 +62,7 @@ Three ways in:
 | `strings` | `en` / `jp` sub-strings: items `name`, `article`, `logName`, `logPlural`, `description` (JP: `name`, `description`); text tables their own (`name`, `plural`, `description`, …; the help tables have one, `help`; the Japanese key items keep only `name` and `description`, the Japanese status names only `name`). A value is the text, or `{"replace": {old: new}}` on the record's original text. |
 | `copy_from` | Create the record as a copy of another: copy record `copy_from` of the same table into slot `id` (replacing what it holds), then apply the edit. The Japanese record takes the English name/description unless `strings.jp` says otherwise. (It was called `like`; an edit that still says `like` is refused, naming the new key.) |
 | `layout` | Only for an item table given by its ROM path: the layout of its records ([below](#tables-by-path)). |
-| `icon` | `{"from": <item id>}` — copy another item's icon; or `{"file": "icons/x.bmp"}` — a 32×32 256-colour `.bmp` file, relative to the file holding the action, with an optional `tag` (the icon's 16-character name, default `item    custom`). |
+| `icon` | `{"from": <item id>}` — copy another item's icon; `{"file": "icons/x.bmp"}` — a 32×32 256-colour `.bmp` file in the record's own layout; or `{"png": "icons/x.png"}` — any image, encoded the way every retail icon is (an `xi ui items icon export` PNG comes back byte for byte; [ui/item-icons.md](../ui/item-icons.md)). Paths are relative to the file holding the action. `tag` sets the icon's 16-character name (default: the PNG's own, the copied icon's, else `item    custom`). `adjust` recolours the icon and draws a border; see below. |
 | `add` | Whole new items from fields, instead of `id` ([below](#adding-items-add)). |
 | `hex` | The whole record, exactly (below). |
 | `server` | The item's server rows (see below), or `false` to leave the server out. |
@@ -302,9 +302,39 @@ server's `mob_skills` row from `sql/mob_skills.sql` (animation, AoE, range, time
 flag, param, knockback, skillchains), and the server's rows the client has no name for are
 listed with `name: null`. Other tables print the rows `xi mv database` bakes.
 
+## Icon adjustments
+
+`icon.adjust` changes the icon a `from`, `file` or `png` names before it is written:
+
+```json
+{"table": "armor", "id": 10294, "copy_from": 11697,
+ "icon": {"from": 11697, "adjust": {"hue": 120, "border": "hq3"}}}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `hue` | 0 | Hue shift in degrees, -360..360 |
+| `saturation` | 0 | Percent, -100..100: -100 greys the icon, 0 keeps it |
+| `lightness` | 0 | Percent, -100..100: the HSV value scaled by 1 + n/100 |
+| `tint` | — | `#RRGGBB` or `#RRGGBBAA` blended over every colour; AA is the strength |
+| `blend` | `normal` | How `tint` blends: `normal`, `multiply`, `screen`, `overlay`, `add` |
+| `border` | — | `hq1` … `hq4` (LPS's silver, steel-blue, gold and green HQ frames: a 1-pixel ring and a 1-pixel inner ring; LPS's colours, not measured from retail) or a 32×32 `.png` |
+| `border_under` | false | Draw `border` under the icon (it shows where the icon is transparent), not over it |
+
+`hue`, `saturation`, `lightness` and `tint` change the icon's palette only: its pixels, alpha
+and tag stay byte for byte, with the same colour maths `xi tex` uses for textures. A border
+redraws pixels, so the icon is re-encoded (exactly when it ends up with 256 colours or fewer).
+
+An adjusted copy of an icon the action itself changes (`"id": 10242, "icon": {"from": 10242,
+"adjust": …}`) starts from the icon the record had before the action's first build, so
+rebuilding doesn't shift it again.
+
+On CatsEyeXI's custom items, the nine icons made by a hue shift of a retail icon come out
+within ±1 per channel of the hand-made `.bmp` files (one, Alcahest, differs further and was
+evidently edited after the shift). The adjustments follow Loxley's LPS (`lps/icons.py`),
+ported with his permission.
+
 ## Not yet
 
-- An icon from a PNG (the client's palettized icon format needs an encoder); a `.bmp` in the
-  client's own 256-colour layout works (`icon.file`).
 - Proposed SQL for ability records (`abilities`, `weapon_skills`); the `mnc2`, `mon_` and `levc`
   sections of `114.DAT`, which aren't decoded yet.

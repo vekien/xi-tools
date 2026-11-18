@@ -90,7 +90,7 @@ def test_validator_names_the_field():
             {"table": "armor", "id": 28671, "set": {"damage": 5, "jobs": ["WARR"], "level": -1}},
             {"table": "armor", "id": 28671, "strings": {"jp": {"logName": "x"}, "fr": {}}},
             {"table": "keyitems", "id": 1, "set": {"level": 1}, "strings": {"en": {"name": 5}}},
-            {"table": "weapons", "id": 16385, "icon": {"from": 1, "png": "a.png"},
+            {"table": "weapons", "id": 16385, "icon": {"from": 1, "png": "a.gif", "adjust": {"hue": 400, "blend": "screen", "border": "hq9"}},
              "server": {"item_stuff": {}, "item_equipment": {"MId": 5000, "colour": 1},
                         "item_mods": {"def": 3}, "item_latents": [{"mod": "HP", "value": 1}]}},
             {"table": "titles", "id": 3},
@@ -109,7 +109,11 @@ def test_validator_names_the_field():
     assert "edits[2].strings: unknown language 'fr'" in text
     assert "edits[3].set: only item tables take 'set'" in text
     assert "edits[3].strings.en.name must be a string" in text
-    assert "edits[4].icon: unknown key 'png'" in text
+    assert "edits[4].icon: give one of from, file or png, not from and png" in text
+    assert "edits[4].icon.png must be a .png file, relative to the file holding the action" in text
+    assert "edits[4].icon.adjust.hue must be a number -360..360" in text
+    assert "edits[4].icon.adjust.blend goes with tint" in text
+    assert "edits[4].icon.adjust.border must be hq1, hq2, hq3, hq4 or a .png file" in text
     assert "edits[4].server: unknown server table 'item_stuff'" in text
     assert "edits[4].server.item_equipment.MId must be a model id 0-4095" in text
     assert "edits[4].server.item_equipment: unknown column 'colour'" in text
@@ -142,3 +146,20 @@ def test_validator_takes_every_table_example_shape():
     assert db.validate_action(ok) == []
     assert errors(SCHEMA, ok) == []
     assert json.loads(json.dumps(ok)) == ok
+
+
+def test_wizard_icon_lines():
+    import pytest
+    from xi.dats.xi_dats import _wizard_change
+    edit = {"table": "armor", "id": 10294}
+    for line in ("icon=11697", "icon.hue=120", "icon.tint=#ff000080", "icon.blend=multiply", "icon.border=hq3"):
+        _wizard_change(edit, "armor", line)
+    assert edit["icon"] == {"from": 11697, "adjust": {"hue": 120, "tint": "#ff000080", "blend": "multiply",
+                                                       "border": "hq3"}}
+    _wizard_change(edit, "armor", "icon=icons/beret.png")
+    _wizard_change(edit, "armor", "icon.border=")
+    assert edit["icon"]["png"] == "icons/beret.png" and "from" not in edit["icon"]
+    assert "border" not in edit["icon"]["adjust"]
+    assert db.validate_action({"id": "d", "type": "database", "edits": [edit]}) == []
+    with pytest.raises(ValueError):
+        _wizard_change(edit, "armor", "icon=beret.gif")

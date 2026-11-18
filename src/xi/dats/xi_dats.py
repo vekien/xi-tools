@@ -1495,6 +1495,39 @@ def _wizard_change(edit: dict, table: str, raw: str) -> None:
             raise ValueError(f"{table} has no {key!r} — it has {', '.join(C.menu_fields(table))} "
                              "(levels as levels.WHM=1)")
         return
+    if item and (key == "icon" or key.startswith("icon.")):
+        # icon=11697 (copy that item's), icon=icons/x.png or .bmp (a file), icon.tag=…,
+        # icon.hue=120, icon.tint=#ff000080, icon.blend=multiply, icon.border=hq3 (adjust).
+        icon = edit.setdefault("icon", {})
+        if key == "icon":
+            for k in ("from", "file", "png"):
+                icon.pop(k, None)
+            if value.isdigit():
+                icon["from"] = int(value)
+            elif value.lower().endswith(".png"):
+                icon["png"] = value
+            elif value.lower().endswith(".bmp"):
+                icon["file"] = value
+            else:
+                raise ValueError("icon= takes an item id, a .png or a .bmp file")
+        elif key == "icon.tag":
+            icon["tag"] = value
+        else:
+            sub = key[5:]
+            adj = icon.setdefault("adjust", {})
+            if not value:
+                adj.pop(sub, None)
+            elif sub in ("hue", "saturation", "lightness"):
+                adj[sub] = float(value) if "." in value else int(value)
+            elif sub == "border_under":
+                adj[sub] = value.lower() in ("1", "true", "yes")
+            elif sub in ("tint", "blend", "border"):
+                adj[sub] = value
+            else:
+                raise ValueError("icon adjustments: hue, saturation, lightness, tint, blend, border, border_under")
+            if not adj:
+                icon.pop("adjust", None)
+        return
     lang, name = ("jp", key[3:]) if key.startswith("jp.") else ("en", key)
     if item and name in C.set_fields(table) and lang == "en":
         if name in _MASK_FIELDS:
@@ -1547,6 +1580,7 @@ def _wizard_database(slug: str, prev: dict | None, pivot: bool) -> dict:
         click.echo("\n  Changes, one per line (blank when done):  level=50   jobs=WAR,PLD   flags=RARE,EX\n"
                    "    description=New text\\nSecond line   description~HP+15=>HP+30   jp.name=…\n"
                    "    mod.HP=30 (the proposed SQL; mod.HP= removes it)   note=why\n"
+                   "    icon=11697 or icon=icons/x.png   icon.hue=120   icon.tint=#ff000080   icon.border=hq3\n"
                    "    spell / ability data: mp=5   cast=8 (quarter seconds)   element=light   levels.RDM=3")
         while True:
             raw = click.prompt("  change", default="", show_default=False).strip()

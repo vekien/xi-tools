@@ -56,5 +56,8 @@ Measured on those 34,816 icons: every one is 2,105 bytes, after the record's u32
   fits either stride (2,427 / 4,475 bytes of room). The format above was measured on a
   legacy client only.
 
+A `database` action takes the same PNGs (`icon.png`) and can recolour an icon or draw
+an HQ border on it (`icon.adjust`): [database/README.md](../database/README.md#icon-adjustments).
+
 The encoding follows Loxley's LPS (`lps/icons.py`), ported into xi-tools with his
 permission.

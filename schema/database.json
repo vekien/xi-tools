@@ -1439,7 +1439,7 @@
     "icon": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Item tables only: the 32x32 icon — copied from another item (from), or a 256-colour .bmp file (file, relative to the file holding the action) stored after a 16-character tag.",
+      "description": "Item tables only: the 32x32 icon — copied from another item (from), a 256-colour .bmp file in the record's own layout (file), or any image Pillow reads (png), encoded the way every retail icon is (docs/ui/item-icons.md). Paths are relative to the file holding the action. adjust recolours the icon or draws a border.",
       "properties": {
         "from": {
           "type": "integer",
@@ -1451,10 +1451,65 @@
           "pattern": "\\.[bB][mM][pP]$",
           "description": "A .bmp file, relative to the file holding the action."
         },
+        "png": {
+          "type": "string",
+          "pattern": "\\.[pP][nN][gG]$",
+          "description": "A .png file, relative to the file holding the action: an `xi ui items icon export` PNG comes back byte for byte; any other image is resized to 32x32 and reduced to 256 colours."
+        },
         "tag": {
           "type": "string",
           "maxLength": 16,
-          "description": "The icon's 16-character tag (default \"item    custom\")."
+          "description": "The icon's 16-character tag (default: the PNG's own, the copied icon's, else \"item    custom\")."
+        },
+        "adjust": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Recolour the icon (on its palette: indices and alpha are kept) and draw a border.",
+          "properties": {
+            "hue": {
+              "type": "number",
+              "minimum": -360,
+              "maximum": 360,
+              "description": "Hue shift in degrees."
+            },
+            "saturation": {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 100,
+              "description": "Percent: -100 removes all colour, 0 keeps it."
+            },
+            "lightness": {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 100,
+              "description": "Percent: brightness (HSV value) scaled by 1 + n/100."
+            },
+            "tint": {
+              "type": "string",
+              "pattern": "^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "description": "A colour blended over every palette entry; its AA byte is the strength (default ff)."
+            },
+            "blend": {
+              "enum": [
+                "normal",
+                "multiply",
+                "screen",
+                "overlay",
+                "add"
+              ],
+              "default": "normal",
+              "description": "How tint is blended."
+            },
+            "border": {
+              "type": "string",
+              "description": "hq1, hq2, hq3, hq4 (LPS's silver, blue, gold and green HQ frames) or a 32x32 .png drawn over the icon."
+            },
+            "border_under": {
+              "type": "boolean",
+              "default": false,
+              "description": "Draw border under the icon instead (it shows where the icon is transparent)."
+            }
+          }
         }
       },
       "oneOf": [
@@ -1466,6 +1521,11 @@
         {
           "required": [
             "file"
+          ]
+        },
+        {
+          "required": [
+            "png"
           ]
         }
       ]
@@ -1589,7 +1649,7 @@
     {
       "id": "database.gear_tweaks",
       "type": "database",
-      "description": "Decennial Coat +1 at level 50, Scorpion Harness at HP+30, a new earring copied from Moonshade Earring and a key item reworded. Cure costs 5 MP and Red Mage learns it at 1. Foot Kick is renamed Stomp, and mob skill 5200 is named Abyssal Roar.",
+      "description": "Decennial Coat +1 at level 50, Scorpion Harness at HP+30, a new earring copied from Moonshade Earring (its icon hue-shifted, with a gold HQ frame) and a key item reworded. Cure costs 5 MP and Red Mage learns it at 1. Foot Kick is renamed Stomp, and mob skill 5200 is named Abyssal Roar.",
       "server": {
         "emit": true,
         "mirror": true
@@ -1649,7 +1709,11 @@
             }
           },
           "icon": {
-            "from": 11697
+            "from": 11697,
+            "adjust": {
+              "hue": 120,
+              "border": "hq3"
+            }
           },
           "server": {
             "item_mods": {
