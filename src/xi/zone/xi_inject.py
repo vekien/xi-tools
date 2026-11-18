@@ -428,6 +428,14 @@ def _next_free_zone_id(tables: dict) -> int:
               help='Fog far distance (lower = denser). Original zones use 100–500.')
 @click.option('--fog-start', type=float, default=None,
               help='Fog near distance (default 0).')
+@click.option('--texture', 'textures', multiple=True, metavar='PATTERN:KEY=VALUE,…',
+              help='Different adjustments for the textures whose name matches PATTERN '
+                   '(suny*:lightness=-70). Repeatable; the first match wins.')
+@click.option('--skip', 'skips', multiple=True, metavar='PATTERN',
+              help='Leave the textures whose name matches PATTERN as they are. Repeatable.')
+@click.option('--range', 'ranges', multiple=True, metavar='KEY=VALUE,…',
+              help='A range-filtered pass (hue_min=150,hue_max=340,hue=240), applied in order '
+                   'instead of --hue/--saturation/--lightness/--tint. Repeatable.')
 @click.option('--zone-id', type=int, default=None,
               help='Target zone ID (default: auto-assign from 400+).')
 @click.option('--model-dat', type=str, default=None,
@@ -439,6 +447,7 @@ def cmd(name: str, clone: str, hue: float | None, saturation: float | None,
         lightness: float | None, tint: str | None, blend: str,
         env_lightness: float | None, fog_tint: str | None,
         fog_end: float | None, fog_start: float | None,
+        textures: tuple, skips: tuple, ranges: tuple,
         zone_id: int | None, model_dat: str | None, subdir: int, dry_run: bool):
     """Create a new zone by cloning an existing one into FTABLE10.
 
@@ -451,6 +460,8 @@ def cmd(name: str, clone: str, hue: float | None, saturation: float | None,
       xi zone inject "Shadow Jeuno" --clone 244 --hue 180 --lightness -30 \\
           --env-lightness -60 --fog-tint "#1a0a2a" --fog-end 80
       xi zone inject "Dark Bastok" --clone "Bastok Mines" --tint "#330066aa" --blend overlay
+      xi zone inject "Shadow Jeuno" --clone 244 --hue 180 --texture "suny*:lightness=-70" \\
+          --texture "clod*:hue=180,lightness=-60"
     """
     tables = load_all_tables()
     zone_names = _load_zone_names()
@@ -463,7 +474,9 @@ def cmd(name: str, clone: str, hue: float | None, saturation: float | None,
             raise click.ClickException(f'Could not find zone "{clone}".')
 
     clone_name = zone_names[clone_zid] if clone_zid < len(zone_names) else f'zone {clone_zid}'
-    has_adjustments = any([hue, saturation, lightness, tint, env_lightness, fog_tint,
+    from xi.gear.xi_edit import texture_passes_kwargs
+    passes_kw = texture_passes_kwargs(textures, skips, ranges)
+    has_adjustments = any([hue, saturation, lightness, tint, env_lightness, fog_tint, passes_kw,
                            fog_end is not None, fog_start is not None])
 
     desc = []
@@ -549,7 +562,7 @@ def cmd(name: str, clone: str, hue: float | None, saturation: float | None,
                 hue=hue or 0, saturation=saturation or 0, lightness=lightness or 0,
                 tint=tint, blend_mode=blend,
                 env_lightness=env_lightness, fog_tint=fog_tint,
-                fog_end=fog_end, fog_start=fog_start,
+                fog_end=fog_end, fog_start=fog_start, **passes_kw,
             )
             click.echo(f'    {stats["dxt"]} DXT + {stats["paletted"]} paletted + '
                        f'{stats["environment"]} environment sections')

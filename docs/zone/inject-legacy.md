@@ -41,6 +41,39 @@ Processing time: ~1.5s for a 17 MB HD zone DAT.
 | `--tint #RRGGBB[AA]` | hex | Blend a colour onto all textures |
 | `--blend MODE` | string | Blend mode: `normal`, `multiply`, `screen`, `overlay`, `add` |
 
+## Per-texture adjustments, skips and several ranges
+
+Three repeatable options pick different adjustments for different textures. A texture's
+name is the 16 characters after its type byte (`suny    sky01`: category, then name), as
+`xi tex list ROM/0/124` prints it; a PATTERN matches it case-insensitively,
+with `*` and `?` wildcards.
+
+| Option | Example | What it does |
+|---|---|---|
+| `--texture PATTERN:KEY=VALUE,…` | `--texture "suny*:lightness=-70"` | Textures matching PATTERN get these keys instead of the top-level ones (the others still apply). The first matching `--texture` wins. Keys: `hue`, `saturation`, `lightness`, `tint`, `blend`, `hue_min` … `val_max` |
+| `--skip PATTERN` | `--skip "lf*"` | Textures matching PATTERN are left byte for byte |
+| `--range KEY=VALUE,…` | `--range hue_min=150,hue_max=340,hue=240` | A pass limited to a colour range. Several `--range`s run in order, each on the colours the one before left, and replace the top-level `--hue` / `--saturation` / `--lightness` / `--tint` |
+
+A texture none of the adjustments change keeps its bytes exactly. (Before, a call with
+only fog or environment options still re-packed every DXT colour through 8 bits, which
+loses the low bits of dark colours.)
+
+`--texture "environment:KEY=VALUE,…"` adjusts the 0x2F environment sections instead
+(`hue`, `saturation`, `lightness`, `tint`, `blend`, `fog_tint`, `fog_end`, `fog_start`).
+
+```bash
+xi zone inject "Shadow Jeuno" --clone 244 --hue 180 --saturation 20 --lightness -30 \
+    --texture "suny*:lightness=-70" --texture "clod*:hue=180,lightness=-60" \
+    --texture "environment:lightness=-60,fog_tint=#1a0a2a,fog_end=80,fog_start=0"
+xi gear edit HumeMale main 259 --range hue_min=150,hue_max=340,hue=240 --range val_max=0.2,lightness=40
+```
+
+These follow dats' zone builder and Loxley's LPS (`modules/equipment/textures.py`,
+LPS-modules `mobs`), ported with his permission. Verified on CatsEyeXI's six recoloured
+zones (`content/zones/*.json` in its dats repo, the same settings as `texture_overrides`):
+the models come out within one 5/6-bit step per DXT colour endpoint, and ±2 per palette
+and environment byte, of the files that builder made.
+
 ## Environment options
 
 Modify the 0x2F environment sections (ambient lighting, fog colour/distance).

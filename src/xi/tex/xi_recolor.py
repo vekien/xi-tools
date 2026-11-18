@@ -9,9 +9,15 @@ Public API
 recolour_zone_dat(source, output, *, hue, saturation, lightness, tint, ...)
     Read *source*, apply colour adjustments to every texture section, write
     *output*.  Returns a stats dict.
+
+Per-texture overrides (``texture_overrides``), skipped textures (``skip_textures``)
+and several range-filtered passes (``color_ranges``) follow dats' zone builder and
+LPS (Loxley's Patch System, ``modules/equipment/textures.py`` and LPS-modules
+``mobs``), ported with his permission.
 """
 
 import colorsys
+import fnmatch
 import struct
 from pathlib import Path
 
@@ -391,6 +397,99 @@ def _scale_animation(data: bytearray, data_start: int, scale: float) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Which adjustments a texture gets: overrides, skips, colour-range passes
+# ---------------------------------------------------------------------------
+
+PASS_KEYS = ('hue', 'saturation', 'lightness', 'tint', 'blend_mode',
+             'hue_min', 'hue_max', 'sat_min', 'sat_max', 'val_min', 'val_max')
+ENV_KEYS = ('hue', 'saturation', 'lightness', 'tint', 'blend_mode',
+            'fog_tint', 'fog_end', 'fog_start')
+_EMPTY_PASS = dict(hue=0, saturation=0, lightness=0, tint=None, blend_mode='normal',
+                   hue_min=None, hue_max=None, sat_min=None, sat_max=None,
+                   val_min=None, val_max=None)
+
+
+def texture_name(data, data_start: int) -> str:
+    """A 0x20 section's texture name: the 16 characters after its type byte (category and
+    name, e.g. ``suny    sky01``), up to a NUL, trailing spaces dropped."""
+    raw = bytes(data[data_start + 1:data_start + 0x11])
+    return raw.split(b'\0')[0].decode('ascii', errors='replace').rstrip()
+
+
+def name_matches(name: str, pattern: str) -> bool:
+    """Case-insensitive shell-style match (``suny*``, ``*water*``, an exact name)."""
+    return fnmatch.fnmatchcase(name.strip().lower(), pattern.strip().lower())
+
+
+def _changes(p: dict) -> bool:
+    return bool(p.get('hue') or p.get('saturation') or p.get('lightness') or p.get('tint'))
+
+
+def texture_passes(name: str, base: dict, texture_overrides: dict | None = None,
+                   color_ranges: list | None = None, skip_textures: list | None = None) -> list[dict]:
+    """The adjustment passes texture ``name`` gets, in order; ``[]`` leaves it as it is.
+
+    - a name matching a ``skip_textures`` pattern gets none;
+    - the first ``texture_overrides`` pattern it matches (``environment`` aside) gives one
+      pass: the override's keys over ``base``;
+    - otherwise ``color_ranges`` (when given) are the passes, one per range, each starting
+      from no change (the top-level adjustments don't apply, as in LPS); each pass sees the
+      colours the one before it left;
+    - otherwise ``base``.
+    A pass that changes nothing is dropped, so a texture with nothing to do keeps its bytes."""
+    if any(name_matches(name, p) for p in skip_textures or ()):
+        return []
+    for pattern, ov in (texture_overrides or {}).items():
+        if pattern == 'environment':
+            continue
+        if name_matches(name, pattern):
+            p = {**base, **{k: ov[k] for k in PASS_KEYS if k in ov}}
+            return [p] if _changes(p) else []
+    if color_ranges:
+        passes = [{**_EMPTY_PASS, **{k: cr[k] for k in PASS_KEYS if k in cr}} for cr in color_ranges]
+    else:
+        passes = [base]
+    return [p for p in passes if _changes(p)]
+
+
+def _parse_value(v: str):
+    v = v.strip()
+    if v.startswith('#'):
+        return v
+    try:
+        return int(v)
+    except ValueError:
+        try:
+            return float(v)
+        except ValueError:
+            return v
+
+
+def parse_adjustments(spec: str) -> dict:
+    """``hue=240,hue_min=150,hue_max=340`` (or ``key=value`` pairs split by spaces) as a
+    pass dict, for the ``--range`` and ``--texture`` options. ``blend`` is ``blend_mode``."""
+    out = {}
+    for part in spec.replace(',', ' ').split():
+        if '=' not in part:
+            raise ValueError(f'{part!r}: write key=value')
+        k, v = part.split('=', 1)
+        k = k.strip().replace('-', '_')
+        k = 'blend_mode' if k == 'blend' else k
+        if k not in PASS_KEYS + ENV_KEYS:
+            raise ValueError(f'{k!r} is not an adjustment ({", ".join(sorted(set(PASS_KEYS + ENV_KEYS)))})')
+        out[k] = _parse_value(v)
+    return out
+
+
+def parse_texture_option(spec: str) -> tuple[str, dict]:
+    """``suny*:lightness=-70`` → ``('suny*', {'lightness': -70})`` (the ``--texture`` option)."""
+    if ':' not in spec:
+        raise ValueError(f'{spec!r}: write PATTERN:key=value[,key=value]')
+    pattern, rest = spec.split(':', 1)
+    return pattern.strip(), parse_adjustments(rest)
+
+
+# ---------------------------------------------------------------------------
 # Main public function
 # ---------------------------------------------------------------------------
 
@@ -400,7 +499,8 @@ def recolour_zone_dat(source: Path, output: Path, hue=0, saturation=0,
                       val_min=None, val_max=None,
                       env_lightness=None, fog_tint=None,
                       fog_end=None, fog_start=None,
-                      scale=0) -> dict:
+                      scale=0, texture_overrides=None, skip_textures=None,
+                      color_ranges=None) -> dict:
     """Recolour all textures and optionally adjust environment lighting/scale.
 
     Works on any FFXI DAT containing 0x20 texture sections (entity, gear, or
@@ -412,13 +512,23 @@ def recolour_zone_dat(source: Path, output: Path, hue=0, saturation=0,
     scale: Uniform model scale factor (e.g. 2.0 = double size). Scales
     skeleton bone translations, mesh vertex positions, and animation
     translation keyframes. Works best with grounded entity models.
+
+    texture_overrides: ``{pattern: {hue, saturation, lightness, tint, blend_mode,
+    hue_min … val_max}}`` — the first pattern a texture's name matches replaces those
+    keys for it (``suny*``, case-insensitive). The ``environment`` key instead adjusts
+    the 0x2F sections: its ``hue``/``saturation``/``lightness``/``tint``/``blend_mode``
+    over the top-level ones, and ``fog_tint``/``fog_end``/``fog_start``.
+    skip_textures: name patterns left untouched.
+    color_ranges: ``[{hue_min, hue_max, …, hue, saturation, …}]`` — several
+    range-filtered passes in order, instead of the top-level adjustments.
+    See :func:`texture_passes`. A texture with nothing to change keeps its bytes.
     """
     data = bytearray(source.read_bytes())
     kw = dict(hue=hue, saturation=saturation, lightness=lightness,
               tint=tint, blend_mode=blend_mode,
               hue_min=hue_min, hue_max=hue_max, sat_min=sat_min, sat_max=sat_max,
               val_min=val_min, val_max=val_max)
-    stats = {'dxt': 0, 'paletted': 0, 'environment': 0, 'total': 0,
+    stats = {'dxt': 0, 'paletted': 0, 'environment': 0, 'total': 0, 'skipped': 0,
              'joints_scaled': 0, 'vertices_scaled': 0, 'anims_scaled': 0}
 
     do_scale = scale and scale != 1.0
@@ -430,11 +540,18 @@ def recolour_zone_dat(source: Path, output: Path, hue=0, saturation=0,
                 continue
             tex_type, dxt_type, doff, dsize, bit_count = info
             stats['total'] += 1
+            passes = texture_passes(texture_name(data, data_start), kw, texture_overrides,
+                                    color_ranges, skip_textures)
+            if not passes:
+                stats['skipped'] += 1
+                continue
             if tex_type == 0xA1 and dxt_type in ('1TXD', '3TXD'):
-                _adjust_dxt(data, dxt_type, doff, dsize, **kw)
+                for p in passes:
+                    _adjust_dxt(data, dxt_type, doff, dsize, **p)
                 stats['dxt'] += 1
             elif tex_type in (0x91, 0xB1):
-                _adjust_palette(data, doff, dsize, bit_count, **kw)
+                for p in passes:
+                    _adjust_palette(data, doff, dsize, bit_count, **p)
                 stats['paletted'] += 1
 
         elif type_code == 0x29 and do_scale:
@@ -449,6 +566,11 @@ def recolour_zone_dat(source: Path, output: Path, hue=0, saturation=0,
     env_kw = dict(kw)
     if env_lightness is not None:
         env_kw['lightness'] = env_lightness
+    env_ov = (texture_overrides or {}).get('environment') or {}
+    env_kw.update({k: env_ov[k] for k in ('hue', 'saturation', 'lightness', 'tint', 'blend_mode') if k in env_ov})
+    fog_tint = env_ov.get('fog_tint', fog_tint)
+    fog_end = env_ov.get('fog_end', fog_end)
+    fog_start = env_ov.get('fog_start', fog_start)
     if any([env_kw.get('hue'), env_kw.get('saturation'), env_kw.get('lightness'),
             env_kw.get('tint'), fog_tint, fog_end is not None, fog_start is not None]):
         stats['environment'] = _adjust_environments(
