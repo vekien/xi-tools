@@ -19,6 +19,9 @@ Spell and command records: fixed-size records of ROM/118/114.DAT (xi.menu.xi_men
 one file for every client language; an edit sets named fields, copies a record into an empty
 slot (``copy_from``), or writes one whole (``hex``). A d_msg table may be named by its ROM path;
 its sub-strings are then ``sub0``, ``sub1``, …, and it is one file, whatever the language.
+
+Event-message name tables (``mobSkills``: ROM/27/80 EN, ROM/27/79 JP; xi.dialog.xi_dialog): one
+name per row, a row by the id the server sends; an id past the end grows the table to it.
 """
 from __future__ import annotations
 
@@ -194,6 +197,7 @@ class _Files:
         self.items: dict[str, ItemDat | None] = {}
         self.dmsg: dict[str, D.DmsgTable | None] = {}
         self.menus: dict[str, object] = {}
+        self.events: dict[str, list | None] = {}       # rel -> [row blobs, obfuscated]
         self.orig: dict[str, bytes] = {}
 
     def item(self, rel: str) -> ItemDat | None:
@@ -244,8 +248,32 @@ class _Files:
                 self.orig[rel] = data
         return self.menus[rel]
 
+    def event(self, rel: str) -> list | None:
+        """An event-message name table (xi.dialog.xi_dialog) as ``[row blobs, obfuscated]``,
+        each blob the row's bytes, its NUL included; None when the file isn't there."""
+        if rel not in self.events:
+            from xi.dats import xi_stage
+            from xi.dialog.xi_dialog import DialogError, raw_entry_blobs
+            data = xi_stage.read(self.root, rel)
+            if data is None:
+                self.events[rel] = None
+            else:
+                try:
+                    blobs, obfuscated = raw_entry_blobs(data)
+                except DialogError as e:
+                    raise DbError(f"{rel}: {e}") from None
+                self.events[rel] = [list(blobs), obfuscated]
+                self.orig[rel] = data
+        return self.events[rel]
+
     def changed(self) -> list[tuple[str, bytes]]:
         out = []
+        from xi.dialog.xi_dialog import build_container
+        for rel, ev in self.events.items():
+            if ev is not None:
+                data = build_container(ev[0], ev[1])
+                if data != self.orig[rel]:
+                    out.append((rel, data))
         for rel, menu in self.menus.items():
             if menu is not None:
                 data = menu.serialize()
@@ -592,6 +620,9 @@ def _restore(files: _Files, entry: dict, warnings: list) -> None:
         return
     if table in C.MENU_KINDS:
         _restore_menu(files, entry, warnings, label)
+        return
+    if table in C.EVENT_TABLES:
+        _restore_event(files, entry, warnings, label)
         return
     t = files.table(entry["dat"])
     idx = locate_block(t, table, rid) if t is not None else None
@@ -960,6 +991,115 @@ def _dmsg_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
     return out
 
 
+# ── event-message name tables (mobSkills) ────────────────────────────────────
+# One name per row: the text, a NUL. A row nobody named holds '.', and row 0 '#0'; '#<n>'
+# rows are retail's own placeholders. A table grows by '.' rows, as retail fills its gaps.
+
+_PLACEHOLDER = re.compile(r"^(\.|#\d+)?$")
+_EMPTY_ROW = b".\0"
+
+
+def is_placeholder(name: str) -> bool:
+    return bool(_PLACEHOLDER.match(name))
+
+
+def _event_text(blob: bytes) -> tuple[str, bytes]:
+    """A row's name, and the bytes after it (its NUL and anything that follows)."""
+    nul = blob.find(0)
+    return (decode_text(blob), b"\0") if nul < 0 else (decode_text(blob[:nul]), blob[nul:])
+
+
+def _event_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
+    """A name by id in both languages. A row past the end grows the table to it ('.' rows in
+    between). The Japanese table takes the English name unless the edit gives its own, when
+    its row holds no name of its own (a placeholder, or a row the build adds)."""
+    table, rid = edit["table"], edit["id"]
+    en_rel, jp_rel, first = C.EVENT_TABLES[table]
+    row = rid - first
+    strings = edit.get("strings") or {}
+    en_name = None
+    out = []
+    for lang, rel in (("en", en_rel), ("jp", jp_rel)):
+        ev = files.event(rel)
+        want = (strings.get(lang) or {}).get("name")
+        if ev is None:
+            if lang == "en" or want is not None:
+                raise DbError(f"{rel} is missing")
+            continue
+        blobs = ev[0]
+        base = _base_texts(prev, table, rid, lang)
+        grew = None
+        if row >= len(blobs):
+            grew = [len(blobs), row + 1]
+        old = _event_text(blobs[row])[0] if grew is None else ""
+        if want is None and lang == "jp" and en_name is not None \
+                and (grew or is_placeholder(base.get("name", old))):
+            want = en_name
+        if want is None:
+            continue
+        new = _new_text(want, base.get("name", old))
+        if lang == "en":
+            en_name = new
+        if grew is None and new == old:
+            continue
+        if grew:
+            blobs.extend([_EMPTY_ROW] * (row + 1 - len(blobs)))
+        tail = _event_text(blobs[row])[1]
+        blobs[row] = encode_text(new) + tail
+        entry = {"table": table, "id": rid, "lang": lang, "dat": rel, "block": row,
+                 "changed": {"strings.name": {"from": old if grew is None else ".", "to": new}}, "name": new}
+        if grew:
+            entry["grew"] = grew
+        out.append(entry)
+    return out
+
+
+def _restore_event(files: _Files, entry: dict, warnings: list, label: str) -> None:
+    ev = files.event(entry["dat"])
+    if ev is None:
+        warnings.append(f"{label}: {entry['dat']} is gone; nothing to put back")
+        return
+    blobs, row = ev[0], entry["block"]
+    if entry.get("grew"):
+        before, after = entry["grew"]
+        if len(blobs) != after:
+            warnings.append(f"{label}: {entry['dat']} grew again since ({len(blobs)} rows, not {after}); "
+                            "its rows are left")
+            return
+        del blobs[before:]
+        return
+    if row >= len(blobs):
+        warnings.append(f"{label}: the row is gone; nothing to put back")
+        return
+    ch = (entry.get("changed") or {}).get("strings.name")
+    name, tail = _event_text(blobs[row])
+    if ch is None:
+        return
+    if name != ch["to"]:
+        warnings.append(f"{label}: name changed since the last build; left as it is")
+        return
+    blobs[row] = encode_text(ch["from"]) + tail
+
+
+def event_rows(root: Path, table: str, lang: str = "en") -> list[dict] | None:
+    """Every row of an event-message name table in ``root`` as ``{idx, id, offset, length,
+    name}`` (offset: the row's bytes in the file; length: before the NUL), or None when
+    the file isn't there. What ``xi database json`` prints and ``xi mv database`` bakes."""
+    en, jp, first = C.EVENT_TABLES[table]
+    rel = jp if lang == "jp" else en
+    ev = _Files(Path(root)).event(rel)
+    if ev is None:
+        return None
+    rows, off = [], 4 + 4 * len(ev[0])
+    for i, blob in enumerate(ev[0]):
+        name = _event_text(blob)[0]
+        nul = blob.find(0)
+        rows.append({"idx": i, "id": first + i, "offset": off, "length": nul if nul >= 0 else len(blob),
+                     "name": name})
+        off += len(blob)
+    return rows
+
+
 def _menu_name(files: _Files, kind: str, idx: int) -> str:
     t = files.table(MT.KINDS[kind].names["en"])
     if t is None or idx >= t.num:
@@ -1149,6 +1289,9 @@ def tables(action: dict) -> list[str]:
                         if isinstance(rid, int) and lo <= rid <= hi for lang in langs)
         elif table in C.MENU_KINDS:
             rels.add(MENU_DAT)
+        elif table in C.EVENT_TABLES:
+            # Both: the Japanese row takes the English name when it has none of its own.
+            rels.update(C.EVENT_TABLES[table][:2])
         elif C.is_raw(table):
             rels.add(_rom(table))
         elif table in DMSG_PARTS:
@@ -1183,6 +1326,8 @@ def build(action: dict, *, root: Path, target: str | None, manifest: dict, sql_p
                 records += _item_path_edit(files, edit, prev)
             elif edit["table"] in C.MENU_KINDS:
                 records += _menu_edit(files, edit, warnings)
+            elif edit["table"] in C.EVENT_TABLES:
+                records += _event_edit(files, edit, prev)
             else:
                 records += _dmsg_edit(files, edit, prev)
         except DbError as e:
@@ -1518,6 +1663,18 @@ def describe(root: Path, table: str, rid: int) -> dict:
             return {"name": "", "empty": True, "fields": {}, "strings": {}, "dat": MENU_DAT}
         return {"name": _menu_name(files, kind, rid), "empty": False,
                 "fields": _menu_values(kind, menu.records(kind)[rid]), "strings": {}, "dat": MENU_DAT}
+    if table in C.EVENT_TABLES:
+        en, _jp, first = C.EVENT_TABLES[table]
+        if rid < first:
+            raise DbError(f"{table} ids start at {first}; ids below are named by table 'abilities'")
+        ev = files.event(en)
+        if ev is None:
+            raise DbError(f"{en} is missing")
+        if rid - first >= len(ev[0]):
+            return {"name": "", "empty": True, "fields": {}, "strings": {}, "dat": en, "format": "dialog"}
+        name = _event_text(ev[0][rid - first])[0]
+        return {"name": name, "empty": is_placeholder(name), "fields": {}, "strings": {"name": name},
+                "dat": en, "format": "dialog"}
     en = table if C.is_raw(table) else DMSG_PARTS[table][0]
     t = files.table(en)
     idx = locate_block(t, table, rid) if t is not None else None

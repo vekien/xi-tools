@@ -17,6 +17,9 @@ registry, block layouts and JSON row shape must stay in step with it:
 * spell / ability rows (ROM/118/114.DAT): ``{idx, offset, name, help, fields,
   levels, hex}`` — the decoded record (xi.menu.xi_menu_table) with the name and
   help of the language baked.
+* name rows (the event-message name tables, ``kind: "names"``): ``{idx, id, offset,
+  length, name}`` — ``id`` is the id the server sends (``firstId`` + row), ``length`` the
+  bytes before the row's NUL. Every row, placeholders ('.', '#0') included.
 """
 
 from __future__ import annotations
@@ -119,7 +122,14 @@ MENU_TABLES = [
     ("abilityData", "command", "abilities", "abilityHelp"),
 ]
 
-ALL_KEYS = [t[0] for t in ITEM_TABLES] + [t[0] for t in DMSG_TABLES] + [t[0] for t in MENU_TABLES]
+# Name tables in the event-message (dialog) format, by the id the server sends
+# (xi.database.xi_core.EVENT_TABLES): key -> (EN DAT, JP DAT, the id of row 0).
+NAME_TABLES = [
+    ("mobSkills", "ROM/27/80.DAT", "ROM/27/79.DAT", 256),
+]
+
+ALL_KEYS = ([t[0] for t in ITEM_TABLES] + [t[0] for t in DMSG_TABLES] + [t[0] for t in MENU_TABLES]
+            + [t[0] for t in NAME_TABLES])
 LANGS = ("en", "jp")
 
 # Legacy record stride. Files are read with the stride ``detect_stride`` finds
@@ -389,6 +399,15 @@ def bake_menu(game: Path, key: str, kind: str, names_key: str, help_key: str, la
             "stride": k.stride, "files": files, "rows": rows}
 
 
+def bake_names(game: Path, key: str, en: str, jp: str, first: int, lang: str):
+    from xi.database.xi_build import event_rows
+    rows = event_rows(game, key, lang)
+    if rows is None:
+        return None
+    return {"kind": "names", "key": key, "lang": lang, "files": [jp if lang == "jp" else en],
+            "firstId": first, "num": len(rows), "rows": rows}
+
+
 def default_out_dir() -> Path:
     return Path(XI_TOOLS_DIR) / "mv" / "db"
 
@@ -437,6 +456,7 @@ def cmd(only: str | None, langs: str, out_dir: Path | None, game_dir: Path | Non
     items = {k: (layout, parts) for k, layout, parts in ITEM_TABLES}
     dmsgs = {k: (en, jp) for k, en, jp in DMSG_TABLES}
     menus = {k: (kind, names, helps) for k, kind, names, helps in MENU_TABLES}
+    names_t = {k: (en, jp, first) for k, en, jp, first in NAME_TABLES}
     t0 = time.time()
     for key in keys:
         for lang in lang_list:
@@ -445,6 +465,11 @@ def cmd(only: str | None, langs: str, out_dir: Path | None, game_dir: Path | Non
                 doc = bake_items(game, key, layout, parts, lang)
             elif key in menus:
                 doc = bake_menu(game, key, *menus[key], lang)
+                if doc is None:
+                    click.echo(f"  {key:16} {lang}  missing — skipped")
+                    continue
+            elif key in names_t:
+                doc = bake_names(game, key, *names_t[key], lang)
                 if doc is None:
                     click.echo(f"  {key:16} {lang}  missing — skipped")
                     continue

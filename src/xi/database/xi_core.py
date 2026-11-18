@@ -60,6 +60,12 @@ ID_KEYED = {key for key, subs in DMSG_SUBS.items() if subs and subs[0] == "id"}
 # The spell and command records of ROM/118/114.DAT (xi.menu.xi_menu_table): one file for
 # every client language. table -> the menu kind.
 MENU_KINDS = {key: kind for key, kind, _names, _help in MENU_TABLES}
+# Name tables in the event-message (dialog) format — one string per row, no d_msg header —
+# by the id the server sends: table -> (EN DAT, JP DAT, the id of row 0). Monster abilities:
+# the action packet carries mob_skills.mob_skill_id and the client names it from row id − 256
+# (checked against CatsEyeXI's mob_skills.sql: 3,353 of its 3,593 rows from id 256 match that
+# row; the rest are '.' placeholders and server-only rows). Ids below 256 are named by `abilities`.
+EVENT_TABLES = {"mobSkills": ("ROM/27/80.DAT", "ROM/27/79.DAT", 256)}
 # A d_msg table named by its ROM path: its sub-strings are sub0, sub1, …; a row is its index.
 _RAW_RE = re.compile(r"^ROM\d*/\d+/\d+\.DAT$", re.I)
 _SUB_RE = re.compile(r"^sub(\d+)$")
@@ -81,8 +87,9 @@ _NUMERIC_SUBS = {"article": 3, "category": None, "keyItem": None}   # name -> ma
 
 def tables() -> list[str]:
     """Every table key an edit may name: item tables with a known layout, d_msg tables, the
-    spell and command records (a d_msg table may also be named by its ROM path)."""
-    return list(ITEM_LAYOUT) + list(DMSG_SUBS) + list(MENU_KINDS)
+    spell and command records, the event-message name tables (a d_msg table may also be named
+    by its ROM path)."""
+    return list(ITEM_LAYOUT) + list(DMSG_SUBS) + list(MENU_KINDS) + list(EVENT_TABLES)
 
 
 def menu_fields(table: str) -> list[str]:
@@ -108,6 +115,8 @@ def layout_fields(layout: str) -> list[str]:
 def string_names(table: str, lang: str) -> list[str]:
     if table in ITEM_LAYOUT:
         return ITEM_STRINGS[lang]
+    if table in EVENT_TABLES:
+        return ["name"]
     return [s for s in subs(table, lang) if s != "id" and not s.startswith("unk")]
 
 
@@ -469,10 +478,13 @@ def _check_edit(edit, at: str, errs: list) -> tuple | None:
         errs.append(f"{at}: like is now copy_from")
     _unknown({k: v for k, v in edit.items() if k != "like"}, _EDIT_KEYS, at, errs)
     table = edit.get("table")
-    if table not in ITEM_LAYOUT and table not in DMSG_SUBS and table not in MENU_KINDS and not is_raw(table):
+    if table not in ITEM_LAYOUT and table not in DMSG_SUBS and table not in MENU_KINDS \
+            and table not in EVENT_TABLES and not is_raw(table):
         errs.append(f"{at}.table: {table!r} is not a table ({', '.join(tables())}) or a d_msg table's "
                     "ROM path (ROM/181/72.DAT)")
         return None
+    if table in EVENT_TABLES:
+        return _check_event_edit(table, edit, at, errs)
     if not _is_int(edit.get("id")):
         errs.append(f"{at}.id must be a record id (an integer >= 0)")
     if "hex" in edit and ({"set", "strings", "icon", "copy_from"} & edit.keys()):
@@ -508,6 +520,27 @@ def _check_edit(edit, at: str, errs: list) -> tuple | None:
     if not ({"copy_from", "set", "strings", "icon", "hex", "like"} & edit.keys() or edit.get("server")):
         errs.append(f"{at}: the edit changes nothing (give set, strings, icon, copy_from, hex or server)")
     return table, edit.get("id")
+
+
+def _check_event_edit(table: str, edit: dict, at: str, errs: list) -> tuple:
+    """An event-message name table (mobSkills): one name per id, in English and Japanese."""
+    first = EVENT_TABLES[table][2]
+    for key in sorted(edit.keys() - {"table", "id", "strings", "note"}):
+        if key in _EDIT_KEYS or key == "like":
+            errs.append(f"{at}.{key}: {table!r} takes strings and note (a name per id)")
+    rid = edit.get("id")
+    if not _is_int(rid):
+        errs.append(f"{at}.id must be a record id (an integer >= 0)")
+    elif rid < first:
+        errs.append(f"{at}.id: {table} ids start at {first} (the server's mob_skill_id); "
+                    f"ids below {first} are named by table 'abilities', the same id")
+    if "note" in edit and not isinstance(edit["note"], str):
+        errs.append(f"{at}.note must be a string")
+    if "strings" in edit:
+        _check_strings(table, edit["strings"], f"{at}.strings", errs)
+    else:
+        errs.append(f"{at}: the edit changes nothing (give strings)")
+    return table, rid
 
 
 def _check_sub_strings(strings, at: str, errs: list) -> None:

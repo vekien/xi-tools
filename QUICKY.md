@@ -157,7 +157,9 @@ xi dats build P [--dry-run] [--pivot]              # patches the records (EN + J
                                                    #   an edit with "add": whole new items from fields into any item table
 xi dats new [--pivot]                              # wizard: "Database records" — table, id, then field=value lines
 xi dats undo P                                     # every record back to what it held; its SQL section removed
-xi database grow ROM/181/72.DAT 4096               # a table grown once (d_msg or item), its .base too
+xi database grow ROM/181/72.DAT 4096               # a table grown once (d_msg, item or event-message), its .base too
+xi database json mobSkills --search breath        # a table's rows as JSON (mob skills joined with the server's rows)
+xi database search mobSkills "foot kick"          # find rows by id or text
                                                    #   --fill-from ROW | --fill-hex HEX, --pivot, --dry-run
 # spellData / abilityData: {"table": "spellData", "id": 1, "set": {"mp": 5, "levels": {"RDM": 1}}}
 # a new record: "copy_from": <id> (was "like"); exact bytes: "hex" (a whole record)

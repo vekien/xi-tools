@@ -611,16 +611,20 @@ server.add_command(server_ws_widen.ws_widen_cmd,  'ws-widen')   # write the weap
 # ── database (the client's record tables; their edits are `xi dats` database actions) ──
 
 from xi.database import xi_grow as database_grow
+from xi.database import xi_json as database_json
 
 
 @cli.group()
 def database():
-    """The client's record tables: item DATs and d_msg tables. Edits to their records are
-    `xi dats` database actions; this sets a table up (its size) once."""
+    """The client's record tables: item DATs, d_msg tables and the mob skill names. Edits to
+    their records are `xi dats` database actions; json / search read them, grow sets a table
+    up (its size) once."""
     pass
 
 
 database.add_command(database_grow.cmd, "grow")
+database.add_command(database_json.json_cmd, "json")
+database.add_command(database_json.search_cmd, "search")
 
 
 # ── mv (xi-model-viewer list refresh) ─────────────────────────────────────────

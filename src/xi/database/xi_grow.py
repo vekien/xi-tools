@@ -1,11 +1,13 @@
 """``xi database grow``: a client table grown to a fixed number of rows, once — the set-up a
 table needs when a client plugin reads it to a fixed count, as ``xi ftable expand`` is for the
-file tables. An item table (``ROM/288/80.DAT``) or a d_msg table (``ROM/181/72.DAT``), told
-apart by what the file holds.
+file tables. An item table (``ROM/288/80.DAT``), a d_msg table (``ROM/181/72.DAT``) or an
+event-message name table (``ROM/27/80.DAT``, the monster ability names), told apart by what the
+file holds.
 
 The new rows are a filler:
 
 - a d_msg table: a blank row (the last row, its text empty and its numbers kept);
+- an event-message table: '.', the name retail leaves in a row it doesn't use;
 - an item table: a copy of the table's last placeholder record (named '.' or nothing), its
   text emptied;
 - ``--fill-from ROW``: a copy of that row; ``--fill-hex``: exact bytes (a d_msg block, or a
@@ -37,9 +39,18 @@ def _is_dmsg(data: bytes) -> bool:
     return data[:5] == b"d_msg"
 
 
+def _is_event(data: bytes) -> bool:
+    """An event-message table (xi.dialog.xi_dialog): its 24-bit header is its length."""
+    from xi.dialog.xi_dialog import looks_like_event_message
+    return not _is_dmsg(data) and looks_like_event_message(data)
+
+
 def rows(data: bytes) -> int:
     if _is_dmsg(data):
         return D.parse(data).num
+    if _is_event(data):
+        from xi.dialog.xi_dialog import raw_entry_blobs
+        return len(raw_entry_blobs(data)[0])
     from xi.ui.items.xi_layout import detect_stride
     return len(data) // detect_stride(data)
 
@@ -78,6 +89,17 @@ def _blanked(rec: bytes) -> bytes:
 
 def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> bytes:
     """The bytes each new row of the table ``data`` gets (an item record before its id)."""
+    if _is_event(data):
+        from xi.dialog.xi_dialog import raw_entry_blobs
+        blobs = raw_entry_blobs(data)[0]
+        if hexed is not None:
+            blob = bytes.fromhex(hexed.replace(" ", ""))
+            return blob if blob.endswith(b"\0") else blob + b"\0"
+        if row is not None:
+            if not 0 <= row < len(blobs):
+                raise GrowError(f"--fill-from {row}: the table has {len(blobs)} rows")
+            return blobs[row]
+        return b".\0"
     if _is_dmsg(data):
         t = D.parse(data)
         if hexed is not None:
@@ -121,6 +143,12 @@ def filler(data: bytes, row: int | None = None, hexed: str | None = None) -> byt
 
 def grow(data: bytes, count: int, fill: bytes) -> bytes:
     """``data`` with rows added until it holds ``count``, each ``fill``."""
+    if _is_event(data):
+        from xi.dialog.xi_dialog import build_container, raw_entry_blobs
+        blobs, obfuscated = raw_entry_blobs(data)
+        if len(blobs) >= count:
+            return data
+        return build_container(list(blobs) + [fill] * (count - len(blobs)), obfuscated)
     if _is_dmsg(data):
         t = D.parse(data)
         if t.num >= count:
@@ -173,7 +201,7 @@ def grow_table(root: Path, rel: str, count: int, *, row: int | None = None, hexe
     except (D.DmsgError, ValueError) as e:
         if isinstance(e, GrowError):
             raise
-        raise GrowError(f"{rel}: not an item or d_msg table ({e})") from None
+        raise GrowError(f"{rel}: not an item, d_msg or event-message table ({e})") from None
     if dry_run or (new_current == current and (new_base is None or new_base == baseline)):
         return out
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -195,12 +223,12 @@ def grow_table(root: Path, rel: str, count: int, *, row: int | None = None, hexe
                    "A --reset --pivot build copies the install's back over it.")
 @click.option("--dry-run", is_flag=True, default=False, help="Say what would change; write nothing.")
 def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool, dry_run: bool):
-    """Grow TABLE (a ROM path: an item DAT or a d_msg table) to COUNT rows, once.
+    """Grow TABLE (a ROM path: an item DAT, a d_msg or an event-message table) to COUNT rows, once.
 
     
     New rows are a filler: the last d_msg row with its text blank (its numbers kept), or the
     item table's last placeholder record
-    with its text emptied (its id following the table's numbering), unless --fill-from / --fill-hex says
+    with its text emptied, or '.' in an event-message table (ROM/27/80, the monster ability names) (its id following the table's numbering), unless --fill-from / --fill-hex says
     otherwise. In the install the table's .base grows too, so `xi dats build
     --reset` (and `--reset --pivot`, which copies the install's .base) keeps the rows. A table
     already COUNT rows long is left alone.
@@ -209,6 +237,7 @@ def cmd(table: str, count: int, row: int | None, hexed: str | None, pivot: bool,
     Examples:
       xi database grow ROM/181/72.DAT 4096
       xi database grow ROM/288/80.DAT 8192 --fill-from 1023 --pivot
+      xi database grow ROM/27/80.DAT 8192
     """
     if row is not None and hexed is not None:
         raise click.ClickException("give --fill-from or --fill-hex, not both")

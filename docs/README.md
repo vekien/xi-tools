@@ -213,7 +213,8 @@ from `FFXiMain.dll`.
 | Doc | Summary |
 |-----|---------|
 | [gear/json.md](gear/json.md) | All gear model entries across races and slots |
-| [database/README.md](database/README.md) | The `database` dats action: edit or add item / key item / title … records by table and id (or any table by ROM path), EN + JP, legacy or retail DATs, with proposed server SQL; `xi database grow` |
+| [database/README.md](database/README.md) | The `database` dats action: edit or add item / key item / title … records by table and id (or any table by ROM path), EN + JP, legacy or retail DATs, with proposed server SQL; `xi database grow`, `json`, `search` |
+| [database/mob_skills.md](database/mob_skills.md) | Mob skill (TP move) names: where the client reads them (`ROM/27/80`, row `mob_skill_id − 256`), renaming and adding them with the `mobSkills` table, how high an id can go (server, packet, client), looking them up |
 | [gear/model_ids.md](gear/model_ids.md) | Gear model id → file id: the DLL group walk, the custom window formula, retail and patched ceilings |
 | [gear/export.md](gear/export.md) | Gear mesh export |
 | [gear/pose.md](gear/pose.md) | `xi gear pose`: a whole dressed character (every slot + weapons) as one GLB/FBX, with the geometry the worn set hides removed |
