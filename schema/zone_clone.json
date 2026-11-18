@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/zone_clone.json",
+  "title": "xi dats zone_clone action",
+  "description": "A copy of a retail zone at a new zone id: its model DAT (recoloured when recolour says so) and its event, dialog and NPC files placed in ROM10/<subdir>/ and registered at the new zone's file ids, and its name in the zone-name tables (ROM/165/84 English, ROM/165/63 Japanese; grown once with `xi database grow`). A rebuild keeps the zone id and slots the first build took; undo takes the files and registrations back out and puts the names back. `xi dats prepare` also reads a zone recipe ($defs.recipe). See docs/zone/inject-legacy.md.",
+  "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "source", "names"],
+  "properties": {
+    "id": {"$ref": "common.json#/$defs/actionId"},
+    "type": {"type": "string", "const": "zone_clone"},
+    "enabled": {"type": "boolean", "default": true},
+    "description": {"type": "string"},
+    "depends_on": {"type": "array", "items": {"$ref": "common.json#/$defs/actionId"}},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zone"],
+      "properties": {"zone": {"type": "integer", "minimum": 0, "description": "The retail zone to copy, by id."}}
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zone_id": {"$ref": "common.json#/$defs/autoOrInteger", "description": "The new zone's id; auto (default) takes the lowest free from 400."},
+        "subdir": {"type": "integer", "minimum": 0, "maximum": 511, "default": 1, "description": "The ROM10 folder for the zone's four files."},
+        "slot": {"type": "integer", "minimum": 0, "maximum": 124, "description": "The first of four consecutive slots there (model, event, dialog, NPC). Default: the lowest free slots."}
+      }
+    },
+    "names": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["en"],
+      "properties": {
+        "en": {"type": "string", "minLength": 1, "description": "The zone's name, in ROM/165/84 at its id."},
+        "jp": {"type": "string", "description": "In ROM/165/63; default the English name."}
+      }
+    },
+    "recolour": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the model's textures and environment change (xi.tex.xi_recolor; docs/zone/inject-legacy.md). Left out, the model is copied as it is.",
+      "properties": {
+        "hue": {"type": "number", "description": "Hue shift in degrees."},
+        "saturation": {"type": "number", "description": "Percent, -100..100."},
+        "lightness": {"type": "number", "description": "Percent, -100..100."},
+        "tint": {"$ref": "#/$defs/colour"},
+        "blend": {"$ref": "#/$defs/blend"},
+        "env_lightness": {"type": "number", "description": "The 0x2F environment colours' lightness, when it differs from lightness."},
+        "fog_tint": {"$ref": "#/$defs/colour"},
+        "fog_end": {"type": "number"},
+        "fog_start": {"type": "number"},
+        "texture_overrides": {
+          "type": "object",
+          "description": "Name pattern (suny*, case-insensitive) -> adjustments for the textures it matches; the first match wins. The key environment adjusts the 0x2F sections (and takes fog_tint, fog_end, fog_start).",
+          "additionalProperties": {"$ref": "#/$defs/adjust"}
+        },
+        "skip_textures": {"type": "array", "items": {"type": "string"}, "description": "Name patterns left as they are."},
+        "color_ranges": {"type": "array", "items": {"$ref": "#/$defs/adjust"}, "description": "Range-filtered passes in order, instead of hue/saturation/lightness/tint."}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Recorded by dats build: the zone id, each placement and the zone-name rows (with their text before the first build), and the targets it went into.",
+      "properties": {
+        "zone_id": {"type": "integer"},
+        "placements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {"enum": ["model", "event", "dialog", "npc"]},
+              "file_id": {"type": "integer"},
+              "dat": {"type": "string"}
+            }
+          }
+        },
+        "names": {"type": "object"},
+        "targets": {"type": "array", "items": {"type": "string", "enum": ["dir", "pivot", "hd"]}}
+      }
+    }
+  },
+  "$defs": {
+    "colour": {"type": "string", "pattern": "^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"},
+    "blend": {"enum": ["normal", "multiply", "screen", "overlay", "add"]},
+    "adjust": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hue": {"type": "number"}, "saturation": {"type": "number"}, "lightness": {"type": "number"},
+        "tint": {"$ref": "#/$defs/colour"}, "blend_mode": {"$ref": "#/$defs/blend"},
+        "hue_min": {"type": "number"}, "hue_max": {"type": "number"},
+        "sat_min": {"type": "number"}, "sat_max": {"type": "number"},
+        "val_min": {"type": "number"}, "val_max": {"type": "number"},
+        "fog_tint": {"$ref": "#/$defs/colour"}, "fog_end": {"type": "number"}, "fog_start": {"type": "number"}
+      }
+    },
+    "recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A zone recipe `xi dats prepare` turns into this action: the format of CatsEyeXI's content/zones/*.json and LPS's zones.json entries.",
+      "required": ["name", "clone"],
+      "properties": {
+        "name": {"type": "string"}, "name_jp": {"type": "string"},
+        "clone": {"type": "integer", "minimum": 0},
+        "zone_id": {"$ref": "common.json#/$defs/autoOrInteger"},
+        "hue": {"type": "number"}, "saturation": {"type": "number"}, "lightness": {"type": "number"},
+        "tint": {"$ref": "#/$defs/colour"}, "blend_mode": {"$ref": "#/$defs/blend"},
+        "textures": {"type": "object", "additionalProperties": {"$ref": "#/$defs/adjust"}},
+        "skip_textures": {"type": "array", "items": {"type": "string"}},
+        "color_ranges": {"type": "array", "items": {"$ref": "#/$defs/adjust"}}
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "zone_clone.shadow_jeuno",
+      "type": "zone_clone",
+      "description": "Upper Jeuno at night, dark and purple, as CatsEyeXI ships it",
+      "source": {"zone": 244},
+      "target": {"zone_id": 400},
+      "names": {"en": "Shadow Jeuno"},
+      "recolour": {
+        "hue": 180, "saturation": 20, "lightness": -30,
+        "texture_overrides": {
+          "suny*": {"lightness": -70}, "fine*": {"lightness": -70}, "lf*": {"lightness": -70},
+          "clod*": {"hue": 180, "lightness": -60}, "mist*": {"hue": 180, "lightness": -60},
+          "moon*": {"lightness": -40}, "star*": {"lightness": -20},
+          "environment": {"lightness": -60, "fog_tint": "#1a0a2a", "fog_end": 80, "fog_start": 0}
+        }
+      }
+    },
+    {
+      "id": "zone_clone.verdant_sarutabaruta",
+      "type": "zone_clone",
+      "source": {"zone": 115},
+      "target": {"zone_id": "auto", "subdir": 1},
+      "names": {"en": "Verdant Sarutabaruta"},
+      "recolour": {"hue": 120}
+    }
+  ]
+}
