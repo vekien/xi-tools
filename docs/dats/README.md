@@ -195,7 +195,8 @@ type the changes one per line — `level=50`, `jobs=WAR,PLD`, `description~HP+15
 `mod.HP=30` for the proposed SQL. An empty item slot asks which record to copy into it
 (`copy_from`). The edits go into `database.<project>`, merged by table and id with what an
 earlier run wrote. Non-interactive: `xi dats prepare edits.json --project P [--merge]` with
-a list of edits. See [../database/README.md](../database/README.md).
+a list of edits. The *Mob skill names* table (`mobSkills`) takes the server's `mob_skill_id` as
+the id. See [../database/README.md](../database/README.md).
 
 ### Zone dialog (edit or add the lines a zone's NPCs say)
 

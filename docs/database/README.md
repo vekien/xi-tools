@@ -56,8 +56,8 @@ Three ways in:
 
 | Key | What |
 |---|---|
-| `table` | The viewer's table key: `armor`, `weapons`, `general`, `usable`, `puppet`, `maze`, `monst1`, `items7`, `roeObj`, `items6`, `gil`; `keyitems`, `titles`, `q_*` / `m_*`, `spells`, `spellHelp`, `abilities`, `abilityHelp`, …; `spellData`, `abilityData` (below). Or any table's ROM path: a d_msg table, or an item table with `layout` ([below](#tables-by-path)). |
-| `id` | Item tables: the item id — it picks the DAT (armor 10240–16383 → `ROM/118/109`, 23040–28671 → `ROM/286/73`). Key items and quest / mission logs: the id stored in the row. Other text tables, and spell / ability data: the row index. |
+| `table` | The viewer's table key: `armor`, `weapons`, `general`, `usable`, `puppet`, `maze`, `monst1`, `items7`, `roeObj`, `items6`, `gil`; `keyitems`, `titles`, `q_*` / `m_*`, `spells`, `spellHelp`, `abilities`, `abilityHelp`, …; `spellData`, `abilityData` (below); `mobSkills`, the monster ability names ([mob_skills.md](mob_skills.md)). Or any table's ROM path: a d_msg table, or an item table with `layout` ([below](#tables-by-path)). |
+| `id` | Item tables: the item id — it picks the DAT (armor 10240–16383 → `ROM/118/109`, 23040–28671 → `ROM/286/73`). Key items and quest / mission logs: the id stored in the row. Other text tables, and spell / ability data: the row index. `mobSkills`: the server's `mob_skill_id`. |
 | `set` | Header fields by the viewer's names: `level`, `itemLevel`, `superiorLevel`, `jobs`, `races`, `slots`, `flags`, `stack`, `type`, `targets`, `resourceId`, `shieldSize`, `maxCharges`, `castTime`, `useDelay`, `reuseDelay`; weapons `damage`, `delay`, `dps`, `skill`, `jugSize`, `baseItemId`. Written to both languages' records. |
 | `strings` | `en` / `jp` sub-strings: items `name`, `article`, `logName`, `logPlural`, `description` (JP: `name`, `description`); text tables their own (`name`, `plural`, `description`, …; the help tables have one, `help`; the Japanese key items keep only `name` and `description`, the Japanese status names only `name`). A value is the text, or `{"replace": {old: new}}` on the record's original text. |
 | `copy_from` | Create the record as a copy of another: copy record `copy_from` of the same table into slot `id` (replacing what it holds), then apply the edit. The Japanese record takes the English name/description unless `strings.jp` says otherwise. (It was called `like`; an edit that still says `like` is refused, naming the new key.) |
@@ -248,6 +248,7 @@ xi database grow ROM/288/80.DAT 8192                       # item: its last plac
 xi database grow ROM/288/80.DAT 8192 --fill-from 1023      # each new row a copy of row 1023
 xi database grow ROM/181/72.DAT 4096 --fill-hex "…"        # exact bytes per row
 xi database grow ROM/288/80.DAT 8192 --pivot --dry-run     # FFXI_PIVOT_DIR's copy; say only
+xi database grow ROM/27/80.DAT 8192                        # mob skill names: new rows '.'
 ```
 
 The kind of table is read from the file. A new item record's id continues the table's numbering
@@ -267,6 +268,39 @@ Japanese row takes the English text unless `strings.jp` gives its own). Key item
 quest / mission logs are keyed by the id each record carries, so a new id is appended; `copy_from`
 there picks the record to copy. Undo trims the rows back off, only while nothing grew the
 table since. A zone's dialog lines are not here — they are [`zone_dialog`](../dialog/zone_dialog.md).
+
+## Mob skill names (`mobSkills`)
+
+The name a mob's TP move shows in the log comes from the client: `ROM/27/80.DAT` (English) /
+`ROM/27/79.DAT` (Japanese), row `mob_skill_id − 256`. The `mobSkills` table edits it by the
+server's `mob_skill_id`; an id past the end grows the table. Renaming, adding, the id limits and
+looking the names up are all on one page: [mob_skills.md](mob_skills.md).
+
+## Reading a table (`xi database json`, `xi database search`)
+
+The rows the model viewer's Database shows, by the same table key, as JSON or a short list:
+
+```
+xi database search mobSkills "foot kick"       # 257  Foot Kick  [foot_kick anim 1]
+xi database search mobSkills 4262              # a number is an id
+xi database search mobSkills hell_trap         # the server's name matches too
+xi database json mobSkills --search breath
+xi database json mobSkills --all --output mob_skills.json
+xi database json abilities --lang jp
+```
+
+| Option | What |
+|---|---|
+| `--search Q` (`json`) | Only rows whose id is `Q` (a number, or `#257`) or whose text contains it |
+| `--lang en\|jp` | The language's table (default `en`) |
+| `--all` (`json`) | `mobSkills`: include the rows the client leaves unnamed (`.`, `#n`) |
+| `--output PATH` (`json`) | Write the JSON there instead of stdout |
+| `--json` (`search`) | Print the matching rows as JSON |
+
+`mobSkills` rows are `{id, name, row, server}`: with `XI_SERVER_DIR` set, `server` is the
+server's `mob_skills` row from `sql/mob_skills.sql` (animation, AoE, range, times, valid targets,
+flag, param, knockback, skillchains), and the server's rows the client has no name for are
+listed with `name: null`. Other tables print the rows `xi mv database` bakes.
 
 ## Not yet
 

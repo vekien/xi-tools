@@ -1450,6 +1450,7 @@ _DB_LABELS = {
     "gil": "Currency", "keyitems": "Key items", "titles": "Titles", "spells": "Spell names",
     "spellHelp": "Spell help", "abilities": "Ability names", "abilityHelp": "Ability help",
     "spellData": "Spell data (MP, cast, recast, levels)", "abilityData": "Ability data (TP, level, range)",
+    "mobSkills": "Mob skill names (id = mob_skill_id)",
 }
 _MASK_FIELDS = ("flags", "jobs", "races", "slots")
 

@@ -153,6 +153,10 @@ Rules that follow:
     projects of `projects/build_list.json` in order, and a list file needs no `--list`
     (`--list --reset`: every table they edit reset once, first). `xi database grow` grows the
     install's table and its `.base` once (set-up; the actions only edit rows).
+  - Mob skill (TP move) names are client-side: `ROM/27/80` (EN) / `79` (JP), row
+    `mob_skill_id − 256`, the `database` action's `mobSkills` table; ids below 256 are
+    `abilities` (`ROM/181/72`). `xi database search mobSkills <text|id>` finds them
+    ([docs/database/mob_skills.md](../../../docs/database/mob_skills.md)).
 - Prefer `--dry-run` where offered (`ftable expand`, `dats build`, `zone import-json`,
   `zone reset`, `mount import`, dialogue edits) before writing.
 - `xi dats build` writes into `FFXI_DIR` and then syncs the custom region of the pivot

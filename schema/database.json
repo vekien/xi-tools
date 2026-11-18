@@ -163,7 +163,7 @@
       ],
       "properties": {
         "table": {
-          "description": "The viewer's table key (ui/js/database.js, xi.mv.xi_database). Item tables: general, usable, puppet, armor, weapons, maze, monst1, items7, roeObj, items6, gil. d_msg tables: the quest (q_*) and mission (m_*) logs, keyitems, titles, jobs, spells, spellHelp, abilities, abilityHelp, bluHelp, status, mounts, mountHelp, monsterFamilies, slots, augments, merits, jobPoints, jobGifts, soulplates, trust, emoteHelp, chatHelp, mazeRunes, headings, servers. Spell and command records of ROM/118/114.DAT (one file for every client language): spellData, abilityData. Any other table may be given by its ROM path, one file whatever the language, a row by its index: a d_msg table (ROM/181/72.DAT), its sub-strings sub0, sub1, …; or an item table with `layout`, the layout of its records (a table a server grew or added, ROM/288/80.DAT row 1030), its strings sub0, sub1, … by position.",
+          "description": "The viewer's table key (ui/js/database.js, xi.mv.xi_database). Item tables: general, usable, puppet, armor, weapons, maze, monst1, items7, roeObj, items6, gil. d_msg tables: the quest (q_*) and mission (m_*) logs, keyitems, titles, jobs, spells, spellHelp, abilities, abilityHelp, bluHelp, status, mounts, mountHelp, monsterFamilies, slots, augments, merits, jobPoints, jobGifts, soulplates, trust, emoteHelp, chatHelp, mazeRunes, headings, servers. Spell and command records of ROM/118/114.DAT (one file for every client language): spellData, abilityData. The monster ability (mob skill) names of ROM/27/80.DAT / ROM/27/79.DAT (event-message tables, one name per row): mobSkills, by the server's mob_skill_id; its edits take strings (name) and note only. Any other table may be given by its ROM path, one file whatever the language, a row by its index: a d_msg table (ROM/181/72.DAT), its sub-strings sub0, sub1, …; or an item table with `layout`, the layout of its records (a table a server grew or added, ROM/288/80.DAT row 1030), its strings sub0, sub1, … by position.",
           "anyOf": [
             {
               "type": "string",
@@ -228,7 +228,8 @@
                 "headings",
                 "servers",
                 "spellData",
-                "abilityData"
+                "abilityData",
+                "mobSkills"
               ]
             },
             {
@@ -240,7 +241,7 @@
         "id": {
           "type": "integer",
           "minimum": 0,
-          "description": "Item tables: the item id; the id decides which DAT of the table holds it (armor 10240-16383 -> ROM/118/109, 23040-28671 -> ROM/286/73). d_msg tables: the row index, except where each row carries its own id (keyitems, the q_* and m_* logs), where it is that id. spellData / abilityData: the spell or command id (the record index)."
+          "description": "Item tables: the item id; the id decides which DAT of the table holds it (armor 10240-16383 -> ROM/118/109, 23040-28671 -> ROM/286/73). d_msg tables: the row index, except where each row carries its own id (keyitems, the q_* and m_* logs), where it is that id. spellData / abilityData: the spell or command id (the record index). mobSkills: the server's mob_skill_id, 256 or more (row id - 256; ids below 256 are named by abilities). An id past the end of the table grows it to that id in both languages, the rows in between holding '.'."
         },
         "layout": {
           "type": "string",
@@ -1588,7 +1589,7 @@
     {
       "id": "database.gear_tweaks",
       "type": "database",
-      "description": "Decennial Coat +1 at level 50, Scorpion Harness at HP+30, a new earring copied from Moonshade Earring and a key item reworded. Cure costs 5 MP and Red Mage learns it at 1.",
+      "description": "Decennial Coat +1 at level 50, Scorpion Harness at HP+30, a new earring copied from Moonshade Earring and a key item reworded. Cure costs 5 MP and Red Mage learns it at 1. Foot Kick is renamed Stomp, and mob skill 5200 is named Abyssal Roar.",
       "server": {
         "emit": true,
         "mirror": true
@@ -1674,6 +1675,26 @@
             "mp": 5,
             "levels": {
               "RDM": 1
+            }
+          }
+        },
+        {
+          "table": "mobSkills",
+          "id": 257,
+          "note": "Foot Kick reads Stomp",
+          "strings": {
+            "en": {
+              "name": "Stomp"
+            }
+          }
+        },
+        {
+          "table": "mobSkills",
+          "id": 5200,
+          "note": "A new mob skill: the table grows to it",
+          "strings": {
+            "en": {
+              "name": "Abyssal Roar"
             }
           }
         }

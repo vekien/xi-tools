@@ -239,6 +239,11 @@ ProcMon read-counts from a boot trace in parens — higher = hit more often.
   record *i*. `xi dats` grows these when it adds spell / command records
   ([menu/records.md](menu/records.md)). The full EN/JP list of name tables is
   `DMSG_TABLES` in `xi.mv.xi_database`; see [anim/weapon-skills.md](anim/weapon-skills.md).
+* `ROM/27/80.DAT` (file_id 7035) = monster ability (mob skill) names, EN; JP `ROM/27/79` (7034).
+  Event-message format, not d_msg: one cp932 name + NUL per row, row *i* names the server's
+  `mob_skill_id` *i* + 256 (measured: 3,353 of CatsEyeXI's 3,593 rows from id 256 on that row); unused rows
+  are `.`. 4,864 EN / 5,120 JP rows. Edited by the `database` action's `mobSkills` table
+  ([database/mob_skills.md](database/mob_skills.md)).
 * Other `d_*` tables: `d_at` (large attribute table, e.g. `ROM/280/2.DAT`, 7 MB+),
   `d_me` (message data). `d_si`/`d_zv`/`d_be`/`d_de`/`d_pa`/`d_ri`/`d_ct`/`d_gh` uncatalogued.
 

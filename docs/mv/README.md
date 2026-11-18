@@ -7,7 +7,7 @@ large item DATs in the browser.
 | Command | Output | What it does |
 |---|---|---|
 | `xi mv update` | `mv/lists/*.json` | Append missing entries to the viewer's asset lists (gear, music, sfx, effects, images, NPCs, …). Never rewrites curated names. |
-| `xi mv database` | `mv/db/<table>.<lang>.json` + `manifest.json` | Decode the item tables and `d_msg` text tables once and write them as JSON rows. |
+| `xi mv database` | `mv/db/<table>.<lang>.json` + `manifest.json` | Decode the item tables, `d_msg` text tables and the mob skill names (`mobSkills`, `ROM/27/80`) once and write them as JSON rows. |
 
 `mv/lists` is tracked in git (the viewer ships from it). `mv/db` is regenerable and
 gitignored.
