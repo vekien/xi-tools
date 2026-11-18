@@ -319,6 +319,7 @@ xi ui tex sx ROM/119/50.DAT                       # export → exports/ui/119/50
 xi ui tex si ROM/119/50.DAT [--hd] [--no-resize] [--repair-rects] [--ffxi DIR]
 xi ui strings search "text" / xi ui strings export|import
 xi ui items armor search <name> / export / json / import / inject / new
+xi ui items icon export 16535 [-o x.png|--bmp] / xi ui items icon import 16535 x.png [--dry-run]
 xi utils dds2png in.dds out.png / xi utils png2dds in.png out.dds
 ```
 
