@@ -41,6 +41,9 @@ Processing time: ~1.5s for a 17 MB HD zone DAT.
 | `--tint #RRGGBB[AA]` | hex | Blend a colour onto all textures |
 | `--blend MODE` | string | Blend mode: `normal`, `multiply`, `screen`, `overlay`, `add` |
 
+To recolour a zone that already exists, in place, use [`xi zone edit`](edit.md); it takes
+the same options.
+
 ## Per-texture adjustments, skips and several ranges
 
 Three repeatable options pick different adjustments for different textures. A texture's

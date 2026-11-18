@@ -25,7 +25,9 @@ every format is documented.
    Don't add new convenience aliases; the existing ones (`xi ability publish`,
    `xi event cutscene compile`, `xi event dialogue new`) stay thin. If an existing
    command places content on its own, the fix is to move it into a `dats` action and
-   alias the old command, not to extend it.
+   alias the old command, not to extend how it places content. Where a domain has
+   both, `edit` changes what exists in place and `inject` creates a new one with its
+   scaffolding; shaping options like recolour can go on both, defined once and shared.
 3. **Domain commands only export, import, inspect, manipulate what exists, or set an
    install up once** (`export`, `import`, `json`, `search`, `set`, `edit`, `copy`,
    `delete`, `reset`, `expand`, `grow`).
