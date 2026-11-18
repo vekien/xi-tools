@@ -312,23 +312,59 @@ def _check_hex(v, size: int | None, at: str, errs: list) -> None:
         errs.append(f"{at} is {len(raw)} bytes; a record of this table is {size}")
 
 
+_ICON_ADJUST = {"hue", "saturation", "lightness", "tint", "blend", "border", "border_under"}
+_HEX_COLOUR = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+
+
+def _check_icon_adjust(adj, at: str, errs: list) -> None:
+    from xi.ui.items.xi_icon import BLENDS, HQ_BORDERS
+    if not isinstance(adj, dict):
+        errs.append(f"{at} must be an object")
+        return
+    _unknown(adj, _ICON_ADJUST, at, errs)
+    for key, lo, hi in (("hue", -360, 360), ("saturation", -100, 100), ("lightness", -100, 100)):
+        v = adj.get(key, 0)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+            errs.append(f"{at}.{key} must be a number {lo}..{hi}")
+    if "tint" in adj and not (isinstance(adj["tint"], str) and _HEX_COLOUR.match(adj["tint"])):
+        errs.append(f"{at}.tint must be a colour, #RRGGBB or #RRGGBBAA")
+    if "blend" in adj:
+        if adj["blend"] not in BLENDS:
+            errs.append(f"{at}.blend must be one of {', '.join(BLENDS)}")
+        elif "tint" not in adj:
+            errs.append(f"{at}.blend goes with tint")
+    if "border" in adj:
+        b = adj["border"]
+        if not (isinstance(b, str) and (b in HQ_BORDERS or b.lower().endswith(".png"))):
+            errs.append(f"{at}.border must be {', '.join(HQ_BORDERS)} or a .png file, "
+                        "relative to the file holding the action")
+    if "border_under" in adj:
+        if not isinstance(adj["border_under"], bool):
+            errs.append(f"{at}.border_under must be true or false")
+        elif "border" not in adj:
+            errs.append(f"{at}.border_under goes with border")
+
+
 def _check_icon(icon, at: str, errs: list) -> None:
     if not isinstance(icon, dict):
         errs.append(f"{at} must be an object")
         return
-    _unknown(icon, {"from", "file", "tag"}, at, errs)
-    if "file" in icon:
-        if "from" in icon:
-            errs.append(f"{at}: give from or file, not both")
-        if not (isinstance(icon["file"], str) and icon["file"].lower().endswith(".bmp")):
-            errs.append(f"{at}.file must be a .bmp file, relative to the file holding the action")
-        tag = icon.get("tag", "")
+    _unknown(icon, {"from", "file", "png", "tag", "adjust"}, at, errs)
+    sources = [k for k in ("from", "file", "png") if k in icon]
+    if len(sources) != 1:
+        errs.append(f"{at}: give one of from, file or png" + (f", not {' and '.join(sources)}" if sources else ""))
+    if "from" in icon and not _is_int(icon["from"]):
+        errs.append(f"{at}.from must be the item id whose icon to copy")
+    if "file" in icon and not (isinstance(icon["file"], str) and icon["file"].lower().endswith(".bmp")):
+        errs.append(f"{at}.file must be a .bmp file, relative to the file holding the action")
+    if "png" in icon and not (isinstance(icon["png"], str) and icon["png"].lower().endswith(".png")):
+        errs.append(f"{at}.png must be a .png file, relative to the file holding the action")
+    if "tag" in icon:
+        tag = icon["tag"]
         if not (isinstance(tag, str) and tag.isascii() and len(tag) <= 16):
             errs.append(f"{at}.tag must be ASCII text of 16 characters or fewer")
-    elif "tag" in icon:
-        errs.append(f"{at}.tag goes with file")
-    elif not _is_int(icon.get("from")):
-        errs.append(f"{at}.from must be the item id whose icon to copy")
+    if "adjust" in icon:
+        _check_icon_adjust(icon["adjust"], f"{at}.adjust", errs)
 
 
 def _check_server(rows, at: str, errs: list) -> None:

@@ -525,3 +525,63 @@ def test_add_makes_whole_items_from_fields(game):
     from xi.dats.xi_dats import group
     assert CliRunner().invoke(group, ["undo", "add", "--yes"], catch_exceptions=False).exit_code == 0
     assert DB.item_name(record(game, MONST_EN, 1030), "armor", "legacy") == "."
+
+
+def _real_icon(seed: int = 3) -> bytes:
+    """An icon blob in the retail layout (xi.ui.items.xi_icon), opaque but for entry 0."""
+    from xi.ui.items import xi_icon
+    pal = bytearray()
+    for i in range(256):
+        pal += bytes(((i * seed) & 0xFF, (255 - i) & 0xFF, (i * 5) & 0xFF, 0 if i == 0 else 128))
+    return xi_icon.build(bytes(pal), bytes((x + y * seed) & 0xFF for y in range(32) for x in range(32)),
+                         "armor   10242")
+
+
+def _put_icon(game: Path, rel: str, row: int, blob: bytes) -> None:
+    dat = ItemDat.load(game / rel)
+    rec = bytearray(dat.record(row))
+    struct.pack_into("<I", rec, 0x280, len(blob))
+    rec[0x284:0x284 + len(blob)] = blob
+    dat.set_record(row, bytes(rec))
+    (game / rel).write_bytes(dat.encrypted())
+
+
+def test_icon_png_and_adjust_build_rebuild_undo(game):
+    from xi.ui.items import xi_icon
+    _put_icon(game, ARMOR_EN, 2, _real_icon())
+    blob = _real_icon(5)
+    Path("projects/icons").mkdir(parents=True)
+    Path("projects/icons/coat.png").write_bytes(xi_icon.to_png(blob))
+    pristine = record(game, ARMOR_EN, 1)
+    prepare([{"table": "armor", "id": 10241, "icon": {"png": "icons/coat.png"}},
+             {"table": "armor", "id": 10242, "icon": {"from": 10242, "adjust": {"hue": 120, "tint": "#ff000080",
+                                                                                  "blend": "multiply"}}}])
+    r = build()
+    assert r.exit_code == 0, r.output
+    en1 = record(game, ARMOR_EN, 1)
+    assert en1[0x284:0x284 + xi_icon.BLOB_LEN] == blob                    # an exported PNG: byte for byte
+    adj = xi_icon.parse(record(game, ARMOR_EN, 2)[0x284:0x284 + xi_icon.BLOB_LEN])
+    src = xi_icon.parse(_real_icon())
+    assert adj["pixels"] == src["pixels"] and adj["palette"][3::4] == src["palette"][3::4]   # palette only
+    assert adj["palette"] != src["palette"] and adj["tag"] == src["tag"]
+    data = (game / ARMOR_EN).read_bytes()
+    assert build().exit_code == 0 and (game / ARMOR_EN).read_bytes() == data   # a rebuild changes nothing
+    from xi.dats.xi_dats import group
+    assert CliRunner().invoke(group, ["undo", "tweaks", "--yes"], catch_exceptions=False).exit_code == 0
+    assert record(game, ARMOR_EN, 1) == pristine
+
+
+def test_icon_adjust_border_and_dry_run(game):
+    from xi.ui.items import xi_icon
+    _put_icon(game, ARMOR_EN, 2, _real_icon())
+    before = (game / ARMOR_EN).read_bytes()
+    prepare([{"table": "armor", "id": 10241, "icon": {"from": 10242, "tag": "armor   custom", "adjust": {"border": "hq3"}}}])
+    r = build("tweaks", "--dry-run")
+    assert r.exit_code == 0, r.output
+    assert (game / ARMOR_EN).read_bytes() == before
+    assert build().exit_code == 0
+    got = xi_icon.parse(record(game, ARMOR_EN, 1)[0x284:0x284 + xi_icon.BLOB_LEN])
+    assert got["tag"].rstrip() == "armor   custom"
+    img = xi_icon.to_image(xi_icon.build(got["palette"], got["pixels"])).convert("RGBA")
+    assert img.getpixel((0, 0))[:3] == xi_icon.HQ_BORDERS["hq3"][0]
+    assert img.getpixel((1, 5))[:3] == xi_icon.HQ_BORDERS["hq3"][1]

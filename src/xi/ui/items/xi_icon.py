@@ -210,3 +210,79 @@ def from_file(data: bytes, tag: str | None = None, default_tag: str = DEFAULT_TA
     except Exception as e:  # noqa: BLE001 - Pillow raises several types for a bad file
         raise IconError(f'not an image Pillow can read: {e}') from e
     return from_image(img, tag=tag, default_tag=default_tag)
+
+
+# ── adjustments (a `database` edit's icon.adjust) ────────────────────────────
+
+# LPS's HQ border colours (outer 1-pixel ring, inner 1-pixel ring), as CatsEyeXI's custom
+# items use them; they are LPS's choice, not measured from retail icons.
+HQ_BORDERS = {
+    'hq1': ((183, 183, 183), (159, 159, 159)),      # silver
+    'hq2': ((64, 127, 164), (69, 112, 141)),        # steel blue
+    'hq3': ((166, 142, 68), (134, 119, 77)),        # gold
+    'hq4': ((61, 165, 114), (78, 141, 71)),         # green
+}
+BLENDS = ('normal', 'multiply', 'screen', 'overlay', 'add')
+
+
+def _hq_border(name: str):
+    from PIL import Image
+    outer, inner = HQ_BORDERS[name]
+    img = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
+    px = img.load()
+    for i in range(SIZE):
+        for x, y in ((i, 0), (i, SIZE - 1), (0, i), (SIZE - 1, i)):
+            px[x, y] = (*outer, 255)
+    for i in range(1, SIZE - 1):
+        for x, y in ((i, 1), (i, SIZE - 2), (1, i), (SIZE - 2, i)):
+            px[x, y] = (*inner, 255)
+    return img
+
+
+def adjust(blob: bytes, *, hue: float = 0, saturation: float = 0, lightness: float = 0,
+           tint: str | None = None, blend: str = 'normal', border=None, border_under: bool = False,
+           tag: str | None = None) -> bytes:
+    """``blob`` with its colours changed and an optional border.
+
+    ``hue`` (degrees), ``saturation`` and ``lightness`` (percent, -100..100: 0 keeps,
+    -100 removes) and ``tint`` (``#RRGGBB`` or ``#RRGGBBAA``, the AA its strength) blended
+    with ``blend`` act on the palette alone, so the indices, alpha and every other byte
+    stay as they are: the same maths as ``xi.tex.xi_recolor`` uses for textures.
+    ``border`` is ``hq1``..``hq4`` (LPS's HQ frame colours) or a PIL image, drawn over the
+    icon, or under it with ``border_under`` (a frame that shows where the icon is
+    transparent). A border redraws the pixels, so the icon is re-encoded (exactly when the
+    result has 256 colours or fewer)."""
+    import colorsys
+    from xi.tex.xi_recolor import _blend, _parse_colour   # one blend maths for textures and icons
+
+    p = parse(blob)
+    tag = p['tag'] if tag is None else tag
+    pal = bytearray(p['palette'])
+    if hue or saturation or lightness or tint:
+        tr = tg = tb = ta = None
+        if tint:
+            tr, tg, tb, ta = _parse_colour(tint)
+        for i in range(256):
+            b, g, r = pal[i * 4:i * 4 + 3]
+            if hue or saturation or lightness:
+                h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+                h = (h + hue / 360.0) % 1.0
+                s = max(0.0, min(1.0, s * (1.0 + saturation / 100.0)))
+                v = max(0.0, min(1.0, v * (1.0 + lightness / 100.0)))
+                rf, gf, bf = colorsys.hsv_to_rgb(h, s, v)
+                r, g, b = int(rf * 255), int(gf * 255), int(bf * 255)
+            if tint:
+                r, g, b = _blend(r, g, b, tr, tg, tb, ta, blend)
+            pal[i * 4:i * 4 + 3] = bytes((b, g, r))
+    out = build(bytes(pal), p['pixels'], tag)
+    if border is None:
+        return out
+
+    from PIL import Image
+    no_alpha = not any(p['palette'][3::4])
+    frame = _hq_border(border) if isinstance(border, str) else border.convert('RGBA')
+    if frame.size != (SIZE, SIZE):
+        frame = frame.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+    icon = to_image(out).convert('RGBA')
+    img = Image.alpha_composite(frame, icon) if border_under else Image.alpha_composite(icon, frame)
+    return from_image(img, tag=tag, no_alpha=no_alpha)

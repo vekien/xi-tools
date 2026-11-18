@@ -368,23 +368,63 @@ ICON_MARK = 0x91                     # the byte before an icon's tag, on every i
 ICON_TAG = "item    custom"           # what a custom icon's 16-character tag says
 
 
-def _icon_blob(files: _Files, icon: dict, fmt: str) -> bytes:
-    """The icon region (its u32 size, then the icon) an edit's ``icon`` names: another item's,
-    or a .bmp file — a 256-colour bitmap stored as the record holds it, after a mark byte and a
-    16-character ``tag`` (default "item    custom")."""
-    if "from" in icon:
-        return _item_icon(files, icon["from"], fmt)
-    path = Path(icon["file"])
+def _icon_path(files: _Files, rel: str) -> Path:
+    path = Path(rel)
     if not path.is_absolute():
         path = (files.base_dir or Path.cwd()) / path
     if not path.is_file():
         raise DbError(f"icon file {path} is missing")
-    bmp = path.read_bytes()
-    if bmp[:2] != b"BM" or len(bmp) < 14 + 40:
-        raise DbError(f"{path} isn't a BMP file")
-    tag = icon.get("tag", ICON_TAG).encode("ascii").ljust(16, b" ")
-    blob = bytes([ICON_MARK]) + tag + bmp[14:]
+    return path
+
+
+def _icon_blob(files: _Files, icon: dict, fmt: str, original: bytes | None = None) -> bytes:
+    """The icon region (its u32 size, then the icon) an edit's ``icon`` names: another item's,
+    a .bmp file — a 256-colour bitmap stored as the record holds it, after a mark byte and a
+    16-character ``tag`` (default "item    custom") — or a .png file, encoded the way every
+    retail icon is (xi.ui.items.xi_icon). ``adjust`` then recolours it or draws a border.
+    ``original``: the ``from`` item's icon region before a previous build of this action changed
+    it, so an adjusted copy of an icon the action itself edits doesn't compound on a rebuild."""
+    from xi.ui.items import xi_icon
+    adjust = icon.get("adjust")
+    if "from" in icon:
+        region = original if original is not None else _item_icon(files, icon["from"], fmt)
+        if not adjust and "tag" not in icon:
+            return region
+        blob = region[4:4 + struct.unpack_from("<I", region, 0)[0]]
+    elif "png" in icon:
+        path = _icon_path(files, icon["png"])
+        try:
+            blob = xi_icon.from_file(path.read_bytes(), tag=icon.get("tag"), default_tag=ICON_TAG)
+        except xi_icon.IconError as e:
+            raise DbError(f"{path}: {e}") from e
+    else:
+        path = _icon_path(files, icon["file"])
+        bmp = path.read_bytes()
+        if bmp[:2] != b"BM" or len(bmp) < 14 + 40:
+            raise DbError(f"{path} isn't a BMP file")
+        tag = icon.get("tag", ICON_TAG).encode("ascii").ljust(16, b" ")
+        blob = bytes([ICON_MARK]) + tag + bmp[14:]
+        if not adjust:
+            return struct.pack("<I", len(blob)) + blob
+    if adjust or "tag" in icon:
+        a = dict(adjust or {})
+        border = a.pop("border", None)
+        if border is not None and border not in xi_icon.HQ_BORDERS:
+            from PIL import Image
+            border = Image.open(_icon_path(files, border))
+        try:
+            blob = xi_icon.adjust(blob, border=border, border_under=a.pop("border_under", False),
+                                  tag=icon.get("tag"), **a)
+        except xi_icon.IconError as e:
+            raise DbError(f"icon: {e}") from e
     return struct.pack("<I", len(blob)) + blob
+
+
+def _icon_label(icon: dict) -> str:
+    """What the changelog says an icon edit wrote."""
+    src = f"item {icon['from']}" if "from" in icon else icon.get("png") or icon.get("file")
+    adj = icon.get("adjust") or {}
+    return src + (" (" + ", ".join(f"{k} {v}" for k, v in adj.items()) + ")" if adj else "")
 
 
 def icon_bmp(rec: bytes) -> tuple[bytes, str] | None:
@@ -423,7 +463,7 @@ def _item_icon(files: _Files, item_id: int, fmt: str) -> bytes:
 
 
 def _apply_item(files: _Files, edit: dict, lang: str, rec: bytearray, layout: str, fmt: str,
-                base_texts: dict) -> dict:
+                base_texts: dict, base_icons: dict | None = None) -> dict:
     """Apply ``edit`` to one language's record; ``{field: {from, to}}`` of what changed."""
     changed: dict = {}
     values = dict(edit.get("set") or {})
@@ -465,14 +505,14 @@ def _apply_item(files: _Files, edit: dict, lang: str, rec: bytearray, layout: st
         if touched:
             _write_item_strings(rec, off, subs, end)
     icon = edit.get("icon")
-    if icon and ("from" in icon or "file" in icon):
-        blob = _icon_blob(files, icon, fmt)
+    if icon and ({"from", "file", "png"} & icon.keys()):
+        blob = _icon_blob(files, icon, fmt, (base_icons or {}).get(icon.get("from")))
         before = _icon_region(rec)
         region = blob + bytes(len(before) - len(blob))
         if region != before:
             rec[ICON_OFFSET:len(rec) - 1] = region
             changed["icon"] = {"from": base64.b64encode(before.rstrip(b"\0")).decode("ascii"),
-                               "to": f"item {icon['from']}" if "from" in icon else icon["file"],
+                               "to": _icon_label(icon),
                                "sha1": _sha1(region)}
     return changed
 
@@ -649,6 +689,17 @@ def _restore(files: _Files, entry: dict, warnings: list) -> None:
     _restore_block(t, idx, table, entry, warnings, label)
 
 
+def _base_icons(prev: list) -> dict:
+    """Item id -> its English record's icon region before a previous build of the action changed
+    it (``icon.from`` copies the English record's icon into both languages)."""
+    out = {}
+    for e in prev:
+        ch = (e.get("changed") or {}).get("icon")
+        if ch and e.get("lang") == "en":
+            out[e["id"]] = base64.b64decode(ch["from"]) + bytes(4096)
+    return out
+
+
 def _base_texts(prev: dict, table: str, rid: int, lang: str) -> dict:
     """Original text of each sub-string a previous build changed (for ``replace``)."""
     for e in prev:
@@ -696,7 +747,8 @@ def _item_edit(files: _Files, edit: dict, prev: list) -> list[dict]:
         elif is_empty_item(rec, layout, fmt):
             raise DbError(f"{table} {rid} is an empty slot; give copy_from: <id> to create a record there")
         entry["name"] = item_name(rec, layout, fmt)
-        entry["changed"] = _apply_item(files, edit, lang, rec, layout, fmt, _base_texts(prev, table, rid, lang))
+        entry["changed"] = _apply_item(files, edit, lang, rec, layout, fmt, _base_texts(prev, table, rid, lang),
+                                       _base_icons(prev))
         entry["name"] = item_name(rec, layout, fmt) or entry["name"]
         if donor is not None:
             if bytes(rec) == before:

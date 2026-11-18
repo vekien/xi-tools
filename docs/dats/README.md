@@ -192,7 +192,8 @@ Full detail: [../menu/records.md](../menu/records.md).
 
 Pick a table (Armor, Weapons, Key items, …), give a record id, see what it holds now, then
 type the changes one per line — `level=50`, `jobs=WAR,PLD`, `description~HP+15=>HP+30`,
-`mod.HP=30` for the proposed SQL. An empty item slot asks which record to copy into it
+`mod.HP=30` for the proposed SQL, `icon=11697` or `icon=icons/x.png` with `icon.hue=120`,
+`icon.border=hq3` for the icon. An empty item slot asks which record to copy into it
 (`copy_from`). The edits go into `database.<project>`, merged by table and id with what an
 earlier run wrote. Non-interactive: `xi dats prepare edits.json --project P [--merge]` with
 a list of edits. The *Mob skill names* table (`mobSkills`) takes the server's `mob_skill_id` as
