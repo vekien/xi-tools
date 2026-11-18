@@ -282,6 +282,7 @@ xi zone footsteps
 xi zone package             # bundle custom zones (DATs, tables, override-tree tables, server Lua) into one zip
 xi zone patch-proto         # convert a prototype zone's 0x54 placement records to retail 0x64
 xi zone import-collision    # replace/append the whole collision from an OBJ (--compact-buckets, --reset)
+xi zone check               # a zone model's structure + the client's limits (--all, --base ZONE, --json)
 xi zone fx
 xi zone fx list
 

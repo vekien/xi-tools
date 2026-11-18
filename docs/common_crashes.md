@@ -26,6 +26,25 @@ the fix.
 
 ---
 
+## Crash: entering a generated or rebuilt zone
+
+Before loading one, run `xi zone check <DAT> --base <zone it was built on>`
+([zone/check.md](zone/check.md)). The crashes seen with generated zones (LPS-modules,
+September 2026), each on zone-in with nothing in the log:
+
+- **The block grid smaller than the base zone's** (ffximain+0x16663B): the zone keeps the
+  base zone's event and NPC files, whose entities the client drops into the collision grid
+  by position without a bounds check. Keep the base zone's grid.
+- **A ZoneDef section over 8,372,848 bytes** or so (the field's ceiling is 8,388,592): the
+  client copies it into a fixed buffer.
+- **A space tree that isn't the block grid**: 1,330 objects in one leaf read past a buffer,
+  an adaptive tree with 85-yalm leaves wrote past one. Retail's largest leaf is 328, its
+  leaves all at one depth.
+- **79,373 collision grid cells** crashed, 62,909 loaded — but retail zones load with up to
+  124,103, so the count alone isn't the cause.
+
+---
+
 ## Crash: cutscene with a camera track crashes on play
 
 **Symptom.** Dialogue-only cutscenes work. Add a camera track → client closes as
