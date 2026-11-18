@@ -63,6 +63,7 @@ from xi.zone     import xi_footsteps     as zone_footsteps
 from xi.zone     import xi_patch_proto   as zone_patch_proto
 from xi.zone     import xi_package      as zone_package
 from xi.zone     import xi_import_collision as zone_import_collision
+from xi.zone     import xi_check as zone_check
 from xi.fx       import xi_list       as fx_list
 from xi.fx       import xi_dump         as fx_dump
 from xi.fx       import xi_delete       as fx_delete
@@ -438,6 +439,7 @@ zone.add_command(zone_footsteps.cmd,          'footsteps')
 zone.add_command(zone_patch_proto.cmd,        'patch-proto')
 zone.add_command(zone_package.cmd,            'package')
 zone.add_command(zone_import_collision.cmd,   'import-collision')
+zone.add_command(zone_check.cmd,              'check')
 zone_export.tree_cmd.hidden = True
 zone_list.cmd.hidden = True
 zone_inject.cmd.hidden = True

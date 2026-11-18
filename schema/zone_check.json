@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xi.tools/schema/zone_check.json",
+  "title": "xi zone check report",
+  "description": "What `xi zone check --json` prints: per zone model DAT checked, the problems (what the client fails on; any makes the command exit 1), the notes (unusual things retail zones also do) and what was measured. Read-only. See docs/zone/check.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "zones"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "xi.zone-check.v1"
+    },
+    "zones": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/zone"
+      }
+    }
+  },
+  "$defs": {
+    "zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "dat",
+        "problems",
+        "notes",
+        "info"
+      ],
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "What was asked for: the DAT argument, `zone <id>`, or `<id> <name>` with --all."
+        },
+        "dat": {
+          "type": "string",
+          "description": "The DAT file checked."
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "info": {
+          "$ref": "#/$defs/info"
+        }
+      }
+    },
+    "info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bytes"
+      ],
+      "description": "Measured on the (first) ZoneDef; a second one (ships) is in more_zonedefs.",
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The DAT's size."
+        },
+        "sections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "meshes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Named 0x2E zone meshes."
+        },
+        "textures": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct 0x20 texture names."
+        },
+        "zonedef_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zonedef_headroom": {
+          "type": "integer",
+          "description": "Bytes left before the 8,388,592-byte section limit."
+        },
+        "objects": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "record_size": {
+          "type": "integer",
+          "enum": [
+            84,
+            100
+          ],
+          "description": "0x64 retail placements, 0x54 pre-production."
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "minItems": 4,
+          "maxItems": 4,
+          "description": "Block grid: x blocks, z blocks, block width, block length (yalms)."
+        },
+        "culling_tables": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tree_nodes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "leaves": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "largest_leaf": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "leaf_depths": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "collision_meshes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "collision_groups": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "collision_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Grid cells that point at a group."
+        },
+        "more_zonedefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/info"
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "xi.zone-check.v1",
+      "zones": [
+        {
+          "problems": [],
+          "notes": [],
+          "info": {
+            "bytes": 9335568,
+            "sections": 1458,
+            "meshes": 130,
+            "textures": 48,
+            "zonedef_bytes": 4047120,
+            "zonedef_headroom": 4341472,
+            "objects": 2602,
+            "record_size": 100,
+            "blocks": [
+              40,
+              46,
+              40,
+              40
+            ],
+            "culling_tables": 0,
+            "tree_nodes": 1653,
+            "leaves": 1007,
+            "largest_leaf": 32,
+            "leaf_depths": [
+              6
+            ],
+            "collision_meshes": 4503,
+            "collision_groups": 34995,
+            "collision_cells": 34995
+          },
+          "target": "zone 107",
+          "dat": "C:/Games/FINAL FANTASY XI/ROM/0/124.DAT"
+        }
+      ]
+    }
+  ]
+}
