@@ -242,8 +242,9 @@ number (`--target ROM10/20/0.DAT --file-id 424764`).
 
 Give the retail zone to copy (an id or a name), the new zone's name and id (`auto`: the
 lowest free from 400), then hue, saturation, lightness and a tint (blank keeps the colours),
-then, for each of the model, event, dialog and NPC files, a file of your own to place instead
-of the retail zone's (blank keeps the retail one). The action is `zone_clone.<project>`.
+then whether to place files of your own (default no) and, if so, for each of the model, event,
+dialog and NPC files, the file to place instead of the retail zone's (blank keeps the retail
+one). The action is `zone_clone.<project>`.
 Non-interactive: `xi dats prepare <recipe.json> --project P [--zone N] [--subdir N]
 [--zone-file KIND=PATH ...]` with a zone recipe, or `xi zone inject NAME --clone ID
 [--hue …]`, which prepares and builds in one go. The zone-name tables must be grown first

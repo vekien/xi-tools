@@ -71,8 +71,11 @@ next build at the same slots; a file that has gone missing stops the build.
 ```
 
 `xi dats prepare <recipe> --zone-file model=build/open_fields/zone.DAT --zone-file
-npc=build/open_fields/names.DAT` writes the same; a re-prepare without `--zone-file` keeps
-the files while the source zone is the same. Verified with synthetic files (the tests); not
+npc=build/open_fields/names.DAT` writes the same. A re-prepare (`--replace`) keeps the files,
+the zone id and the slots while the source zone is the same; `--zone-file` changes only the
+kinds it names, and `--zone-file model=` (no path) goes back to the retail zone's file. A
+file for a kind the source zone has no file of takes a free slot on the next build; the other
+kinds keep theirs. Verified with synthetic files (the tests); not
 yet in game.
 
 **A zone recipe**, what `xi dats prepare` reads (CatsEyeXI's `content/zones/*.json`, LPS's

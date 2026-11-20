@@ -289,6 +289,62 @@ def test_a_missing_own_file_is_refused_at_build(zones, tmp_path):
     model.unlink()
     r = run("build", "zones", "--pivot")
     assert r.exit_code != 0 and "source DAT not found" in r.output
-    r = CliRunner().invoke(__import__("xi.dats.xi_dats", fromlist=["group"]).group,
-                           ["prepare", str(recipe), "--project", "zones", "--zone-file", "mesh=x"])
+    from xi.dats.xi_dats import group
+    r = CliRunner().invoke(group, ["prepare", str(recipe), "--project", "zones", "--zone-file", "mesh=x"])
     assert r.exit_code != 0 and "KIND=PATH" in r.output
+
+
+def test_a_re_prepare_with_new_files_keeps_the_zone_id_and_slots(zones, tmp_path):
+    """The regenerate-and-re-prepare case: build, prepare --replace --zone-file with a new
+    model, build again: the same zone id and slots, the new bytes in them. --zone-file
+    changes only the kinds it names; KIND= goes back to the retail file."""
+    one, two, npc = tmp_path / "zone.DAT", tmp_path / "zone2.DAT", tmp_path / "names.DAT"
+    one.write_bytes(b"first model")
+    two.write_bytes(b"second model")
+    npc.write_bytes(b"names")
+    recipe = tmp_path / "Open_Fields.json"
+    recipe.write_text(json.dumps({"name": "Open Fields", "clone": 107}), encoding="utf-8")   # zone_id auto
+    assert run("prepare", str(recipe), "--project", "zones", "--zone-file", f"model={one}",
+               "--zone-file", f"npc={npc}").exit_code == 0
+    assert run("build", "zones", "--pivot").exit_code == 0
+    first = action()["result"]
+    assert first["zone_id"] == 400
+    r = run("prepare", str(recipe), "--project", "zones", "--replace", "--zone-file", f"model={two}")
+    assert r.exit_code == 0, r.output
+    assert action()["result"] == first                                     # kept
+    assert set(action()["source"]["files"]) == {"model", "npc"}           # npc still there
+    assert run("build", "zones", "--pivot").exit_code == 0
+    again = action()["result"]
+    assert again["zone_id"] == 400 and again["placements"] == first["placements"]
+    model = next(p["dat"] for p in again["placements"] if p["kind"] == "model")
+    assert (zones / model).read_bytes() == b"second model"
+    assert _resolve(zones, ZC.file_ids(401)["model"]) is None              # nothing went to a new zone
+    assert run("prepare", str(recipe), "--project", "zones", "--replace", "--zone-file", "model=",
+               "--zone-file", "npc=").exit_code == 0
+    assert "files" not in action()["source"] and action()["result"] == again
+
+
+def test_a_kind_the_retail_zone_lacks_takes_a_new_slot_and_keeps_the_rest(zones, tmp_path, monkeypatch):
+    """A file for a kind the source zone has no file of: a rebuild keeps the slots the other
+    kinds took and gives the new kind a free one, so nothing placed before is orphaned."""
+    real = ZC.source_dats
+
+    def no_npc(zone, files=None):                      # a source zone with no NPC file
+        out = {k: v for k, v in real(zone).items() if k != "npc"}
+        out.update({k: Path(v) for k, v in (files or {}).items()})
+        return out
+
+    monkeypatch.setattr(ZC, "source_dats", no_npc)
+    recipe = tmp_path / "a.json"
+    recipe.write_text(json.dumps({"name": "Copy", "clone": 107, "zone_id": 410}), encoding="utf-8")
+    assert run("prepare", str(recipe), "--project", "zones").exit_code == 0
+    assert run("build", "zones", "--pivot").exit_code == 0
+    first = {p["kind"]: p["dat"] for p in action()["result"]["placements"]}
+    assert set(first) == {"model", "event", "dialog"}
+    npc = tmp_path / "names.DAT"
+    npc.write_bytes(b"names")
+    assert run("prepare", str(recipe), "--project", "zones", "--replace", "--zone-file", f"npc={npc}").exit_code == 0
+    assert run("build", "zones", "--pivot").exit_code == 0
+    again = {p["kind"]: p["dat"] for p in action()["result"]["placements"]}
+    assert {k: again[k] for k in first} == first and again["npc"] not in first.values()
+    assert (zones / again["npc"]).read_bytes() == b"names"

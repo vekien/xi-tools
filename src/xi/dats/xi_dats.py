@@ -884,15 +884,19 @@ def _build_zone_clone(action: dict, manifest_path: Path, manifest: dict, force: 
         slots: dict = {}
         if "slot" in target:
             slots = {k: target["slot"] + i for i, k in enumerate(kinds)}
-        elif all(before.get(k) and _parse_rom_placement(before[k])[:2] == (10, subdir) for k in kinds):
-            slots = {k: _parse_rom_placement(before[k])[2] for k in kinds}      # a rebuild: the same slots
         else:
-            taken = ZC.taken_slots(root, subdir)
-            free = [i for i in range(ZC.MAX_SLOT + 1) if i not in taken]
-            if len(free) < len(kinds):
-                raise ZC.CloneError(f"ROM10/{subdir} has {len(free)} free slots; {len(kinds)} are needed "
-                                    "(set target.subdir)")
-            slots = dict(zip(kinds, free))
+            # a rebuild keeps the slots each kind took; a kind new since then (a file of your own
+            # for one the retail zone lacks) takes a free one, so nothing placed before is orphaned
+            slots = {k: _parse_rom_placement(before[k])[2] for k in kinds
+                     if before.get(k) and _parse_rom_placement(before[k])[:2] == (10, subdir)}
+            need = [k for k in kinds if k not in slots]
+            if need:
+                taken = ZC.taken_slots(root, subdir) | set(slots.values())
+                free = [i for i in range(ZC.MAX_SLOT + 1) if i not in taken]
+                if len(free) < len(need):
+                    raise ZC.CloneError(f"ROM10/{subdir} has {len(free)} free slots; {len(need)} are needed "
+                                        "(set target.subdir)")
+                slots.update(zip(need, free))
         placements, stats = [], None
         for kind in kinds:
             xi_stage.claim("rom10_slot", (subdir, slots[kind]))
@@ -2490,7 +2494,7 @@ def json_cmd(manifest: Path, output: Path | None):
               help="Anim from a glTF into a DAT with no skeleton: the model it was exported on (ROM path).")
 @click.option("--zone-file", "zone_files", multiple=True, metavar="KIND=PATH",
               help="A zone recipe: place this file instead of the retail zone's (model, event, dialog or "
-                   "npc), e.g. --zone-file model=build/zone.DAT. Repeatable.")
+                   "npc), e.g. --zone-file model=build/zone.DAT; KIND= goes back to the retail file. Repeatable.")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
@@ -2523,7 +2527,7 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
       xi dats build zones --dry-run
     --zone-file KIND=PATH places a file of your own instead of the retail zone's (a model
     made outside xi-tools, a changed NPC name list); the other kinds still come from the
-    retail zone:
+    retail zone, and KIND= (no path) goes back to the retail zone's file:
       xi dats prepare content/zones/New_Fields.json --project zones --zone-file model=build/zone.DAT
 
     A clip for a model (schema/anim.json) — a .gltf, or a clip in another DAT (a ROM path
@@ -2602,24 +2606,29 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
             action.setdefault("target", {})["zone_id"] = zone_id
         if subdir is not None:
             action.setdefault("target", {})["subdir"] = subdir
+        # the files an earlier prepare gave, while the zone is the same: a re-prepare keeps them,
+        # and --zone-file changes only the kinds it names
+        old = next((a for a in manifest_data.get("actions", []) if a.get("id") == action["id"]), None)
+        old_src = (old or {}).get("source") or {}
+        inherited = old_src.get("files") if old_src.get("zone") == action["source"]["zone"] else None
         if zone_files:
-            files = dict(action["source"].get("files") or {})
+            files = dict(action["source"].get("files") or inherited or {})
             for spec in zone_files:
-                kind, _, path = spec.partition("=")
-                if kind not in ZC.KINDS or not path:
+                zkind, eq, zpath = spec.partition("=")
+                if zkind not in ZC.KINDS or not eq:
                     raise click.BadParameter(f"{spec!r}: KIND=PATH, KIND one of {', '.join(ZC.KINDS)}",
                                              param_hint="'--zone-file'")
-                if not Path(path).is_file():
-                    raise click.BadParameter(f"{path!r} does not exist", param_hint="'--zone-file'")
-                files[kind] = _file_ref(Path(path), manifest)
-            action["source"] = {**action["source"], "files": files}
-        else:
-            # a re-prepare keeps the files an earlier --zone-file gave, while the zone is the same
-            old = next((a for a in manifest_data.get("actions", []) if a.get("id") == action["id"]), None)
-            old_src = (old or {}).get("source") or {}
-            if old_src.get("files") and old_src.get("zone") == action["source"]["zone"] \
-                    and "files" not in action["source"]:
-                action["source"] = {**action["source"], "files": old_src["files"]}
+                if not zpath:                                # KIND= : back to the retail zone's file
+                    files.pop(zkind, None)
+                    continue
+                if not Path(zpath).is_file():
+                    raise click.BadParameter(f"{zpath!r} does not exist", param_hint="'--zone-file'")
+                files[zkind] = _file_ref(Path(zpath), manifest)
+            action["source"] = {k: v for k, v in action["source"].items() if k != "files"}
+            if files:
+                action["source"]["files"] = files
+        elif inherited and "files" not in action["source"]:
+            action["source"] = {**action["source"], "files": inherited}
         action_id = action["id"]
         errs = ZC.validate_action(action)
         if errs:
@@ -5084,7 +5093,9 @@ def _wizard_zone_clone(slug: str, prev: dict | None, manifest_path: Path) -> dic
         rc.pop("blend", None)
     rc = {k: v for k, v in rc.items() if v not in (None, 0, "")}
     files = dict((p.get("source") or {}).get("files") or {})
-    for kind in ZC.KINDS:
+    own = _choose("Place files of your own instead of the retail zone's?", ["no", "yes"],
+                  default="yes" if files else "no") == "yes"
+    for kind in (ZC.KINDS if own else ()):
         while True:
             raw = str(_ask(f"Your own {kind} file instead of the retail zone's? (a path; blank for the retail one)",
                            "Enter path", default=files.get(kind, ""), show_default=bool(files.get(kind)))).strip()
@@ -5095,7 +5106,7 @@ def _wizard_zone_clone(slug: str, prev: dict | None, manifest_path: Path) -> dic
             files[kind] = _file_ref(Path(raw), manifest_path)
         elif not raw:
             files.pop(kind, None)
-    source = {"zone": zone, **({"files": files} if files else {})}
+    source = {"zone": zone, **({"files": files} if own and files else {})}
     action = {"id": f"zone_clone.{slug}", "type": "zone_clone", "source": source,
               "target": {**(p.get("target") or {}), "zone_id": int(zid) if zid.isdigit() else "auto"},
               "names": {**(p.get("names") or {}), "en": name}}

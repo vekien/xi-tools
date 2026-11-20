@@ -192,10 +192,7 @@ def source_dats(zone: int, files: dict | None = None) -> dict:
             p = cfg.pristine(Path(cfg.FFXI_DIR) / dat)
             if p is not None:
                 out[kind] = p
-    for kind, path in (files or {}).items():
-        if not Path(path).is_file():
-            raise CloneError(f"source.files.{kind}: {path} doesn't exist")
-        out[kind] = Path(path)
+    out.update({kind: Path(path) for kind, path in (files or {}).items()})
     if "model" not in out:
         raise CloneError(f"zone {zone} has no model DAT in the install")
     return out
