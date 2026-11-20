@@ -635,6 +635,7 @@ POL1-packed modules. Docs: `docs/reference/dll.md`, `ffximain.md`, `polcore.md`,
 xi dll list
 xi dll ffximain unpack
 xi dll ffximain pack
+xi dll ffximain sig-audit OLD NEW --src DIR   # a project's byte patterns vs two builds
 xi dll ffximain text-dump
 xi dll ffximain gear-groups
 xi dll ffximain gear-patch
