@@ -9,7 +9,7 @@ PE layout, base-collision/relocation) see the reference
 ```text
 xi dll
 ├── list                          # resolve packed DLL paths
-├── ffximain   unpack | pack | patch | text-dump | gear-groups | gear-patch | crashdump
+├── ffximain   unpack | pack | patch | sig-gen | sig-apply | sig-audit | text-dump | gear-groups | gear-patch | crashdump
 ├── polcore    unpack | pack
 └── app        unpack | pack
 ```
@@ -24,7 +24,7 @@ xi dll
 
 All three are the same POL1 family, so `unpack`/`pack` are **shared** commands
 generated per target — they behave identically; only the default paths differ.
-The extra RE helpers (`text-dump`, `gear-*`, `crashdump`, `patch`) live only
+The extra RE helpers (`text-dump`, `gear-*`, `crashdump`, `patch`, `sig-*`) live only
 under `ffximain`.
 
 ## Commands
@@ -36,6 +36,7 @@ under `ffximain`.
 | `xi dll <t> pack` | [pack.md](pack.md) | Re-compress an unpacked PE → a game-loadable packed DLL |
 | `xi dll ffximain patch` | [patch.md](patch.md) | Apply a replayable `va/expect/replace` `.patch` to an unpacked DLL |
 | `xi dll ffximain sig-gen` / `sig-apply` | [sig-patch.md](sig-patch.md) | **Version-resilient** patching — locate edits by code signature so they survive client updates |
+| `xi dll ffximain sig-audit` | [sig-audit.md](sig-audit.md) | Check a C++ project's byte patterns against two builds: what breaks, which functions changed, which offsets moved |
 | `xi dll ffximain text-dump` | [text-dump.md](text-dump.md) | Write flat `.text` bytes + a full disassembly `.txt` |
 | `xi dll ffximain gear-groups` | [gear-groups.md](gear-groups.md) | Dump per-race/per-slot gear model-group tables |
 | `xi dll ffximain gear-patch` | [gear-patch.md](gear-patch.md) | Raise the custom `model_id` ceiling per (race, slot) |
@@ -93,6 +94,10 @@ src/xi/dll/
   xi_unpack.py  # make_unpack_cmd(target) → per-target unpack
   xi_pack.py    # make_pack_cmd(target)   → per-target pack
   xi_patch.py   # make_patch_cmd()        → patch (image base from the DLL)
+  sig.py        # signature scan / generate / apply (sig-gen, sig-apply)
+  xi_sig.py     # sig-gen / sig-apply commands
+  sig_audit.py  # pattern extraction, function alignment, the sig-audit report
+  xi_sig_audit.py  # sig-audit command
 src/xi/ffximain/
   xi_core.py    # shared LZSS + detect_pol1_layout
   xi_text_dump.py  xi_geargroups.py  xi_gear_patch.py  xi_crashdump.py

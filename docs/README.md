@@ -344,7 +344,7 @@ Core lookup tables and named-DAT catalog.
 | [ffximain/app.md](ffximain/app.md) | app.dll: PlayOnline Viewer UI / apps module |
 | [ffximain/inventory.md](ffximain/inventory.md) | FFXiMain.dll 80→120 inventory expansion: relocation root cause, object-relative patching, what's left |
 | [ffximain/main-menu.md](ffximain/main-menu.md) | FFXiMain.dll main menu (menuwind + socialme): CTkMenuWind / CTkSocial handlers, events, signatures |
-| [dll/README.md](dll/README.md) | `xi dll` command reference: list / unpack / pack / patch / text-dump / gear-groups / gear-patch / crashdump |
+| [dll/README.md](dll/README.md) | `xi dll` command reference: list / unpack / pack / patch / sig-audit / text-dump / gear-groups / gear-patch / crashdump |
 | [common_crashes.md](common_crashes.md) | Client crash diagnosis: overlay table shadowing, scene-file churn, FFXI-2003 |
 
 ---
