@@ -270,6 +270,7 @@ xi zone tree
 xi zone import
 xi zone import-json
 xi zone inject              # hidden alias: a zone_clone dats action (prepare + build)
+                            # files of your own instead of the retail zone's: dats prepare <recipe> --zone-file model=PATH
 xi zone reset
 xi zone build-from-manifest
 xi zone navmesh

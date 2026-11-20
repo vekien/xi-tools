@@ -6,6 +6,11 @@ the new zone's file ids; and the zone's name in the English and Japanese zone-na
 (``ROM/165/84``, ``ROM/165/63``). The server half (zone_settings, the ``!zone`` entry) is the
 server's.
 
+``source.files`` gives files of its own for any of the four kinds (a model made outside
+xi-tools, a changed NPC name list): those are placed instead of the retail zone's, and
+``recolour`` applies to whichever model is placed. The kinds it leaves out still come from
+``source.zone``, which every zone needs for its event and dialog files.
+
 What ``xi zone inject`` did, and CatsEyeXI's own zone builder before it (its dats repo,
 written by Loxley; its recipes are what :func:`action_from_recipe` reads), as an action:
 built by ``xi dats build`` into the install or the pivot folder, recorded, undone.
@@ -84,9 +89,19 @@ def validate_action(action) -> list[str]:
     if action.get("type") != "zone_clone":
         errs.append("type must be 'zone_clone'")
     src = action.get("source")
-    if not isinstance(src, dict) or set(src) - {"zone"} or not isinstance(src.get("zone"), int) \
+    if not isinstance(src, dict) or set(src) - {"zone", "files"} or not isinstance(src.get("zone"), int) \
             or isinstance(src.get("zone"), bool) or src["zone"] < 0:
-        errs.append("source must be {\"zone\": <the retail zone id to copy>}")
+        errs.append("source must be {\"zone\": <the retail zone id to copy>} (and optionally \"files\")")
+    elif "files" in src:
+        files = src["files"]
+        if not isinstance(files, dict) or not files:
+            errs.append(f"source.files must be {{kind: path}} for any of {', '.join(KINDS)}")
+        else:
+            for k, v in files.items():
+                if k not in KINDS:
+                    errs.append(f"source.files: unknown kind {k!r} (one of {', '.join(KINDS)})")
+                elif not isinstance(v, str) or not v.strip():
+                    errs.append(f"source.files.{k} must be a path")
     tgt = action.get("target", {})
     if not isinstance(tgt, dict) or set(tgt) - {"zone_id", "subdir", "slot"}:
         errs.append("target takes zone_id, subdir and slot")
@@ -162,8 +177,10 @@ def action_from_recipe(recipe: dict, action_id: str | None = None) -> dict:
     return {"id": action_id or f"zone_clone.{slug}", "type": "zone_clone", **action}
 
 
-def source_dats(zone: int) -> dict:
-    """``{kind: Path}`` of the retail zone's files in the install (their pristine copies)."""
+def source_dats(zone: int, files: dict | None = None) -> dict:
+    """``{kind: Path}`` of the retail zone's files in the install (their pristine copies),
+    with ``files`` (``{kind: Path}``, already resolved: ``source.files``) in place of those
+    kinds."""
     import xi.xi_config as cfg
     from xi.ftable.xi_core import resolve_dat_in_root
     out = {}
@@ -175,6 +192,10 @@ def source_dats(zone: int) -> dict:
             p = cfg.pristine(Path(cfg.FFXI_DIR) / dat)
             if p is not None:
                 out[kind] = p
+    for kind, path in (files or {}).items():
+        if not Path(path).is_file():
+            raise CloneError(f"source.files.{kind}: {path} doesn't exist")
+        out[kind] = Path(path)
     if "model" not in out:
         raise CloneError(f"zone {zone} has no model DAT in the install")
     return out

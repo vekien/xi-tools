@@ -870,7 +870,9 @@ def _build_zone_clone(action: dict, manifest_path: Path, manifest: dict, force: 
     prev = action.get("result") or {}
     target = action.get("target") or {}
     try:
-        sources = ZC.source_dats(action["source"]["zone"])
+        own = {k: _resolve_raw_source(v, manifest_path, manifest)
+               for k, v in (action["source"].get("files") or {}).items()}
+        sources = ZC.source_dats(action["source"]["zone"], own)
         zone_id = target.get("zone_id", "auto")
         if zone_id == "auto":
             zone_id = prev.get("zone_id") if isinstance(prev.get("zone_id"), int) else ZC.free_zone_id(root)
@@ -2486,6 +2488,9 @@ def json_cmd(manifest: Path, output: Path | None):
               help="Anim: add the routine that plays the clip (default: for a new clip).")
 @click.option("--skeleton-dat", default=None,
               help="Anim from a glTF into a DAT with no skeleton: the model it was exported on (ROM path).")
+@click.option("--zone-file", "zone_files", multiple=True, metavar="KIND=PATH",
+              help="A zone recipe: place this file instead of the retail zone's (model, event, dialog or "
+                   "npc), e.g. --zone-file model=build/zone.DAT. Repeatable.")
 def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action_id: str | None, action_type: str | None,
                 target: str | None, hd: bool, replace: bool,
                 ability_kind: str | None = None, animation: int | None = None, subdir: int | None = None,
@@ -2494,7 +2499,7 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
                 camera: str | None = None, event_name: str | None = None, file_id: int | None = None,
                 clip: str | None = None, source_clip: str | None = None, tag: str | None = None,
                 loops: int | None = None, blend: int | None = None, anim_schedule: bool = True,
-                skeleton_dat: str | None = None):
+                skeleton_dat: str | None = None, zone_files: tuple[str, ...] = ()):
     """Add an exported/import JSON, zone-changes.json or ability recipe to a dats package.
 
     \b
@@ -2516,6 +2521,10 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
     id (--zone, default auto) and its name into the zone-name tables:
       xi dats prepare content/zones/Azure_Gustaberg.json --project zones
       xi dats build zones --dry-run
+    --zone-file KIND=PATH places a file of your own instead of the retail zone's (a model
+    made outside xi-tools, a changed NPC name list); the other kinds still come from the
+    retail zone:
+      xi dats prepare content/zones/New_Fields.json --project zones --zone-file model=build/zone.DAT
 
     A clip for a model (schema/anim.json) — a .gltf, or a clip in another DAT (a ROM path
     with --type anim) — becomes an `anim` action: the clip goes into --target with a
@@ -2593,6 +2602,24 @@ def prepare_cmd(source: Path, manifest: Path | None, project: str | None, action
             action.setdefault("target", {})["zone_id"] = zone_id
         if subdir is not None:
             action.setdefault("target", {})["subdir"] = subdir
+        if zone_files:
+            files = dict(action["source"].get("files") or {})
+            for spec in zone_files:
+                kind, _, path = spec.partition("=")
+                if kind not in ZC.KINDS or not path:
+                    raise click.BadParameter(f"{spec!r}: KIND=PATH, KIND one of {', '.join(ZC.KINDS)}",
+                                             param_hint="'--zone-file'")
+                if not Path(path).is_file():
+                    raise click.BadParameter(f"{path!r} does not exist", param_hint="'--zone-file'")
+                files[kind] = _file_ref(Path(path), manifest)
+            action["source"] = {**action["source"], "files": files}
+        else:
+            # a re-prepare keeps the files an earlier --zone-file gave, while the zone is the same
+            old = next((a for a in manifest_data.get("actions", []) if a.get("id") == action["id"]), None)
+            old_src = (old or {}).get("source") or {}
+            if old_src.get("files") and old_src.get("zone") == action["source"]["zone"] \
+                    and "files" not in action["source"]:
+                action["source"] = {**action["source"], "files": old_src["files"]}
         action_id = action["id"]
         errs = ZC.validate_action(action)
         if errs:
@@ -2800,7 +2827,9 @@ def _result_rows(manifest_data: dict) -> list[tuple[str, ...]]:
             for n in (res.get("names") or {}).values():
                 rows.append((aid, typ, n.get("dat") or "-", f"zone {zid} name {n.get('to')!r}", "-"))
             if not res.get("placements"):
-                rows.append((aid, typ, "-", f"zone {zid} from {(action.get('source') or {}).get('zone')}", "-"))
+                own = sorted(((action.get("source") or {}).get("files") or {}))
+                rows.append((aid, typ, "-", f"zone {zid} from {(action.get('source') or {}).get('zone')}"
+                             + (f" (own {', '.join(own)})" if own else ""), "-"))
             continue
         if typ in ("gear", "ability"):
             placements = res.get("placements") or []
@@ -2881,7 +2910,9 @@ def _action_summary(action: dict) -> str:
         adj = ", ".join(f"{k} {v}" for k, v in rc.items() if k not in ("texture_overrides", "skip_textures",
                                                                         "color_ranges"))
         extra = len(rc.get("texture_overrides") or {}) + len(rc.get("color_ranges") or [])
-        line += (f": zone {(action.get('source') or {}).get('zone')} >> zone {zid} "
+        own = sorted(((action.get("source") or {}).get("files") or {}))
+        line += (f": zone {(action.get('source') or {}).get('zone')}"
+                 + (f" (own {', '.join(own)})" if own else "") + f" >> zone {zid} "
                  f"\"{(action.get('names') or {}).get('en', '?')}\""
                  + (f" ({adj}{', ' if adj and extra else ''}{f'{extra} more' if extra else ''})" if adj or extra else ""))
         return line
@@ -5020,9 +5051,10 @@ def _wizard_copy(slug: str, prev: dict | None, manifest_path: Path) -> dict:
             "resources": {"file": _file_ref(src, manifest_path)}}
 
 
-def _wizard_zone_clone(slug: str, prev: dict | None) -> dict:
-    """A zone_clone action: the retail zone to copy, the new zone's name and id, and how to
-    recolour it (blank keeps the colours)."""
+def _wizard_zone_clone(slug: str, prev: dict | None, manifest_path: Path) -> dict:
+    """A zone_clone action: the retail zone to copy, the new zone's name and id, how to
+    recolour it (blank keeps the colours), and any files of your own to place instead of the
+    retail zone's."""
     from xi.zone import xi_clone as ZC
     from xi.zone.xi_inject import _find_zone_by_name, _load_zone_names
     p = prev or {}
@@ -5051,7 +5083,20 @@ def _wizard_zone_clone(slug: str, prev: dict | None) -> dict:
     else:
         rc.pop("blend", None)
     rc = {k: v for k, v in rc.items() if v not in (None, 0, "")}
-    action = {"id": f"zone_clone.{slug}", "type": "zone_clone", "source": {"zone": zone},
+    files = dict((p.get("source") or {}).get("files") or {})
+    for kind in ZC.KINDS:
+        while True:
+            raw = str(_ask(f"Your own {kind} file instead of the retail zone's? (a path; blank for the retail one)",
+                           "Enter path", default=files.get(kind, ""), show_default=bool(files.get(kind)))).strip()
+            if not raw or raw == files.get(kind) or Path(raw).is_file():
+                break
+            click.echo(f"  {raw} doesn't exist.")
+        if raw and raw != files.get(kind):
+            files[kind] = _file_ref(Path(raw), manifest_path)
+        elif not raw:
+            files.pop(kind, None)
+    source = {"zone": zone, **({"files": files} if files else {})}
+    action = {"id": f"zone_clone.{slug}", "type": "zone_clone", "source": source,
               "target": {**(p.get("target") or {}), "zone_id": int(zid) if zid.isdigit() else "auto"},
               "names": {**(p.get("names") or {}), "en": name}}
     if rc:
@@ -5725,7 +5770,7 @@ def new_cmd(project: str | None, pivot: bool = False):
         elif ctype == "anim":
             new_actions = [_wizard_anim(slug, prev, manifest_path)]
         elif ctype == "zone_clone":
-            new_actions = [_wizard_zone_clone(slug, prev)]
+            new_actions = [_wizard_zone_clone(slug, prev, manifest_path)]
         else:
             new_actions = [_wizard_entity(slug, prev)]
 

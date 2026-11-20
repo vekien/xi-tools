@@ -102,7 +102,7 @@ def test_validator_names_the_field():
                                "target": {"zone_id": -1, "slot": 200}, "names": {"en": ""},
                                "recolour": {"hue": "lots", "blend": "burn", "colour": 1,
                                             "texture_overrides": {"suny*": {"fog_end": 3}}}})
-    assert "source must be {\"zone\": <the retail zone id to copy>}" in errs
+    assert "source must be {\"zone\": <the retail zone id to copy>} (and optionally \"files\")" in errs
     assert "target.zone_id must be a zone id or \"auto\"" in errs
     assert "target.slot must be the first of four free slots, 0-124" in errs
     assert "names must be {\"en\": <the zone's name>} (and optionally \"jp\")" in errs
@@ -229,3 +229,66 @@ def test_zone_inject_is_prepare_and_build(zones):
     assert a["result"]["zone_id"] == 420 and _resolve(zones, ZC.file_ids(420)["model"]) == "ROM10/1/0.DAT"
     assert "--model-dat is no longer taken" in CliRunner().invoke(
         cmd, ["X", "--clone", "107", "--model-dat", "ROM/0/1.DAT"]).output
+
+
+def test_source_files_validate():
+    base = {"id": "zone_clone.x", "type": "zone_clone", "names": {"en": "X"}}
+    assert ZC.validate_action({**base, "source": {"zone": 107, "files": {"model": "a.DAT", "npc": "b.DAT"}}}) == []
+    errs = ZC.validate_action({**base, "source": {"zone": 107, "files": {"mesh": "a.DAT", "npc": ""}}})
+    assert "source.files: unknown kind 'mesh' (one of model, event, dialog, npc)" in errs
+    assert "source.files.npc must be a path" in errs
+    assert ZC.validate_action({**base, "source": {"zone": 107, "files": {}}}) == [
+        "source.files must be {kind: path} for any of model, event, dialog, npc"]
+
+
+def test_own_files_are_placed_instead_of_the_retail_zones(zones, game, tmp_path):
+    """--zone-file: a model and an NPC list made elsewhere go in; the event and dialog files
+    stay the retail zone's. A dry run writes nothing, a rebuild changes nothing, a re-prepare
+    without the flag keeps the files, undo takes them out."""
+    model = tmp_path / "build" / "zone.DAT"
+    npc = tmp_path / "build" / "names.DAT"
+    model.parent.mkdir()
+    model.write_bytes(b"our own zone model" * 8)
+    npc.write_bytes(b"our own names")
+    recipe = tmp_path / "Open_Fields.json"
+    recipe.write_text(json.dumps({"name": "Open Fields", "clone": 107, "zone_id": 420}), encoding="utf-8")
+    r = run("prepare", str(recipe), "--project", "zones", "--zone-file", f"model={model}",
+            "--zone-file", f"npc={npc}")
+    assert r.exit_code == 0, r.output
+    files = action()["source"]["files"]
+    assert set(files) == {"model", "npc"} and not Path(files["model"]).is_absolute()   # relative to the project
+    assert "own model, npc" in run("changelog", "zones").output
+    assert run("build", "zones", "--pivot", "--dry-run").exit_code == 0
+    assert not (zones / "ROM10" / "1").exists()
+    r = run("build", "zones", "--pivot")
+    assert r.exit_code == 0, r.output
+    fids = ZC.file_ids(420)
+    placed = {p["kind"]: zones / p["dat"] for p in action()["result"]["placements"]}
+    assert placed["model"].read_bytes() == model.read_bytes()
+    assert placed["npc"].read_bytes() == npc.read_bytes()
+    assert placed["event"].read_bytes() == (game / SOURCE["event"]).read_bytes()
+    assert placed["dialog"].read_bytes() == (game / SOURCE["dialog"]).read_bytes()
+    assert all(_resolve(zones, fids[k]) == p["dat"] for k, p in
+               ((p["kind"], p) for p in action()["result"]["placements"]))
+    snapshot = {p: p.read_bytes() for p in zones.rglob("*") if p.is_file()}
+    assert run("build", "zones", "--pivot").exit_code == 0
+    assert {p: p.read_bytes() for p in zones.rglob("*") if p.is_file()} == snapshot
+    assert run("prepare", str(recipe), "--project", "zones", "--replace").exit_code == 0
+    assert action()["source"]["files"] == files and action()["result"]["zone_id"] == 420
+    assert run("undo", "zones", "--yes").exit_code == 0
+    assert not any((zones / "ROM10" / "1").glob("*.DAT"))
+    assert all(_resolve(zones, f) is None for f in fids.values())
+
+
+def test_a_missing_own_file_is_refused_at_build(zones, tmp_path):
+    model = tmp_path / "zone.DAT"
+    model.write_bytes(b"model")
+    recipe = tmp_path / "a.json"
+    recipe.write_text(json.dumps({"name": "Copy", "clone": 107, "zone_id": 410}), encoding="utf-8")
+    assert run("prepare", str(recipe), "--project", "zones", "--zone-file", f"model={model}").exit_code == 0
+    model.unlink()
+    r = run("build", "zones", "--pivot")
+    assert r.exit_code != 0 and "source DAT not found" in r.output
+    r = CliRunner().invoke(__import__("xi.dats.xi_dats", fromlist=["group"]).group,
+                           ["prepare", str(recipe), "--project", "zones", "--zone-file", "mesh=x"])
+    assert r.exit_code != 0 and "KIND=PATH" in r.output
