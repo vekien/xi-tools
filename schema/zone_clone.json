@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xi.tools/schema/zone_clone.json",
   "title": "xi dats zone_clone action",
-  "description": "A copy of a retail zone at a new zone id: its model DAT (recoloured when recolour says so) and its event, dialog and NPC files placed in ROM10/<subdir>/ and registered at the new zone's file ids, and its name in the zone-name tables (ROM/165/84 English, ROM/165/63 Japanese; grown once with `xi database grow`). A rebuild keeps the zone id and slots the first build took; undo takes the files and registrations back out and puts the names back. `xi dats prepare` also reads a zone recipe ($defs.recipe). See docs/zone/inject-legacy.md.",
+  "description": "A copy of a retail zone at a new zone id (or files of your own in place of any of its four: source.files): its model DAT (recoloured when recolour says so) and its event, dialog and NPC files placed in ROM10/<subdir>/ and registered at the new zone's file ids, and its name in the zone-name tables (ROM/165/84 English, ROM/165/63 Japanese; grown once with `xi database grow`). A rebuild keeps the zone id and slots the first build took; undo takes the files and registrations back out and puts the names back. `xi dats prepare` also reads a zone recipe ($defs.recipe). See docs/zone/inject-legacy.md.",
   "allOf": [{"$ref": "common.json#/$defs/baseAction"}],
   "type": "object",
   "additionalProperties": false,
@@ -17,7 +17,21 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["zone"],
-      "properties": {"zone": {"type": "integer", "minimum": 0, "description": "The retail zone to copy, by id."}}
+      "properties": {
+        "zone": {"type": "integer", "minimum": 0, "description": "The retail zone to copy, by id."},
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Files of your own placed instead of the retail zone's, by kind: a path (relative to the project file, or absolute). The kinds left out come from zone; recolour applies to whichever model is placed.",
+          "properties": {
+            "model": {"type": "string", "minLength": 1},
+            "event": {"type": "string", "minLength": 1},
+            "dialog": {"type": "string", "minLength": 1},
+            "npc": {"type": "string", "minLength": 1}
+          }
+        }
+      }
     },
     "target": {
       "type": "object",
@@ -140,6 +154,14 @@
       "target": {"zone_id": "auto", "subdir": 1},
       "names": {"en": "Verdant Sarutabaruta"},
       "recolour": {"hue": 120}
+    },
+    {
+      "id": "zone_clone.open_fields",
+      "type": "zone_clone",
+      "description": "A zone whose model and NPC name list were made outside xi-tools; West Ronfaure's event and dialog files",
+      "source": {"zone": 100, "files": {"model": "build/open_fields/zone.DAT", "npc": "build/open_fields/names.DAT"}},
+      "target": {"zone_id": 420, "subdir": 1, "slot": 4},
+      "names": {"en": "Open Fields"}
     }
   ]
 }
